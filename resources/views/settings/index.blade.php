@@ -132,8 +132,25 @@
                             method: 'POST',
                             headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content }
                         });
-                        this.pollQr();
-                    } catch(e) { this.loading = false; }
+                    } catch(e) {}
+                    // Fetch QR immediately then poll
+                    await this.fetchQr();
+                    this.pollQr();
+                },
+
+                async fetchQr() {
+                    try {
+                        const r = await fetch('{{ route('channels.whatsapp.qr') }}');
+                        const d = await r.json();
+                        if (d.connected) {
+                            this.connected = true; this.phone = d.phone; this.qr = null;
+                            this.loading = false;
+                            if (this.pollInterval) clearInterval(this.pollInterval);
+                        } else if (d.qr) {
+                            this.qr = d.qr;
+                            this.loading = false;
+                        }
+                    } catch(e) {}
                 },
 
                 async stop() {
@@ -148,19 +165,7 @@
 
                 pollQr() {
                     if (this.pollInterval) clearInterval(this.pollInterval);
-                    this.pollInterval = setInterval(async () => {
-                        try {
-                            const r = await fetch('{{ route('channels.whatsapp.qr') }}');
-                            const d = await r.json();
-                            if (d.connected) {
-                                this.connected = true; this.phone = d.phone; this.qr = null;
-                                this.loading = false;
-                                clearInterval(this.pollInterval);
-                            } else if (d.qr) {
-                                this.qr = d.qr;
-                            }
-                        } catch(e) {}
-                    }, 5000);
+                    this.pollInterval = setInterval(() => this.fetchQr(), 5000);
                 }
              }"
              x-init="checkStatus()">
