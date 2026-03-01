@@ -77,6 +77,7 @@ services:
       - waha_data:/app/.sessions
     environment:
       - WAHA_LOG_LEVEL=error
+      - WAHA_API_KEY=zeniclaw-waha-2026
     networks:
       - zeniclaw
 
