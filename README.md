@@ -1,93 +1,200 @@
-# zeniclaw
+# 🦅 ZeniClaw
 
+**ZeniClaw** is an open-source autonomous AI agent platform built with Laravel 11. Create, manage, and monitor AI agents that can send reminders, answer messages, and execute tasks — all via a clean web UI.
 
+---
 
-## Getting started
+## ✨ Features
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- 🤖 **Multi-agent management** — Create unlimited agents with custom system prompts
+- 🧠 **Claude Max support** — Use your Anthropic Claude Max subscription (claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5)
+- 🟢 **OpenAI support** — GPT-4o, GPT-4o Mini
+- 📱 **WhatsApp integration** — Via WAHA (WhatsApp HTTP API, open-source)
+- ⏰ **Smart reminders** — Schedule messages with iCal RRULE recurrence
+- 📋 **Agent logs** — Info/warn/error with auto-compaction (>1000 entries archived)
+- 🧠 **Two-layer memory** — Daily notes (7 days) + long-term memory per agent
+- 💬 **Session tracking** — Track conversations per agent/channel/peer
+- 🔑 **API tokens** — Generate tokens for webhook authentication
+- 🔄 **Self-update** — Pull latest version from GitLab via UI
+- 🏥 **Health monitoring** — `/health` endpoint + admin health dashboard
+- 🛡️ **Role-based access** — superadmin / admin / operator / viewer
+- 🔒 **Data sandboxing** — All data strictly scoped to authenticated user
+- 🧪 **Self-test suite** — Feature tests covering auth, agents, reminders, logs, webhooks
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+---
 
-## Add your files
+## 🚀 Quick Start (4 commands)
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+```bash
+git clone https://gitlab.com/zenibiz/zeniclaw.git
+cd zeniclaw
+cp .env.example .env
+sudo docker-compose up -d
+```
+
+Then open **http://localhost:8080** 🎉
+
+---
+
+## 🔑 Default Credentials
+
+| Field    | Value                  |
+|----------|------------------------|
+| Email    | `admin@zeniclaw.io`    |
+| Password | `password`             |
+| Role     | `superadmin`           |
+
+> ⚠️ Change the password immediately after first login!
+
+---
+
+## 🐳 Docker Services
+
+| Service | Description             | Port     |
+|---------|-------------------------|----------|
+| `app`   | Laravel (nginx+php-fpm) | 8080     |
+| `db`    | PostgreSQL 16           | internal |
+| `redis` | Redis 7                 | internal |
+| `waha`  | WAHA WhatsApp API       | 3000     |
+
+---
+
+## 🧪 Test Commands
+
+```bash
+# Run migrations + seed
+sudo docker-compose exec app php artisan migrate --seed
+
+# Health check
+sudo docker-compose exec app php artisan zeniclaw:health
+
+# Process pending reminders manually
+sudo docker-compose exec app php artisan reminders:process
+
+# Compact logs (archive old logs)
+sudo docker-compose exec app php artisan zeniclaw:compact-logs
+
+# Run self-test suite (needs sqlite or test DB)
+sudo docker-compose exec app php artisan test --filter ZeniClawSelfTest
+```
+
+---
+
+## 🔄 Self-Update
+
+Via the UI: go to **Settings → Mises à jour** (admin only)
+
+Or via CLI:
+```bash
+sudo docker-compose exec app php artisan zeniclaw:update
+```
+
+---
+
+## 📱 WhatsApp Setup
+
+1. Go to **Settings → Canaux**
+2. Click **"Connecter WhatsApp"**
+3. Scan the QR code with your WhatsApp app
+4. Done — your agents can now send/receive WhatsApp messages
+
+WAHA runs at `http://localhost:3000` (API dashboard available there).
+
+---
+
+## 🧠 LLM Configuration
+
+Go to **Settings → LLM Providers** and enter your API keys:
+
+### Claude Max (Anthropic)
+- Model options: `claude-sonnet-4-5` (default), `claude-opus-4-5`, `claude-haiku-4-5`
+- Get your key at: https://console.anthropic.com
+- 💡 **Claude Max subscribers**: Your API key is included in the Claude Max subscription — no separate billing needed.
+
+### OpenAI
+- Model options: `gpt-4o`, `gpt-4o-mini`
+- Get your key at: https://platform.openai.com
+
+---
+
+## 🏥 Health Check
+
+**API endpoint** (no auth required):
+```bash
+curl http://localhost:8080/health
+# → {"status":"ok","version":"1.0.0","db":{"ok":true,"ms":1.2},"redis":{"ok":true,"ms":0.3},"timestamp":"..."}
+```
+
+**Admin dashboard**: http://localhost:8080/admin/health
+
+---
+
+## 🗂️ Project Structure
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/gti1/zeniclaw.git
-git branch -M main
-git push -uf origin main
+app/
+  Http/Controllers/       # All controllers
+  Http/Controllers/Admin/ # UpdateController, HealthDashboardController
+  Models/                 # Agent, AgentLog, AgentMemory, AgentSession, etc.
+  Console/Commands/       # zeniclaw:health, zeniclaw:update, zeniclaw:compact-logs
+  Policies/               # AgentPolicy (user scoping)
+database/
+  migrations/             # All table definitions
+  seeders/                # Admin user + 3 demo agents
+docker/
+  nginx/default.conf
+  php/php.ini
+  entrypoint.sh           # Runs health check, migrations, starts services
+resources/views/          # All Blade templates
+tests/Feature/
+  ZeniClawSelfTest.php    # 20+ feature tests
 ```
 
-## Integrate with your tools
+---
 
-* [Set up project integrations](https://gitlab.com/gti1/zeniclaw/-/settings/integrations)
+## 🔒 Security Notes
 
-## Collaborate with your team
+- All database queries are scoped to `auth()->user()` via policies and query scoping
+- API keys are encrypted at rest using Laravel's `Crypt` facade
+- Agent secrets are encrypted using `Crypt::encryptString()`
+- API tokens are stored as SHA-256 hashes (never in plain text)
+- Admin routes (`/admin/*`) require `superadmin` role middleware
+- Public endpoints: `/health`, `/webhook/whatsapp/{agent}` (webhook auth via API token)
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+---
 
-## Test and Deploy
+## 📦 Tech Stack
 
-Use the built-in continuous integration in GitLab.
+| Component    | Technology                    |
+|-------------|-------------------------------|
+| Framework    | Laravel 11                    |
+| Auth         | Laravel Breeze (Blade)        |
+| Frontend     | Tailwind CSS + Alpine.js      |
+| Realtime UI  | Livewire 3                    |
+| Database     | PostgreSQL 16                 |
+| Cache/Queue  | Redis 7                       |
+| WhatsApp     | WAHA (devlikeapro/waha)       |
+| Container    | Docker + nginx + php-fpm 8.3  |
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+---
 
-***
+## 📝 Changelog
 
-# Editing this README
+### v1.0.0 (2026-03-01)
+- Initial MVP release
+- Multi-agent management with CRUD
+- Laravel Breeze authentication
+- WhatsApp channel via WAHA
+- Claude Max + OpenAI model support
+- Reminders with recurrence rules
+- Agent logs with compaction
+- Two-layer memory system (daily + longterm)
+- Session tracking per channel/peer
+- API token management
+- Self-update system via GitLab API
+- Health monitoring dashboard
+- Full feature test suite
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+---
 
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Made with ❤️ by the ZeniClaw team.

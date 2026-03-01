@@ -1,0 +1,65 @@
+#!/bin/bash
+set -e
+
+echo "🚀 ZeniClaw entrypoint starting..."
+
+# Generate APP_KEY if not set
+if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:CHANGE_ME" ]; then
+    echo "⚠️  Generating APP_KEY..."
+    export APP_KEY=$(php artisan key:generate --show --no-ansi 2>/dev/null || echo "base64:$(openssl rand -base64 32)")
+fi
+
+# Write .env from environment
+cat > /var/www/html/.env << EOF
+APP_NAME=ZeniClaw
+APP_ENV=${APP_ENV:-production}
+APP_KEY=${APP_KEY}
+APP_DEBUG=${APP_DEBUG:-false}
+APP_URL=${APP_URL:-http://localhost:8080}
+
+LOG_CHANNEL=stderr
+LOG_LEVEL=info
+
+DB_CONNECTION=pgsql
+DB_HOST=${DB_HOST:-db}
+DB_PORT=${DB_PORT:-5432}
+DB_DATABASE=${DB_DATABASE:-zeniclaw}
+DB_USERNAME=${DB_USERNAME:-zeniclaw}
+DB_PASSWORD=${DB_PASSWORD:-secret}
+
+REDIS_HOST=${REDIS_HOST:-redis}
+REDIS_PORT=${REDIS_PORT:-6379}
+
+CACHE_DRIVER=${CACHE_DRIVER:-redis}
+SESSION_DRIVER=${SESSION_DRIVER:-redis}
+QUEUE_CONNECTION=${QUEUE_CONNECTION:-redis}
+EOF
+
+cd /var/www/html
+
+# Health check before start
+echo "🏥 Running health check..."
+php artisan zeniclaw:health || echo "⚠️  Health check warnings (continuing)"
+
+# Run migrations
+echo "📦 Running migrations..."
+php artisan migrate --force --no-interaction
+
+# Optimize
+echo "⚡ Optimizing..."
+php artisan config:cache --no-interaction || true
+php artisan route:cache --no-interaction  || true
+php artisan view:cache --no-interaction   || true
+
+# Storage link
+php artisan storage:link --no-interaction 2>/dev/null || true
+
+# Fix permissions
+chown -R www-data:www-data storage bootstrap/cache
+chmod -R 775 storage bootstrap/cache
+
+# Start nginx + php-fpm via supervisor
+echo "✅ Starting nginx + php-fpm..."
+service nginx start
+
+exec php-fpm

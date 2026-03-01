@@ -1,0 +1,91 @@
+version: '3.9'
+
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zeniclaw_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    environment:
+      APP_ENV: production
+      APP_KEY: ${APP_KEY}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-zeniclaw}
+      DB_USERNAME: ${DB_USERNAME:-zeniclaw}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+    volumes:
+      - app_storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - zeniclaw
+
+  db:
+    image: postgres:16-alpine
+    container_name: zeniclaw_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-zeniclaw}
+      POSTGRES_USER: ${DB_USERNAME:-zeniclaw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-zeniclaw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - zeniclaw
+
+  redis:
+    image: redis:7-alpine
+    container_name: zeniclaw_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - zeniclaw
+
+  waha:
+    image: devlikeapro/waha
+    container_name: zeniclaw_waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - waha_data:/app/.sessions
+    environment:
+      - WAHA_LOG_LEVEL=error
+    networks:
+      - zeniclaw
+
+volumes:
+  db_data:
+  redis_data:
+  app_storage:
+  waha_data:
+
+networks:
+  zeniclaw:
+    driver: bridge
