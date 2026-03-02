@@ -75,6 +75,32 @@ check_command() {
     command -v "$1" &>/dev/null
 }
 
+# Docker command — set after daemon check (docker or sudo docker)
+DOCKER_CMD="docker"
+DOCKER_COMPOSE_STANDALONE=false
+
+set_docker_cmd() {
+    if docker info &>/dev/null; then
+        DOCKER_CMD="docker"
+    elif sudo docker info &>/dev/null; then
+        DOCKER_CMD="sudo docker"
+        warn "Using 'sudo docker' (add your user to the docker group to avoid sudo)"
+    fi
+}
+
+# Wrapper: runs "docker compose ..." or "docker-compose ..." with correct sudo
+dcompose() {
+    if [[ "$DOCKER_COMPOSE_STANDALONE" == "true" ]]; then
+        if [[ "$DOCKER_CMD" == "sudo docker" ]]; then
+            sudo docker-compose "$@"
+        else
+            docker-compose "$@"
+        fi
+    else
+        $DOCKER_CMD compose "$@"
+    fi
+}
+
 generate_password() {
     openssl rand -base64 24 2>/dev/null | tr -d '/+=' | head -c 24 || \
     head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 24
@@ -224,9 +250,15 @@ install_docker() {
 
 # --- Docker daemon check ----------------------------------------------------
 
+docker_is_running() {
+    # Try without sudo first, then with sudo (user may not be in docker group yet)
+    docker info &>/dev/null || sudo docker info &>/dev/null
+}
+
 ensure_docker_running() {
-    if docker info &>/dev/null; then
+    if docker_is_running; then
         success "Docker daemon is running"
+        set_docker_cmd
         return 0
     fi
 
@@ -238,45 +270,66 @@ ensure_docker_running() {
         exit 1
     fi
 
-    info "Starting Docker daemon..."
-
-    # Try systemctl first (systemd)
-    if check_command systemctl && sudo systemctl start docker 2>/dev/null; then
-        sleep 2
-        if docker info &>/dev/null; then
-            success "Docker daemon started (systemctl)"
-            # Enable on boot
-            sudo systemctl enable docker 2>/dev/null || true
-            return 0
+    # Try systemctl first (systemd) — show errors so user sees what's wrong
+    if check_command systemctl; then
+        info "Starting Docker via systemctl..."
+        if sudo systemctl start docker; then
+            sleep 2
+            if docker_is_running; then
+                success "Docker daemon started (systemctl)"
+                sudo systemctl enable docker 2>/dev/null || true
+                info "Docker enabled on boot"
+                set_docker_cmd
+                return 0
+            fi
+        else
+            warn "systemctl start docker failed (see above)"
         fi
     fi
 
     # Try service (SysVinit / upstart)
-    if check_command service && sudo service docker start 2>/dev/null; then
-        sleep 2
-        if docker info &>/dev/null; then
-            success "Docker daemon started (service)"
-            return 0
+    if check_command service; then
+        info "Starting Docker via service..."
+        if sudo service docker start; then
+            sleep 2
+            if docker_is_running; then
+                success "Docker daemon started (service)"
+                set_docker_cmd
+                return 0
+            fi
+        else
+            warn "service docker start failed (see above)"
         fi
     fi
 
     # Try starting dockerd directly as last resort
     if check_command dockerd; then
-        info "Attempting to start dockerd directly..."
-        sudo dockerd &>/dev/null &
+        info "Starting dockerd directly (last resort)..."
+        sudo dockerd > /tmp/dockerd.log 2>&1 &
         local dockerd_pid=$!
-        sleep 3
-        if docker info &>/dev/null; then
-            success "Docker daemon started (dockerd)"
-            return 0
-        fi
+        # Wait up to 10 seconds for daemon to be ready
+        local wait=0
+        while [[ $wait -lt 10 ]]; do
+            if docker_is_running; then
+                success "Docker daemon started (dockerd, PID $dockerd_pid)"
+                set_docker_cmd
+                return 0
+            fi
+            sleep 1
+            wait=$((wait + 1))
+        done
+        warn "dockerd started but daemon not responding. Log:"
+        echo -e "    ${DIM}$(tail -5 /tmp/dockerd.log 2>/dev/null)${NC}"
         sudo kill "$dockerd_pid" 2>/dev/null || true
     fi
 
+    echo ""
     error "Could not start Docker daemon."
-    echo -e "    ${DIM}Try manually:${NC}"
+    echo -e "    ${DIM}Try manually in another terminal:${NC}"
     echo -e "    ${DIM}  sudo systemctl start docker${NC}"
     echo -e "    ${DIM}  sudo service docker start${NC}"
+    echo -e "    ${DIM}  sudo dockerd${NC}"
+    echo -e ""
     echo -e "    ${DIM}Then re-run: ./install.sh${NC}"
     exit 1
 }
@@ -314,20 +367,13 @@ preflight_checks() {
 
     # Check Docker Compose
     info "Checking Docker Compose..."
-    if docker compose version &>/dev/null; then
-        success "Docker Compose found ($(docker compose version --short 2>/dev/null || echo 'v2+'))"
+    if $DOCKER_CMD compose version &>/dev/null; then
+        success "Docker Compose found ($($DOCKER_CMD compose version --short 2>/dev/null || echo 'v2+'))"
     elif check_command docker-compose; then
         success "Docker Compose (standalone) found ($(docker-compose --version | head -1))"
         warn "Consider upgrading to Docker Compose v2 (docker compose plugin)."
-        # Create alias for this script's session
-        docker() {
-            if [[ "$1" == "compose" ]]; then
-                shift
-                command docker-compose "$@"
-            else
-                command docker "$@"
-            fi
-        }
+        # Wrap DOCKER_CMD to route "compose" to docker-compose
+        DOCKER_COMPOSE_STANDALONE=true
     else
         error "Docker Compose not found."
         echo -ne "${PURPLE}🔹 Install Docker Compose plugin now? ${DIM}[Y/n]${NC}: "
@@ -338,8 +384,8 @@ preflight_checks() {
             local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
             if sudo curl -fsSL "$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose && \
                sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; then
-                if docker compose version &>/dev/null; then
-                    success "Docker Compose plugin installed ($(docker compose version --short 2>/dev/null))"
+                if $DOCKER_CMD compose version &>/dev/null; then
+                    success "Docker Compose plugin installed ($($DOCKER_CMD compose version --short 2>/dev/null))"
                 else
                     error "Docker Compose installation failed. Please install manually."
                     echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
@@ -498,7 +544,7 @@ build_and_start() {
     # Build
     info "Building Docker images (this may take a few minutes on first run)..."
     echo ""
-    if ! docker compose build 2>&1 | while IFS= read -r line; do
+    if ! dcompose build 2>&1 | while IFS= read -r line; do
         echo -e "    ${DIM}${line}${NC}"
     done; then
         error "Docker build failed. Check the output above for details."
@@ -509,7 +555,7 @@ build_and_start() {
 
     # Start
     info "Starting services..."
-    if ! docker compose up -d 2>&1; then
+    if ! dcompose up -d 2>&1; then
         error "Failed to start services."
         exit 1
     fi
@@ -525,9 +571,9 @@ build_and_start() {
 
     while [[ $elapsed -lt $max_wait ]]; do
         local db_health app_health redis_health
-        db_health=$(docker inspect --format='{{.State.Health.Status}}' zeniclaw_db 2>/dev/null || echo "starting")
-        redis_health=$(docker inspect --format='{{.State.Health.Status}}' zeniclaw_redis 2>/dev/null || echo "starting")
-        app_health=$(docker inspect --format='{{.State.Status}}' zeniclaw_app 2>/dev/null || echo "starting")
+        db_health=$($DOCKER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_db 2>/dev/null || echo "starting")
+        redis_health=$($DOCKER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_redis 2>/dev/null || echo "starting")
+        app_health=$($DOCKER_CMD inspect --format='{{.State.Status}}' zeniclaw_app 2>/dev/null || echo "starting")
 
         local status_line="    "
         [[ "$db_health" == "healthy" ]]  && status_line+="${GREEN}● DB${NC}  "    || status_line+="${YELLOW}○ DB${NC}  "
@@ -567,7 +613,7 @@ initialize_database() {
 
     while [[ $elapsed -lt $max_wait ]]; do
         # Check if migrations have completed by testing if artisan responds
-        if docker compose exec -T app php artisan --version &>/dev/null; then
+        if dcompose exec -T app php artisan --version &>/dev/null; then
             break
         fi
         sleep 2
@@ -576,7 +622,7 @@ initialize_database() {
 
     # The entrypoint.sh already runs migrations, but we run seed explicitly
     info "Running database seeder..."
-    if docker compose exec -T app php artisan db:seed --force --no-interaction 2>&1 | while IFS= read -r line; do
+    if dcompose exec -T app php artisan db:seed --force --no-interaction 2>&1 | while IFS= read -r line; do
         echo -e "    ${DIM}${line}${NC}"
     done; then
         success "Database seeded successfully"
@@ -623,9 +669,9 @@ DONE
 
     for i in "${!services[@]}"; do
         local status
-        status=$(docker inspect --format='{{.State.Status}}' "${services[$i]}" 2>/dev/null || echo "not found")
+        status=$($DOCKER_CMD inspect --format='{{.State.Status}}' "${services[$i]}" 2>/dev/null || echo "not found")
         local health
-        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${services[$i]}" 2>/dev/null || echo "n/a")
+        health=$($DOCKER_CMD inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${services[$i]}" 2>/dev/null || echo "n/a")
 
         if [[ "$status" == "running" ]]; then
             echo -e "  │  ${GREEN}●${NC} ${labels[$i]}  ${DIM}running${NC} ${DIM}(${health})${NC}"
