@@ -118,6 +118,169 @@ BANNER
     echo -e "    ${DIM}──────────────────────────────────${NC}\n"
 }
 
+# --- Package installer helper ------------------------------------------------
+
+detect_pkg_manager() {
+    if check_command apt-get;  then echo "apt"; return; fi
+    if check_command dnf;      then echo "dnf"; return; fi
+    if check_command yum;      then echo "yum"; return; fi
+    if check_command pacman;   then echo "pacman"; return; fi
+    if check_command apk;      then echo "apk"; return; fi
+    echo "unknown"
+}
+
+install_package() {
+    local pkg="$1"
+    local mgr
+    mgr=$(detect_pkg_manager)
+
+    info "Installing ${pkg} via ${mgr}..."
+    case "$mgr" in
+        apt)    sudo apt-get update -qq && sudo apt-get install -y -qq "$pkg" ;;
+        dnf)    sudo dnf install -y -q "$pkg" ;;
+        yum)    sudo yum install -y -q "$pkg" ;;
+        pacman) sudo pacman -Sy --noconfirm "$pkg" ;;
+        apk)    sudo apk add --quiet "$pkg" ;;
+        *)
+            error "Unknown package manager. Please install '${pkg}' manually."
+            return 1
+            ;;
+    esac
+}
+
+offer_install() {
+    local binary="$1"
+    local package="${2:-$1}"
+    local required="${3:-true}"
+
+    if check_command "$binary"; then
+        success "${binary} found ($(${binary} --version 2>&1 | head -1))"
+        return 0
+    fi
+
+    warn "${binary} is not installed."
+    echo -ne "${PURPLE}🔹 Install ${binary} now? ${DIM}[Y/n]${NC}: "
+    read -r answer
+    if [[ "${answer,,}" != "n" ]]; then
+        if install_package "$package"; then
+            if check_command "$binary"; then
+                success "${binary} installed successfully!"
+                return 0
+            fi
+        fi
+        error "Failed to install ${binary}."
+        if [[ "$required" == "true" ]]; then
+            error "${binary} is required. Aborting."
+            exit 1
+        fi
+        return 1
+    else
+        if [[ "$required" == "true" ]]; then
+            error "${binary} is required. Aborting."
+            exit 1
+        fi
+        warn "Skipping ${binary} (optional)."
+        return 1
+    fi
+}
+
+# --- Docker installer -------------------------------------------------------
+
+install_docker() {
+    warn "Docker is not installed."
+    echo -ne "${PURPLE}🔹 Install Docker now? ${DIM}[Y/n]${NC}: "
+    read -r answer
+    if [[ "${answer,,}" == "n" ]]; then
+        error "Docker is required. Aborting."
+        exit 1
+    fi
+
+    if ! check_command curl; then
+        info "curl is needed to install Docker. Installing curl first..."
+        install_package curl || { error "Cannot install curl. Please install Docker manually."; exit 1; }
+    fi
+
+    info "Installing Docker via official script (https://get.docker.com)..."
+    echo ""
+    if curl -fsSL https://get.docker.com | sudo sh; then
+        echo ""
+        if check_command docker; then
+            success "Docker installed successfully!"
+            # Add current user to docker group if not root
+            if [[ $EUID -ne 0 ]]; then
+                sudo usermod -aG docker "$USER" 2>/dev/null || true
+                warn "You were added to the 'docker' group. You may need to log out/in for it to take effect."
+            fi
+        else
+            error "Docker installation failed. Please install manually: https://docs.docker.com/engine/install/"
+            exit 1
+        fi
+    else
+        echo ""
+        error "Docker installation script failed. Please install manually: https://docs.docker.com/engine/install/"
+        exit 1
+    fi
+}
+
+# --- Docker daemon check ----------------------------------------------------
+
+ensure_docker_running() {
+    if docker info &>/dev/null; then
+        success "Docker daemon is running"
+        return 0
+    fi
+
+    warn "Docker daemon is not running."
+    echo -ne "${PURPLE}🔹 Start Docker daemon now? ${DIM}[Y/n]${NC}: "
+    read -r answer
+    if [[ "${answer,,}" == "n" ]]; then
+        error "Docker daemon must be running. Aborting."
+        exit 1
+    fi
+
+    info "Starting Docker daemon..."
+
+    # Try systemctl first (systemd)
+    if check_command systemctl && sudo systemctl start docker 2>/dev/null; then
+        sleep 2
+        if docker info &>/dev/null; then
+            success "Docker daemon started (systemctl)"
+            # Enable on boot
+            sudo systemctl enable docker 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    # Try service (SysVinit / upstart)
+    if check_command service && sudo service docker start 2>/dev/null; then
+        sleep 2
+        if docker info &>/dev/null; then
+            success "Docker daemon started (service)"
+            return 0
+        fi
+    fi
+
+    # Try starting dockerd directly as last resort
+    if check_command dockerd; then
+        info "Attempting to start dockerd directly..."
+        sudo dockerd &>/dev/null &
+        local dockerd_pid=$!
+        sleep 3
+        if docker info &>/dev/null; then
+            success "Docker daemon started (dockerd)"
+            return 0
+        fi
+        sudo kill "$dockerd_pid" 2>/dev/null || true
+    fi
+
+    error "Could not start Docker daemon."
+    echo -e "    ${DIM}Try manually:${NC}"
+    echo -e "    ${DIM}  sudo systemctl start docker${NC}"
+    echo -e "    ${DIM}  sudo service docker start${NC}"
+    echo -e "    ${DIM}Then re-run: ./install.sh${NC}"
+    exit 1
+}
+
 # --- Pre-flight Checks ------------------------------------------------------
 
 preflight_checks() {
@@ -131,48 +294,23 @@ preflight_checks() {
     fi
     success "Linux detected ($(uname -r))"
 
+    # Check required binaries
+    info "Checking required tools..."
+    offer_install "curl"    "curl"    "true"
+    offer_install "openssl" "openssl" "true"
+    offer_install "git"     "git"     "true"
+
     # Check Docker
     info "Checking Docker..."
     if ! check_command docker; then
-        warn "Docker is not installed."
-        echo -ne "${PURPLE}🔹 Install Docker now? ${DIM}[Y/n]${NC}: "
-        read -r install_docker
-        if [[ "${install_docker,,}" != "n" ]]; then
-            info "Installing Docker via official script..."
-            curl -fsSL https://get.docker.com | sh &
-            spinner $! "Installing Docker..."
-            wait $!
-            if check_command docker; then
-                success "Docker installed successfully!"
-                # Add current user to docker group if not root
-                if [[ $EUID -ne 0 ]]; then
-                    sudo usermod -aG docker "$USER" 2>/dev/null || true
-                    warn "You may need to log out and back in for Docker permissions to take effect."
-                fi
-            else
-                error "Docker installation failed. Please install manually: https://docs.docker.com/engine/install/"
-                exit 1
-            fi
-        else
-            error "Docker is required. Aborting."
-            exit 1
-        fi
+        install_docker
     else
         success "Docker found ($(docker --version | head -1))"
     fi
 
-    # Check Docker is running
-    if ! docker info &>/dev/null; then
-        warn "Docker daemon is not running."
-        info "Attempting to start Docker..."
-        sudo systemctl start docker 2>/dev/null || sudo service docker start 2>/dev/null || true
-        sleep 2
-        if ! docker info &>/dev/null; then
-            error "Could not start Docker daemon. Please start it manually and re-run this script."
-            exit 1
-        fi
-        success "Docker daemon started."
-    fi
+    # Check Docker daemon is running
+    info "Checking Docker daemon..."
+    ensure_docker_running
 
     # Check Docker Compose
     info "Checking Docker Compose..."
@@ -191,9 +329,31 @@ preflight_checks() {
             fi
         }
     else
-        error "Docker Compose not found. Please install the Docker Compose plugin."
-        echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
-        exit 1
+        error "Docker Compose not found."
+        echo -ne "${PURPLE}🔹 Install Docker Compose plugin now? ${DIM}[Y/n]${NC}: "
+        read -r answer
+        if [[ "${answer,,}" != "n" ]]; then
+            info "Installing Docker Compose plugin..."
+            sudo mkdir -p /usr/local/lib/docker/cli-plugins
+            local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
+            if sudo curl -fsSL "$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose && \
+               sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; then
+                if docker compose version &>/dev/null; then
+                    success "Docker Compose plugin installed ($(docker compose version --short 2>/dev/null))"
+                else
+                    error "Docker Compose installation failed. Please install manually."
+                    echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
+                    exit 1
+                fi
+            else
+                error "Download failed. Please install Docker Compose manually."
+                echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
+                exit 1
+            fi
+        else
+            error "Docker Compose is required. Aborting."
+            exit 1
+        fi
     fi
 
     # Check ports
@@ -201,7 +361,7 @@ preflight_checks() {
     info "Checking port availability..."
 
     if ! check_port "$APP_PORT_CHECK"; then
-        warn "Port $APP_PORT_CHECK is already in use."
+        warn "Port $APP_PORT_CHECK is already in use. You can choose a different port in the next step."
     else
         success "Port $APP_PORT_CHECK is available"
     fi
@@ -211,6 +371,9 @@ preflight_checks() {
     else
         success "Port 3000 is available (WAHA/WhatsApp)"
     fi
+
+    echo ""
+    success "All pre-flight checks passed!"
 }
 
 # --- Interactive Configuration -----------------------------------------------
