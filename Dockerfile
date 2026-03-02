@@ -23,18 +23,30 @@ COPY . .
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
+# Install Node.js and build front-end assets
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm ci \
+    && npm run build \
+    && rm -rf node_modules \
+    && apt-get purge -y nodejs \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy configs
 COPY docker/nginx/default.conf /etc/nginx/sites-available/default
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zeniclaw.ini
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Version file for health check
+RUN echo "1.0.0" > storage/app/version.txt
+
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 775 storage bootstrap/cache
 
-# Build assets (already built, just copy public/build)
 EXPOSE 80
 
 ENTRYPOINT ["/entrypoint.sh"]
