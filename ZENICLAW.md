@@ -112,6 +112,17 @@ app_settings   — id, key, encrypted_value (global LLM API keys etc.)
 api_tokens     — id, user_id, name, token_hash, last_used_at
 ```
 
+### Project & SubAgent tables (v2.0.0)
+
+```sql
+projects       — id, name, gitlab_url, request_description, requester_phone, requester_name,
+                 allowed_phones(json), notify_groups(json), agent_id, status(pending|approved|rejected|in_progress|completed|failed),
+                 approved_by, rejection_reason, approved_at, timestamps
+sub_agents     — id, project_id, status(queued|running|completed|failed|killed), task_description,
+                 branch_name, commit_hash, error_message, output_log(text),
+                 timeout_minutes, pid, api_calls_count, started_at, completed_at, timestamps
+```
+
 ---
 
 ## LLM Providers
@@ -196,7 +207,7 @@ Settings → Updates (superadmin only):
 - Displays last 5 commits as changelog
 - One-click update: runs `git pull` + `composer install` + migrations + cache clear
 - Live log output during update (Alpine.js polling)
-- Version shown in sidebar footer: "ZeniClaw v1.0.0"
+- Version shown in sidebar footer: "ZeniClaw v2.0.0"
 
 Artisan command: `php artisan zeniclaw:update`
 
@@ -210,7 +221,7 @@ GitLab API (public, no token needed):
 
 ### GET /health (no auth required)
 ```json
-{ "status": "ok", "version": "1.0.0", "db": "ok", "redis": "ok", "timestamp": "..." }
+{ "status": "ok", "version": "2.0.0", "db": "ok", "redis": "ok", "timestamp": "..." }
 ```
 
 ### php artisan zeniclaw:health
@@ -223,6 +234,141 @@ Real-time status of: DB ✅, Redis ✅, WAHA ✅/❌, Scheduler ✅/❌
 - All health checks with response times
 - Recent errors from agent_logs (last 24h)
 - Queue status (pending jobs)
+
+---
+
+## Projects System (v2.0.0)
+
+Projects link ZeniClaw to GitLab repositories for autonomous task execution.
+
+### Creation Flow
+
+**From Dashboard (admin/superadmin):**
+1. Navigate to Projects → Nouveau projet
+2. Search GitLab repos via API (autocomplete dropdown)
+3. Select authorized WhatsApp contacts (can send tasks directly)
+4. Select WhatsApp groups to notify (receive project creation notification)
+5. Project is auto-approved on creation
+
+**From WhatsApp (any user):**
+1. User sends a message containing a GitLab URL
+2. ZeniClaw extracts URL and description
+3. If repo already approved → SubAgent dispatched immediately
+4. If new repo → pending approval, admin notified
+
+### Task Detection via WhatsApp
+
+When a WhatsApp message is received:
+1. Check for GitLab URL → project creation flow
+2. If no URL, use Claude Haiku to classify: TASK or CHAT
+3. If TASK → find matching project (by name mention, allowed_phones, or last project)
+4. Dispatch SubAgent on the matched project
+
+### Message Prefix
+
+All project-related messages are prefixed with `[ProjectName]`:
+- Acknowledgment: `[my-app] C'est parti ! Je bosse dessus.`
+- Progress: `[my-app] Repo recupere. ZeniClaw AI analyse le code...`
+- Completion: `[my-app] C'est fait ! Les modifications ont ete mergees.`
+- Errors: `[my-app] Oups, j'ai pas reussi cette fois.`
+
+This applies to:
+- SubAgent progress notifications (`RunSubAgentJob::notifyRequester()`)
+- WhatsApp webhook acknowledgments (`ChannelController::whatsappWebhook()`)
+- Project creation notifications to contacts and groups
+
+### WhatsApp Group Notifications
+
+When creating a project, admins can select WhatsApp groups (`@g.us` peers) to notify.
+Groups receive a message: `[ProjectName] Nouveau projet configure !`
+
+Stored as `notify_groups` (JSON array of group peer IDs) on the project.
+
+### Approval Workflow
+
+| Status        | Description                                      |
+|---------------|--------------------------------------------------|
+| `pending`     | Awaiting admin approval (created from WhatsApp)  |
+| `approved`    | Ready for task execution                         |
+| `in_progress` | SubAgent currently running                       |
+| `completed`   | Last SubAgent finished successfully              |
+| `failed`      | Last SubAgent failed                             |
+| `rejected`    | Admin rejected the request                       |
+
+---
+
+## SubAgents (v2.0.0)
+
+SubAgents are autonomous workers that execute code modification tasks.
+
+### Execution Pipeline
+
+```
+1. Clone repo (git clone --depth 50)
+2. Resolve branch (reuse previous or create zeniclaw/subagent-{id})
+3. Run Claude Code CLI (--dangerously-skip-permissions --output-format stream-json)
+4. Stage + commit + push
+5. Find or create Merge Request
+6. Auto-merge MR (wait for CI if needed)
+7. Notify requester via WhatsApp
+```
+
+### Model Strategy
+
+- Primary: Claude Opus (most capable)
+- Fallback: Claude Sonnet (if Opus is overloaded/fails)
+- If both fail but files were modified → continue with partial changes
+
+### Context Continuity
+
+When a new SubAgent runs on a project that had previous SubAgents:
+- Previous task descriptions are injected into the prompt
+- The existing branch is reused (fetched from remote)
+- This ensures Claude has context of what was already done
+
+### Timeout & Kill
+
+- Default timeout: configurable globally in Settings → SubAgents
+- Per-SubAgent timeout: set when creating
+- Kill: sends SIGTERM then SIGKILL to the process tree
+- PID tracked in DB for reliable process management
+
+### Real-time Logging
+
+SubAgent output is streamed and parsed:
+- `[CLAUDE]` — Claude's text responses (truncated to 300 chars)
+- `[TOOL]` — Tool usage (Read, Edit, Write, Bash, Glob, Grep)
+- `[GIT]` — Git operations (clone, branch, commit, push)
+- `[MR]` — Merge Request creation and merge status
+- `[ERROR]` — Errors and failures
+
+---
+
+## Conversations & Contacts (v2.0.0)
+
+### Conversations (`/conversations`)
+- Lists all WhatsApp conversation sessions
+- Shows peer ID, message count, last activity
+- Click to view conversation detail (logs of messages exchanged)
+
+### Contacts (`/contacts`)
+- Lists all WhatsApp contacts (excludes groups and status@broadcast)
+- Shows name (from pushName or project data), peer ID, message count
+- Sorted by most recent activity
+
+---
+
+## Services (v2.0.0)
+
+### AnthropicClient (`app/Services/AnthropicClient.php`)
+- Centralized Claude API client used for chat responses and task classification
+- Supports text and multimodal messages (images, PDFs)
+- Used by ChannelController for WhatsApp chat and task classification
+
+### ConversationMemoryService (`app/Services/ConversationMemoryService.php`)
+- Per-contact conversation memory stored in files
+- AI-generated summaries of each exchange
+- Injected into system prompt for context continuity across conversations
 
 ---
 
@@ -400,7 +546,21 @@ Expected: all green ✅
 - [x] Version tracking
 - [x] One-click update UI
 
-### Phase 6 — Future
+### Phase 6 — Projects & Autonomy ✅ (v2.0.0)
+- [x] Projects system (create, approve, reject)
+- [x] SubAgents (autonomous Claude Code execution)
+- [x] GitLab integration (repo search, clone, MR, auto-merge)
+- [x] WhatsApp task detection (GitLab URL + Claude classification)
+- [x] Conversations & Contacts views
+- [x] WhatsApp group notifications
+- [x] [PROJECT] message prefix
+- [x] AnthropicClient service
+- [x] Conversation memory service
+- [x] SubAgent timeout & kill
+- [x] Model fallback (Opus → Sonnet)
+- [x] Real-time SubAgent log streaming
+
+### Phase 7 — Future
 - [ ] Telegram channel driver
 - [ ] Web chat (Reverb WebSocket)
 - [ ] 2FA

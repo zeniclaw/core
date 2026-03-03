@@ -6,6 +6,7 @@
 
 ## ✨ Features
 
+### Core
 - 🤖 **Multi-agent management** — Create unlimited agents with custom system prompts
 - 🧠 **Claude Max support** — Use your Anthropic Claude Max subscription (claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4-5)
 - 🟢 **OpenAI support** — GPT-4o, GPT-4o Mini
@@ -20,6 +21,18 @@
 - 🛡️ **Role-based access** — superadmin / admin / operator / viewer
 - 🔒 **Data sandboxing** — All data strictly scoped to authenticated user
 - 🧪 **Self-test suite** — Feature tests covering auth, agents, reminders, logs, webhooks
+
+### Projects & SubAgents (v2.0.0)
+- 📂 **Projects** — Create projects linked to GitLab repos, manage approval workflow
+- 🤖 **SubAgents** — Autonomous Claude Code execution: clone repo, apply changes, commit, push, create & auto-merge MR
+- 📱 **WhatsApp task detection** — Send a GitLab URL or a task description via WhatsApp, ZeniClaw detects and dispatches automatically
+- 💬 **Conversations view** — Browse all WhatsApp conversations with message history
+- 👥 **Contacts view** — See all WhatsApp contacts who interacted with ZeniClaw
+- 📢 **WhatsApp group notifications** — Select groups to notify when a project is created
+- 🏷️ **[PROJECT] prefix** — All project-related messages are prefixed with `[ProjectName]` for clarity
+- 🔗 **GitLab integration** — Search repos, auto-create branches, merge requests, and auto-merge
+- 🧠 **Conversation memory** — Per-contact memory with AI-generated summaries
+- ⏱️ **SubAgent timeout & kill** — Configurable timeout per SubAgent, kill button in dashboard
 
 ---
 
@@ -117,12 +130,87 @@ Go to **Settings → LLM Providers** and enter your API keys:
 
 ---
 
+## 🔗 GitLab Configuration
+
+Go to **Settings → GitLab** and enter:
+- **GitLab Access Token** — Personal access token with `api` scope (for repo search, clone, MR creation)
+
+This enables:
+- Searching GitLab repos when creating projects
+- SubAgents cloning repos and pushing changes
+- Auto-creation and auto-merge of Merge Requests
+
+---
+
+## 📂 Projects
+
+Projects link a **GitLab repository** to ZeniClaw. Two ways to create:
+
+### Via Dashboard
+1. Go to **Projects → Nouveau projet**
+2. Search and select a GitLab repo
+3. Add description (optional)
+4. Select authorized WhatsApp contacts (optional) — they can send tasks directly
+5. Select WhatsApp groups to notify (optional)
+6. Click **Créer** — project is auto-approved
+
+### Via WhatsApp
+1. Send a GitLab URL to ZeniClaw on WhatsApp
+2. ZeniClaw detects the URL and creates a pending project
+3. An admin approves/rejects from the dashboard
+4. Once approved, SubAgent is dispatched automatically
+
+### Task Detection
+ZeniClaw uses Claude Haiku to classify incoming WhatsApp messages:
+- **TASK** → dispatched to the matching project's SubAgent
+- **CHAT** → handled as casual conversation
+
+Priority for project matching:
+1. Project name mentioned in message
+2. Phone in project's `allowed_phones`
+3. User's last active project
+
+### Message Prefix
+All project-related messages (progress, completion, errors) are prefixed with `[ProjectName]`:
+```
+[my-app] C'est parti ! Je bosse dessus.
+[my-app] Repo recupere. ZeniClaw AI analyse le code...
+[my-app] C'est fait ! Les modifications ont ete mergees.
+```
+
+---
+
+## 🤖 SubAgents
+
+SubAgents are autonomous workers that execute tasks on a project's GitLab repo.
+
+### Workflow
+1. **Clone** — Git clone with depth 50
+2. **Branch** — Reuse existing branch from previous SubAgent or create new one (`zeniclaw/subagent-{id}`)
+3. **Execute** — Run Claude Code CLI with the task description (tries Opus first, falls back to Sonnet)
+4. **Commit & Push** — Stage all changes, commit, push to branch
+5. **Merge Request** — Create MR (or add commit to existing MR), then auto-merge
+
+### Features
+- **Configurable timeout** — Default 10 minutes, adjustable per SubAgent and globally
+- **Kill button** — Stop a running SubAgent from the dashboard
+- **Real-time logs** — Stream Claude Code output in the SubAgent detail page
+- **Context continuity** — Previous task descriptions are injected as context for new tasks
+- **Model fallback** — Opus → Sonnet if API is overloaded
+- **API call counter** — Track how many Claude API calls each SubAgent made
+
+### Dashboard
+- **List view** (`/subagents`) — All SubAgents with status, project, duration
+- **Detail view** (`/subagents/{id}`) — Full execution log, task description, commit hash, MR link
+
+---
+
 ## 🏥 Health Check
 
 **API endpoint** (no auth required):
 ```bash
 curl http://localhost:8080/health
-# → {"status":"ok","version":"1.0.0","db":{"ok":true,"ms":1.2},"redis":{"ok":true,"ms":0.3},"timestamp":"..."}
+# → {"status":"ok","version":"2.0.0","db":{"ok":true,"ms":1.2},"redis":{"ok":true,"ms":0.3},"timestamp":"..."}
 ```
 
 **Admin dashboard**: http://localhost:8080/admin/health
@@ -133,21 +221,30 @@ curl http://localhost:8080/health
 
 ```
 app/
-  Http/Controllers/       # All controllers
-  Http/Controllers/Admin/ # UpdateController, HealthDashboardController
-  Models/                 # Agent, AgentLog, AgentMemory, AgentSession, etc.
-  Console/Commands/       # zeniclaw:health, zeniclaw:update, zeniclaw:compact-logs
-  Policies/               # AgentPolicy (user scoping)
+  Http/Controllers/           # All controllers
+  Http/Controllers/Admin/     # UpdateController, HealthDashboardController
+  Models/                     # Agent, AgentLog, AgentMemory, AgentSession, Project, SubAgent
+  Jobs/                       # RunSubAgentJob (autonomous task execution)
+  Services/                   # AnthropicClient, ConversationMemoryService
+  Console/Commands/           # zeniclaw:health, zeniclaw:update, zeniclaw:compact-logs
+  Policies/                   # AgentPolicy (user scoping)
 database/
-  migrations/             # All table definitions
-  seeders/                # Admin user + 3 demo agents
+  migrations/                 # All table definitions
+  seeders/                    # Admin user + 3 demo agents
 docker/
   nginx/default.conf
   php/php.ini
-  entrypoint.sh           # Runs health check, migrations, starts services
-resources/views/          # All Blade templates
+  entrypoint.sh               # Runs health check, migrations, queue worker, starts services
+resources/views/
+  agents/                     # Agent CRUD views
+  contacts/                   # Contact list
+  conversations/              # Conversation list + detail
+  projects/                   # Project list, create, detail
+  subagents/                  # SubAgent list + detail with logs
+  settings/                   # Settings (LLM, GitLab, WhatsApp, tokens)
+  layouts/                    # App layout with sidebar navigation
 tests/Feature/
-  ZeniClawSelfTest.php    # 20+ feature tests
+  ZeniClawSelfTest.php        # 20+ feature tests
 ```
 
 ---
@@ -179,6 +276,22 @@ tests/Feature/
 ---
 
 ## 📝 Changelog
+
+### v2.0.0 (2026-03-03)
+- **Projects system** — Create projects linked to GitLab repos with approval workflow
+- **SubAgents** — Autonomous Claude Code execution (clone, modify, commit, push, MR, auto-merge)
+- **WhatsApp task detection** — Claude Haiku classifies messages as TASK or CHAT
+- **Conversations view** — Browse WhatsApp conversations with message history
+- **Contacts view** — All WhatsApp contacts who interacted with ZeniClaw
+- **WhatsApp group notifications** — Select groups to notify on project creation
+- **[PROJECT] prefix** — All project messages prefixed with `[ProjectName]`
+- **GitLab integration** — Repo search, branch management, MR creation & auto-merge
+- **AnthropicClient service** — Centralized Claude API client
+- **ConversationMemoryService** — Per-contact memory with AI-generated summaries
+- **SubAgent timeout & kill** — Configurable timeout, kill from dashboard
+- **Model fallback** — Opus → Sonnet if API overloaded
+- **Settings: GitLab** — Configure GitLab access token from UI
+- **Docker improvements** — Queue worker in entrypoint, improved health checks
 
 ### v1.0.0 (2026-03-01)
 - Initial MVP release
