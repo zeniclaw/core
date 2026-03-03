@@ -18,6 +18,25 @@ class AgentSession extends Model
 
     public static function keyFor(int $agentId, string $channel, string $peerId): string
     {
-        return "agent:{$agentId}:{$channel}:dm:{$peerId}";
+        $type = str_ends_with($peerId, '@g.us') ? 'group' : 'dm';
+        return "agent:{$agentId}:{$channel}:{$type}:{$peerId}";
+    }
+
+    public function isGroup(): bool
+    {
+        return str_ends_with($this->peer_id, '@g.us');
+    }
+
+    public function displayName(): string
+    {
+        $id = $this->peer_id ?? '';
+
+        if ($this->isGroup()) {
+            // Remove @g.us suffix for groups
+            return str_replace('@g.us', '', $id);
+        }
+
+        // Remove @s.whatsapp.net suffix for DMs
+        return str_replace('@s.whatsapp.net', '', $id);
     }
 }

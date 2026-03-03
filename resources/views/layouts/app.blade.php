@@ -37,11 +37,15 @@
         <nav class="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
             @php
                 $nav = [
-                    ['route'=>'dashboard',      'icon'=>'📊', 'label'=>'Dashboard',  'match'=>'dashboard'],
-                    ['route'=>'agents.index',   'icon'=>'🤖', 'label'=>'Agents',     'match'=>'agents*'],
-                    ['route'=>'reminders.index','icon'=>'⏰', 'label'=>'Reminders',  'match'=>'reminders*'],
-                    ['route'=>'logs.index',     'icon'=>'📋', 'label'=>'Logs',       'match'=>'logs*'],
-                    ['route'=>'settings.index', 'icon'=>'⚙️', 'label'=>'Settings',   'match'=>'settings*'],
+                    ['route'=>'dashboard',            'icon'=>'📊', 'label'=>'Dashboard',      'match'=>'dashboard'],
+                    ['route'=>'agents.index',         'icon'=>'🤖', 'label'=>'Agents',         'match'=>'agents*'],
+                    ['route'=>'conversations.index',  'icon'=>'💬', 'label'=>'Conversations',  'match'=>'conversations*'],
+                    ['route'=>'contacts.index',       'icon'=>'👥', 'label'=>'Contacts',       'match'=>'contacts*'],
+                    ['route'=>'projects.index',       'icon'=>'📁', 'label'=>'Projets',        'match'=>'projects*'],
+                    ['route'=>'subagents.index',      'icon'=>'🚀', 'label'=>'SubAgents',      'match'=>'subagents*'],
+                    ['route'=>'reminders.index',      'icon'=>'⏰', 'label'=>'Reminders',      'match'=>'reminders*'],
+                    ['route'=>'logs.index',           'icon'=>'📋', 'label'=>'Logs',           'match'=>'logs*'],
+                    ['route'=>'settings.index',       'icon'=>'⚙️', 'label'=>'Settings',       'match'=>'settings*'],
                 ];
             @endphp
             @foreach($nav as $n)
@@ -138,11 +142,11 @@
         <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 flex z-10 safe-pb">
             @php
                 $bottomNav = [
-                    ['route'=>'dashboard',      'icon'=>'📊', 'label'=>'Home',     'match'=>'dashboard'],
-                    ['route'=>'agents.index',   'icon'=>'🤖', 'label'=>'Agents',   'match'=>'agents*'],
-                    ['route'=>'reminders.index','icon'=>'⏰', 'label'=>'Reminders','match'=>'reminders*'],
-                    ['route'=>'logs.index',     'icon'=>'📋', 'label'=>'Logs',     'match'=>'logs*'],
-                    ['route'=>'settings.index', 'icon'=>'⚙️', 'label'=>'Settings', 'match'=>'settings*'],
+                    ['route'=>'dashboard',            'icon'=>'📊', 'label'=>'Home',      'match'=>'dashboard'],
+                    ['route'=>'agents.index',         'icon'=>'🤖', 'label'=>'Agents',    'match'=>'agents*'],
+                    ['route'=>'conversations.index',  'icon'=>'💬', 'label'=>'Convos',    'match'=>'conversations*'],
+                    ['route'=>'logs.index',           'icon'=>'📋', 'label'=>'Logs',      'match'=>'logs*'],
+                    ['route'=>'settings.index',       'icon'=>'⚙️', 'label'=>'Settings',  'match'=>'settings*'],
                 ];
             @endphp
             @foreach($bottomNav as $n)

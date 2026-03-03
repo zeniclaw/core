@@ -7,11 +7,15 @@ use App\Http\Controllers\AgentMemoryController;
 use App\Http\Controllers\AgentSessionController;
 use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\ContactController;
+use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LogController;
+use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\SubAgentController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ────────────────────────────────────────────────────────────────────
@@ -36,12 +40,40 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/reminders', [ReminderController::class, 'store'])->name('reminders.store');
     Route::delete('/reminders/{reminder}', [ReminderController::class, 'destroy'])->name('reminders.destroy');
 
+    // Conversations
+    Route::get('/conversations', [ConversationController::class, 'index'])->name('conversations.index');
+    Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
+
+    // Contacts
+    Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
+
+    // Projects
+    Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
+    Route::get('/projects/create', [ProjectController::class, 'create'])->name('projects.create');
+    Route::post('/projects', [ProjectController::class, 'store'])->name('projects.store');
+    Route::get('/projects/{project}', [ProjectController::class, 'show'])->name('projects.show');
+    Route::post('/projects/{project}/approve', [ProjectController::class, 'approve'])->name('projects.approve');
+    Route::post('/projects/{project}/reject', [ProjectController::class, 'reject'])->name('projects.reject');
+
+    // API endpoints
+    Route::get('/api/gitlab-projects', [ProjectController::class, 'apiGitlabProjects'])->name('api.gitlab-projects');
+    Route::get('/api/contacts', [ProjectController::class, 'apiContacts'])->name('api.contacts');
+    Route::get('/api/groups', [ProjectController::class, 'apiGroups'])->name('api.groups');
+
+    // SubAgents
+    Route::get('/subagents', [SubAgentController::class, 'index'])->name('subagents.index');
+    Route::post('/subagents/default-timeout', [SubAgentController::class, 'updateDefaultTimeout'])->name('subagents.default-timeout');
+    Route::get('/subagents/{subAgent}', [SubAgentController::class, 'show'])->name('subagents.show');
+    Route::get('/subagents/{subAgent}/output', [SubAgentController::class, 'output'])->name('subagents.output');
+    Route::post('/subagents/{subAgent}/kill', [SubAgentController::class, 'kill'])->name('subagents.kill');
+
     // Logs
     Route::get('/logs', [LogController::class, 'index'])->name('logs.index');
 
     // Settings
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::post('/settings/llm-keys', [SettingsController::class, 'saveLlmKeys'])->name('settings.llm-keys');
+    Route::post('/settings/gitlab', [SettingsController::class, 'saveGitlabSettings'])->name('settings.gitlab');
 
     // API Tokens
     Route::post('/settings/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');

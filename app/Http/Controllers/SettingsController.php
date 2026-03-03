@@ -12,8 +12,10 @@ class SettingsController extends Controller
         $user = $request->user();
         $hasAnthropicKey = AppSetting::has('anthropic_api_key');
         $hasOpenAiKey = AppSetting::has('openai_api_key');
+        $hasGitlabToken = AppSetting::has('gitlab_access_token');
+        $adminWhatsappPhone = AppSetting::get('admin_whatsapp_phone');
         $tokens = $user->tokens()->latest()->get();
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'tokens'));
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'tokens'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -31,5 +33,22 @@ class SettingsController extends Controller
         }
 
         return redirect()->route('settings.index')->with('success', 'Clés API sauvegardées.');
+    }
+
+    public function saveGitlabSettings(Request $request)
+    {
+        $request->validate([
+            'gitlab_access_token' => 'nullable|string',
+            'admin_whatsapp_phone' => 'nullable|string|max:50',
+        ]);
+
+        if ($request->filled('gitlab_access_token')) {
+            AppSetting::set('gitlab_access_token', $request->gitlab_access_token);
+        }
+        if ($request->filled('admin_whatsapp_phone')) {
+            AppSetting::set('admin_whatsapp_phone', $request->admin_whatsapp_phone);
+        }
+
+        return redirect()->route('settings.index')->with('success', 'Parametres GitLab sauvegardes.');
     }
 }

@@ -62,4 +62,54 @@ chmod -R 775 storage bootstrap/cache
 echo "✅ Starting nginx + php-fpm..."
 service nginx start
 
+# Start queue worker as www-data (Claude Code refuses --dangerously-skip-permissions as root)
+echo "⚙️ Starting queue worker (www-data)..."
+su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" &
+
+# Auto-start WAHA WhatsApp session in background
+(
+    set +e
+    WAHA_KEY="${WAHA_API_KEY:-zeniclaw-waha-2026}"
+    WAHA_URL="http://${WAHA_HOST:-waha}:3000"
+
+    # Wait for WAHA API to be available
+    echo "📱 Waiting for WAHA to be ready..."
+    for i in $(seq 1 30); do
+        curl -sf -H "X-Api-Key: $WAHA_KEY" "$WAHA_URL/api/server/status" >/dev/null 2>&1 && break
+        sleep 2
+    done
+
+    # Keep trying to get session to WORKING state
+    echo "📱 Starting WhatsApp session watchdog..."
+    for attempt in $(seq 1 12); do
+        SESSION=$(curl -sf -H "X-Api-Key: $WAHA_KEY" "$WAHA_URL/api/sessions/default" 2>/dev/null)
+        SESSION_STATUS=$(echo "$SESSION" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+        case "$SESSION_STATUS" in
+            WORKING)
+                echo "📱 WhatsApp connected!"
+                break
+                ;;
+            SCAN_QR_CODE)
+                echo "📱 Waiting for QR scan..."
+                break
+                ;;
+            STARTING)
+                echo "📱 Session starting, waiting... ($attempt/12)"
+                ;;
+            STOPPED|FAILED)
+                echo "📱 Session $SESSION_STATUS, restarting... ($attempt/12)"
+                curl -sf -X POST -H "X-Api-Key: $WAHA_KEY" -H "Content-Type: application/json" \
+                    -d '{}' "$WAHA_URL/api/sessions/default/start" 2>/dev/null || true
+                ;;
+            *)
+                echo "📱 No session found, creating... ($attempt/12)"
+                curl -sf -X POST -H "X-Api-Key: $WAHA_KEY" -H "Content-Type: application/json" \
+                    -d '{"name":"default"}' "$WAHA_URL/api/sessions/start" 2>/dev/null || true
+                ;;
+        esac
+        sleep 5
+    done
+) &
+
 exec php-fpm

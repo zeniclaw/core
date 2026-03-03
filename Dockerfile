@@ -23,14 +23,13 @@ COPY . .
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
-# Install Node.js and build front-end assets
+# Install Node.js, build front-end assets, install Claude Code CLI
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && npm ci \
     && npm run build \
     && rm -rf node_modules \
-    && apt-get purge -y nodejs \
-    && apt-get autoremove -y \
+    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy configs

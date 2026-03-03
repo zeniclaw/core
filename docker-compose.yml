@@ -79,8 +79,10 @@ services:
       - WAHA_LOG_LEVEL=error
       - WAHA_API_KEY=zeniclaw-waha-2026
       - WHATSAPP_RESTART_ALL_SESSIONS=True
-      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
       - WAHA_WORKER_RESTART_DELAY_SECONDS=5
+      - WHATSAPP_HOOK_URL=http://app:80/webhook/whatsapp/1
+      - WHATSAPP_HOOK_EVENTS=message
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/server/status"]
       interval: 30s
