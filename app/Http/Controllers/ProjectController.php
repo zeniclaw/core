@@ -197,37 +197,89 @@ class ProjectController extends Controller
 
     public function apiGroups()
     {
-        $sessions = AgentSession::where('channel', 'whatsapp')
-            ->where('peer_id', 'LIKE', '%@g.us')
-            ->orderByDesc('last_message_at')
-            ->get();
+        try {
+            $response = Http::timeout(10)
+                ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                ->get('http://waha:3000/api/default/groups');
 
-        // Build pushName lookup from logs
-        $pushNames = [];
-        $logs = \App\Models\AgentLog::where('message', 'WhatsApp message received')
-            ->orderByDesc('id')->limit(500)->get(['context']);
-        foreach ($logs as $log) {
-            $payload = $log->context['payload'] ?? [];
-            $from = $payload['from'] ?? null;
-            $pushName = $payload['_data']['pushName'] ?? null;
-            if ($from && $pushName && !isset($pushNames[$from])) {
-                $pushNames[$from] = $pushName;
+            if (!$response->successful()) {
+                return response()->json([]);
             }
+
+            $wahaGroups = $response->json();
+            $groups = collect($wahaGroups)->map(function ($group) {
+                return [
+                    'peer_id' => $group['id'],
+                    'name' => $group['subject'] ?? $group['id'],
+                    'size' => $group['size'] ?? 0,
+                ];
+            })->sortBy('name')->values();
+
+            return response()->json($groups);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch WhatsApp groups: ' . $e->getMessage());
+            return response()->json([]);
+        }
+    }
+
+    public function apiGroupMembers(Request $request)
+    {
+        $groupId = $request->query('group_id');
+        if (!$groupId) {
+            return response()->json([]);
         }
 
-        $groups = $sessions->map(function ($session) use ($pushNames) {
-            $peerId = $session->peer_id;
-            $name = $pushNames[$peerId] ?? $session->displayName();
+        try {
+            $response = Http::timeout(10)
+                ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                ->get('http://waha:3000/api/default/groups');
 
-            return [
-                'peer_id' => $peerId,
-                'name' => $name,
-                'message_count' => $session->message_count,
-                'last_message_at' => $session->last_message_at?->toIso8601String(),
-            ];
-        });
+            if (!$response->successful()) {
+                return response()->json([]);
+            }
 
-        return response()->json($groups->values());
+            $wahaGroups = $response->json();
+            $group = $wahaGroups[$groupId] ?? null;
+            if (!$group) {
+                return response()->json([]);
+            }
+
+            $participants = collect($group['participants'] ?? [])->map(function ($p) {
+                $phone = $p['phoneNumber'] ?? null;
+                // Convert 32471579551@s.whatsapp.net → 32471579551@c.us
+                if ($phone) {
+                    $phone = str_replace('@s.whatsapp.net', '@c.us', $phone);
+                }
+                return [
+                    'peer_id' => $phone,
+                    'name' => $phone ? str_replace('@c.us', '', $phone) : ($p['id'] ?? '?'),
+                    'admin' => $p['admin'] ?? null,
+                ];
+            })->filter(fn($p) => $p['peer_id'] !== null)->values();
+
+            // Enrich with known names from contacts/projects
+            $participants = $participants->map(function ($p) {
+                $name = \App\Models\Project::where('requester_phone', $p['peer_id'])->value('requester_name');
+                if (!$name) {
+                    // Check pushNames from logs
+                    $log = \App\Models\AgentLog::where('message', 'WhatsApp message received')
+                        ->where('context->payload->from', $p['peer_id'])
+                        ->orderByDesc('id')->first(['context']);
+                    if ($log) {
+                        $name = $log->context['payload']['_data']['pushName'] ?? null;
+                    }
+                }
+                if ($name) {
+                    $p['name'] = $name;
+                }
+                return $p;
+            });
+
+            return response()->json($participants);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch group members: ' . $e->getMessage());
+            return response()->json([]);
+        }
     }
 
     public function approve(Request $request, Project $project)

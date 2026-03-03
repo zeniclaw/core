@@ -108,13 +108,18 @@
             {{-- Notify WhatsApp groups --}}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Groupes WhatsApp a notifier (optionnel)</label>
-                <p class="text-xs text-gray-400 mb-2">Les groupes selectionnes recevront une notification quand le projet est configure.</p>
+                <p class="text-xs text-gray-400 mb-2">Les groupes selectionnes recevront une notification quand le projet est configure. Vous pouvez aussi importer les membres d'un groupe comme contacts autorises.</p>
 
                 <div class="relative" @click.away="showGroups = false">
                     <input type="text" x-model="groupSearch" @input="filterGroups()"
                            @focus="loadGroups(); showGroups = true"
                            placeholder="Rechercher un groupe..."
                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+
+                    {{-- Loading --}}
+                    <div x-show="loadingGroups" class="absolute right-3 top-1/2 -translate-y-1/2">
+                        <svg class="animate-spin h-4 w-4 text-gray-400" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                    </div>
 
                     {{-- Dropdown --}}
                     <div x-show="showGroups && filteredGroups.length > 0" x-transition
@@ -124,7 +129,7 @@
                                     class="w-full text-left px-3 py-2 hover:bg-purple-50 text-sm border-b border-gray-50 last:border-0 flex items-center justify-between">
                                 <div>
                                     <span class="font-medium text-gray-900" x-text="group.name"></span>
-                                    <span class="block text-xs text-gray-500" x-text="group.peer_id"></span>
+                                    <span class="block text-xs text-gray-500" x-text="group.size + ' membres'"></span>
                                 </div>
                                 <span x-show="isGroupSelected(group.peer_id)" class="text-purple-600 text-xs font-bold">&#10003;</span>
                             </button>
@@ -133,13 +138,20 @@
                 </div>
 
                 {{-- Selected groups --}}
-                <div x-show="selectedGroups.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+                <div x-show="selectedGroups.length > 0" class="mt-2 space-y-1.5">
                     <template x-for="(group, i) in selectedGroups" :key="group.peer_id">
-                        <span class="inline-flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium">
-                            <span x-text="group.name"></span>
-                            <button type="button" @click="removeGroup(i)" class="ml-0.5 text-purple-400 hover:text-purple-600">&times;</button>
-                            <input type="hidden" name="notify_groups[]" :value="group.peer_id">
-                        </span>
+                        <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs font-medium">
+                                <span x-text="group.name"></span>
+                                <button type="button" @click="removeGroup(i)" class="ml-0.5 text-purple-400 hover:text-purple-600">&times;</button>
+                                <input type="hidden" name="notify_groups[]" :value="group.peer_id">
+                            </span>
+                            <button type="button" @click="importGroupMembers(group.peer_id)"
+                                    class="text-xs text-purple-600 hover:text-purple-800 underline">
+                                Importer les membres
+                            </button>
+                            <span x-show="importingGroup === group.peer_id" class="text-xs text-gray-400">Chargement...</span>
+                        </div>
                     </template>
                 </div>
             </div>
@@ -184,6 +196,8 @@ function projectForm() {
         selectedGroups: [],
         showGroups: false,
         groupsLoaded: false,
+        loadingGroups: false,
+        importingGroup: null,
 
         async searchRepos() {
             if (this.repoSearch.length < 1) { this.repos = []; this.showRepos = false; return; }
@@ -245,12 +259,14 @@ function projectForm() {
 
         async loadGroups() {
             if (this.groupsLoaded) return;
+            this.loadingGroups = true;
             try {
                 const r = await fetch('{{ route('api.groups') }}');
                 this.allGroups = await r.json();
                 this.filteredGroups = this.allGroups;
                 this.groupsLoaded = true;
             } catch(e) {}
+            this.loadingGroups = false;
         },
 
         filterGroups() {
@@ -273,6 +289,27 @@ function projectForm() {
 
         isGroupSelected(peerId) {
             return this.selectedGroups.some(g => g.peer_id === peerId);
+        },
+
+        async importGroupMembers(groupId) {
+            this.importingGroup = groupId;
+            try {
+                const r = await fetch(`{{ route('api.group-members') }}?group_id=${encodeURIComponent(groupId)}`);
+                const members = await r.json();
+                let added = 0;
+                members.forEach(m => {
+                    if (m.peer_id && !this.isContactSelected(m.peer_id)) {
+                        this.selectedContacts.push({ peer_id: m.peer_id, name: m.name });
+                        added++;
+                    }
+                });
+                if (added === 0) {
+                    alert('Tous les membres sont deja dans la liste.');
+                }
+            } catch(e) {
+                alert('Erreur lors du chargement des membres.');
+            }
+            this.importingGroup = null;
         },
 
         submitForm(e) {

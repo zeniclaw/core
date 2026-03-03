@@ -59,6 +59,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/api/gitlab-projects', [ProjectController::class, 'apiGitlabProjects'])->name('api.gitlab-projects');
     Route::get('/api/contacts', [ProjectController::class, 'apiContacts'])->name('api.contacts');
     Route::get('/api/groups', [ProjectController::class, 'apiGroups'])->name('api.groups');
+    Route::get('/api/group-members', [ProjectController::class, 'apiGroupMembers'])->name('api.group-members');
 
     // SubAgents
     Route::get('/subagents', [SubAgentController::class, 'index'])->name('subagents.index');
