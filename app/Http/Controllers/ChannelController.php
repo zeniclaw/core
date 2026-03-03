@@ -260,6 +260,65 @@ class ChannelController extends Controller
         }
     }
 
+    /**
+     * Build project context for the system prompt so Claude knows
+     * which projects are configured for this user.
+     */
+    private function buildProjectContext(string $phone): ?string
+    {
+        // Projects owned by this phone
+        $ownedProjects = Project::where('requester_phone', $phone)
+            ->whereIn('status', ['approved', 'in_progress', 'completed'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        // Projects where this phone is in allowed_phones
+        $allowedProjects = Project::whereNotNull('allowed_phones')
+            ->whereIn('status', ['approved', 'in_progress', 'completed'])
+            ->where('requester_phone', '!=', $phone)
+            ->get()
+            ->filter(fn($p) => is_array($p->allowed_phones) && in_array($phone, $p->allowed_phones));
+
+        $allProjects = $ownedProjects->merge($allowedProjects)->unique('id');
+
+        if ($allProjects->isEmpty()) {
+            return "PROJETS: Aucun projet n'est configure pour cet utilisateur. "
+                . "S'il demande de modifier du code ou un projet, dis-lui d'envoyer l'URL GitLab du repo.";
+        }
+
+        $lines = ["PROJETS CONFIGURES POUR CET UTILISATEUR (donnees reelles de la base de donnees):"];
+        foreach ($allProjects as $project) {
+            $status = match ($project->status) {
+                'approved' => 'pret',
+                'in_progress' => 'en cours',
+                'completed' => 'termine',
+                default => $project->status,
+            };
+
+            $lastTask = $project->subAgents()
+                ->orderByDesc('created_at')
+                ->first();
+
+            $line = "- {$project->name} (GitLab: {$project->gitlab_url}, statut: {$status})";
+            if ($lastTask) {
+                $taskStatus = match ($lastTask->status) {
+                    'queued' => 'en attente',
+                    'running' => 'en cours',
+                    'completed' => 'termine',
+                    'failed' => 'echoue',
+                    'killed' => 'arrete',
+                    default => $lastTask->status,
+                };
+                $line .= " — derniere tache: \"{$lastTask->task_description}\" ({$taskStatus})";
+            }
+            $lines[] = $line;
+        }
+
+        $lines[] = "Quand l'utilisateur pose une question sur ses projets, utilise UNIQUEMENT ces informations reelles.";
+
+        return implode("\n", $lines);
+    }
+
     private const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
     /**
@@ -477,7 +536,10 @@ class ChannelController extends Controller
             $memory = new ConversationMemoryService();
             $memoryContext = $memory->formatForPrompt($agent->id, $from);
 
-            // Build system prompt with memory
+            // Build project context for this user
+            $projectContext = $this->buildProjectContext($from);
+
+            // Build system prompt with memory + project context
             $systemPrompt =
                 "Tu es ZeniClaw, un assistant WhatsApp cool et sympa. " .
                 "Tu parles comme un ami ou un collègue décontracté. " .
@@ -486,6 +548,10 @@ class ChannelController extends Controller
                 "Tu peux utiliser des emojis avec modération. " .
                 "Réponds de manière concise (2-3 phrases max sauf si on te demande plus). " .
                 "Le message vient de {$senderName}.";
+
+            if ($projectContext) {
+                $systemPrompt .= "\n\n" . $projectContext;
+            }
 
             if ($memoryContext) {
                 $systemPrompt .= "\n\n" . $memoryContext;
