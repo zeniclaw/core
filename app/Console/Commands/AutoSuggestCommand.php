@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\RunSelfImprovementJob;
+use App\Jobs\RunSubAgentJob;
 use App\Models\Agent;
 use App\Models\AppSetting;
 use App\Models\Project;
@@ -106,8 +106,8 @@ class AutoSuggestCommand extends Command
             'sub_agent_id' => $subAgent->id,
         ]);
 
-        // 8. Dispatch the job
-        RunSelfImprovementJob::dispatch($improvement, $subAgent);
+        // 8. Dispatch via the standard SubAgent pipeline (clone, branch, code, commit, push)
+        RunSubAgentJob::dispatch($subAgent);
 
         // 9. Update cache history
         $history[] = $idea['title'];
