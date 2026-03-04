@@ -16,32 +16,31 @@ class ZeniclawUpdate extends Command
 
     public function handle(): int
     {
-        // Step 1: Configure git credentials from GitLab token
+        // Step 1: Git pull using token-authenticated URL
         $token = AppSetting::get('gitlab_access_token');
-        if ($token) {
-            $this->configureGitCredentials($token);
-        }
+        $pullCmd = $token
+            ? ['git', '-c', "url.https://oauth2:{$token}@gitlab.com/.insteadOf=https://gitlab.com/", 'pull', 'origin', 'main']
+            : ['git', 'pull', 'origin', 'main'];
 
-        // Step 2: Git pull on the mounted host repo
-        if (!$this->runStep(['git', 'pull', 'origin', 'main'], 'git pull origin main', $this->repoPath)) {
+        if (!$this->runStep($pullCmd, 'git pull origin main', $this->repoPath)) {
             return self::FAILURE;
         }
 
-        // Step 3: Read new version from Dockerfile
+        // Step 2: Read new version from Dockerfile
         $dockerfile = file_get_contents($this->repoPath . '/Dockerfile');
         preg_match('/echo "([^"]+)" > storage\/app\/version\.txt/', $dockerfile, $m);
         $newVersion = $m[1] ?? 'unknown';
         $this->info("▶ New version: v{$newVersion}");
 
-        // Step 4: Run migrations
+        // Step 3: Run migrations
         $this->info('▶ Running migrations...');
         \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true, '--no-interaction' => true]);
         $this->info('✓ Migrations done');
 
-        // Step 5: Update version file
+        // Step 4: Update version file
         file_put_contents(storage_path('app/version.txt'), $newVersion);
 
-        // Step 6: Log the update
+        // Step 5: Log the update
         try {
             $firstAgent = \App\Models\Agent::first();
             if ($firstAgent) {
@@ -56,29 +55,19 @@ class ZeniclawUpdate extends Command
             // non-fatal
         }
 
-        // Step 7: Docker rebuild + restart (nohup survives container death)
+        // Step 6: Docker rebuild + restart (nohup survives container death)
         $this->info('▶ Rebuilding Docker image...');
-        $this->info('  ⚠ The container will restart — this is expected.');
+        $this->info('  ⚠ Le container va redémarrer — c\'est normal.');
 
-        $script = "cd {$this->repoPath} && docker-compose build app && docker-compose up -d app";
-        $process = Process::fromShellCommandline("nohup bash -c '{$script}' > {$this->repoPath}/storage/app/update-rebuild.log 2>&1 &");
+        $script = "cd {$this->repoPath} && docker-compose build app 2>&1 && docker-compose up -d app 2>&1";
+        $logFile = "{$this->repoPath}/storage/app/update-rebuild.log";
+        $process = Process::fromShellCommandline("nohup bash -c '{$script}' > {$logFile} 2>&1 &");
         $process->setTimeout(0);
         $process->run();
 
-        $this->info("✅ Update v{$newVersion} — rebuild launched, container will restart shortly.");
+        $this->info("✅ Update v{$newVersion} — rebuild lancé, le container va redémarrer.");
 
         return self::SUCCESS;
-    }
-
-    private function configureGitCredentials(string $token): void
-    {
-        // Write credentials file so git pull can authenticate
-        $credFile = '/tmp/.git-credentials';
-        file_put_contents($credFile, "https://oauth2:{$token}@gitlab.com\n");
-        chmod($credFile, 0600);
-
-        // Configure git to use it
-        (new Process(['git', 'config', '--global', 'credential.helper', "store --file={$credFile}"]))->run();
     }
 
     private function runStep(array $cmd, string $label, string $cwd = null): bool
