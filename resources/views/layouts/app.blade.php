@@ -43,6 +43,7 @@
                     ['route'=>'contacts.index',       'icon'=>'👥', 'label'=>'Contacts',       'match'=>'contacts*'],
                     ['route'=>'projects.index',       'icon'=>'📁', 'label'=>'Projets',        'match'=>'projects*'],
                     ['route'=>'subagents.index',      'icon'=>'🚀', 'label'=>'SubAgents',      'match'=>'subagents*'],
+                    ['route'=>'improvements.index',   'icon'=>'🧠', 'label'=>'Ameliorations',  'match'=>'improvements*'],
                     ['route'=>'reminders.index',      'icon'=>'⏰', 'label'=>'Reminders',      'match'=>'reminders*'],
                     ['route'=>'logs.index',           'icon'=>'📋', 'label'=>'Logs',           'match'=>'logs*'],
                     ['route'=>'settings.index',       'icon'=>'⚙️', 'label'=>'Settings',       'match'=>'settings*'],

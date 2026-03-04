@@ -21,6 +21,7 @@ class AgentContext
         public readonly ?string $routedModel = null,
         public readonly ?string $complexity = null,
         public readonly ?string $reasoning = null,
+        public readonly ?string $autonomy = null,
     ) {}
 
     public function phone(): string
@@ -33,7 +34,7 @@ class AgentContext
         return str_ends_with($this->from, '@g.us');
     }
 
-    public function withRouting(string $agent, string $model, string $complexity, string $reasoning): self
+    public function withRouting(string $agent, string $model, string $complexity, string $reasoning, string $autonomy = 'confirm'): self
     {
         return new self(
             agent: $this->agent,
@@ -49,6 +50,7 @@ class AgentContext
             routedModel: $model,
             complexity: $complexity,
             reasoning: $reasoning,
+            autonomy: $autonomy,
         );
     }
 }

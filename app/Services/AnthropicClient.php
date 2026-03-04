@@ -61,6 +61,12 @@ class AnthropicClient
             return $data[0]['text'] ?? null;
         }
 
+        Log::error('AnthropicClient::chat failed', [
+            'status' => $response->status(),
+            'body' => substr($response->body(), 0, 500),
+            'model' => $model,
+        ]);
+
         return null;
     }
 

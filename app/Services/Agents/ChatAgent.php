@@ -47,8 +47,16 @@ class ChatAgent extends BaseAgent
 
         $reply = $this->claude->chat($claudeMessage, $model, $systemPrompt);
 
+        // Fallback to Haiku if the requested model fails
+        if (!$reply && $model !== 'claude-haiku-4-5-20251001') {
+            $reply = $this->claude->chat($claudeMessage, 'claude-haiku-4-5-20251001', $systemPrompt);
+            $model = 'claude-haiku-4-5-20251001 (fallback)';
+        }
+
         if (!$reply) {
-            return AgentResult::reply('Désolé, je n\'ai pas pu générer de réponse. Réessaie !');
+            $fallback = 'Désolé, je n\'ai pas pu générer de réponse. Réessaie !';
+            $this->sendText($context->from, $fallback);
+            return AgentResult::reply($fallback);
         }
 
         $this->sendText($context->from, $reply);

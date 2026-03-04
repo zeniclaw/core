@@ -13,6 +13,7 @@ use App\Services\Agents\ProjectAgent;
 use App\Services\Agents\ReminderAgent;
 use App\Services\Agents\RouterAgent;
 use App\Services\Agents\TodoAgent;
+use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
 class AgentOrchestrator
@@ -67,6 +68,7 @@ class AgentOrchestrator
                     . "Agent: {$routing['agent']}\n"
                     . "Model: {$routing['model']}\n"
                     . "Complexity: {$routing['complexity']}\n"
+                    . "Autonomy: {$routing['autonomy']}\n"
                     . "Reasoning: {$routing['reasoning']}"
                 );
             }
@@ -88,7 +90,8 @@ class AgentOrchestrator
                 $routing['agent'],
                 $routing['model'],
                 $routing['complexity'],
-                $routing['reasoning']
+                $routing['reasoning'],
+                $routing['autonomy'] ?? 'confirm'
             );
 
             // 3. Dispatch to agent with handoff support
@@ -101,6 +104,17 @@ class AgentOrchestrator
             // 4. Save memory for reply actions
             if ($result->action === 'reply' && $result->reply) {
                 $this->saveMemory($context, $result->reply);
+
+                // 5. Dispatch self-improvement analysis in background
+                if ($context->body) {
+                    AnalyzeSelfImprovementJob::dispatch(
+                        $context->agent->id,
+                        $context->from,
+                        $context->body,
+                        $result->reply,
+                        $routing['agent']
+                    )->onQueue('low');
+                }
             }
 
             return $result;

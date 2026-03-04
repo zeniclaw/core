@@ -22,16 +22,29 @@ class TodoAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        // Get all user's list names for context
+        $allListNames = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotNull('list_name')
+            ->distinct()
+            ->pluck('list_name')
+            ->toArray();
+
+        $listsContext = !empty($allListNames)
+            ? "Listes existantes: " . implode(', ', $allListNames)
+            : "Aucune liste nommée (uniquement la liste par défaut)";
+
+        // Load all todos for context
         $todos = Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
-            ->orderByRaw("FIELD(priority, 'high', 'normal', 'low')")
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
             ->orderBy('id')
             ->get();
 
         $listText = $this->formatList($todos);
 
         $response = $this->claude->chat(
-            "Message: \"{$context->body}\"\n\nListe actuelle des todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)'),
+            "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)'),
             'claude-haiku-4-5-20251001',
             $this->buildPrompt()
         );
@@ -50,6 +63,7 @@ class TodoAgent extends BaseAgent
         $category = $parsed['category'] ?? null;
         $priority = $parsed['priority'] ?? 'normal';
         $dueAt = $parsed['due_at'] ?? null;
+        $listName = $parsed['list_name'] ?? null;
 
         switch ($action) {
             case 'add':
@@ -58,6 +72,7 @@ class TodoAgent extends BaseAgent
                         'agent_id' => $context->agent->id,
                         'requester_phone' => $context->from,
                         'requester_name' => $context->senderName,
+                        'list_name' => $listName,
                         'title' => $title,
                         'category' => $category,
                         'priority' => in_array($priority, ['high', 'normal', 'low']) ? $priority : 'normal',
@@ -82,20 +97,52 @@ class TodoAgent extends BaseAgent
                 }
                 break;
 
+            case 'create_list':
+                // Creating a list just means we acknowledge it — todos will be added with this list_name
+                $reply = "📋 Liste *{$listName}* créée ! Ajoute des tâches avec : \"ajoute X dans {$listName}\"";
+                $this->sendText($context->from, $reply);
+                $this->log($context, "Todo action: create_list", ['list_name' => $listName]);
+                return AgentResult::reply($reply, ['action' => 'todo_create_list']);
+
+            case 'show_lists':
+                $reply = $this->buildAllListsOverview($context);
+                $this->sendText($context->from, $reply);
+                $this->log($context, "Todo action: show_lists", ['lists' => $allListNames]);
+                return AgentResult::reply($reply, ['action' => 'todo_show_lists']);
+
             case 'check':
-                $this->updateTodoStatus($todos, $items, true);
+                $filteredTodos = $this->filterByList($todos, $listName);
+                $this->updateTodoStatus($filteredTodos, $items, true);
                 break;
 
             case 'uncheck':
-                $this->updateTodoStatus($todos, $items, false);
+                $filteredTodos = $this->filterByList($todos, $listName);
+                $this->updateTodoStatus($filteredTodos, $items, false);
                 break;
 
             case 'delete':
-                $this->deleteTodos($todos, $items);
+                $filteredTodos = $this->filterByList($todos, $listName);
+                $this->deleteTodos($filteredTodos, $items);
                 break;
 
+            case 'delete_list':
+                $deleted = Todo::where('requester_phone', $context->from)
+                    ->where('agent_id', $context->agent->id)
+                    ->where('list_name', $listName)
+                    ->get();
+                foreach ($deleted as $todo) {
+                    if ($todo->reminder_id && $todo->reminder) {
+                        $todo->reminder->delete();
+                    }
+                    $todo->delete();
+                }
+                $reply = "🗑️ Liste *{$listName}* supprimée ({$deleted->count()} tâches).";
+                $this->sendText($context->from, $reply);
+                $this->log($context, "Todo action: delete_list", ['list_name' => $listName, 'count' => $deleted->count()]);
+                return AgentResult::reply($reply, ['action' => 'todo_delete_list']);
+
             case 'stats':
-                $reply = $this->buildStats($context);
+                $reply = $this->buildStats($context, $listName);
                 $this->sendText($context->from, $reply);
                 $this->log($context, "Todo action: stats", ['todo_count' => $todos->count()]);
                 return AgentResult::reply($reply, ['action' => 'todo_stats']);
@@ -104,23 +151,27 @@ class TodoAgent extends BaseAgent
                 break;
         }
 
-        // Reload and reply
-        $todos = Todo::where('requester_phone', $context->from)
+        // Reload and reply (scoped to list if specified)
+        $reloadQuery = Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
-            ->orderByRaw("FIELD(priority, 'high', 'normal', 'low')")
-            ->orderBy('id')
-            ->get();
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->orderBy('id');
 
-        $reply = $this->buildReply($todos);
+        // For add/check/uncheck/delete, show the relevant list
+        $todos = $reloadQuery->get();
+        $displayTodos = $this->filterByList($todos, $listName);
+
+        $reply = $this->buildReply($displayTodos, $listName);
         $this->sendText($context->from, $reply);
 
         $this->log($context, "Todo action: {$action}", [
             'items' => $items,
+            'list_name' => $listName,
             'recurrence' => $recurrence,
             'category' => $category,
             'priority' => $priority,
             'due_at' => $dueAt,
-            'todo_count' => $todos->count(),
+            'todo_count' => $displayTodos->count(),
         ]);
 
         return AgentResult::reply($reply, ['action' => "todo_{$action}"]);
@@ -130,18 +181,31 @@ class TodoAgent extends BaseAgent
     {
         return <<<'PROMPT'
 Tu es un assistant de gestion de liste de taches (todo list).
-L'utilisateur te donne un message et tu dois determiner l'action a effectuer.
+L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats", "items": [...], "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list", "items": [...], "list_name": "nom_liste" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
 
 ACTIONS:
-- "add": ajouter des taches. items = liste de titres (strings). Si l'utilisateur mentionne un horaire recurrent (chaque jour/semaine/mois), remplis "recurrence".
-- "check": cocher des taches. items = liste de numeros (integers, base 1).
-- "uncheck": decocher des taches. items = liste de numeros (integers, base 1).
-- "delete": supprimer des taches. items = liste de numeros (integers, base 1).
-- "list": afficher la liste. items = [] (vide).
-- "stats": afficher les statistiques. items = [] (vide). Declenchee par "mes stats", "statistiques", "mon historique", "bilan", etc.
+- "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
+- "check": cocher des taches. items = liste de numeros (integers, base 1). list_name = la liste concernee.
+- "uncheck": decocher des taches. items = liste de numeros (integers, base 1). list_name = la liste concernee.
+- "delete": supprimer des taches. items = liste de numeros (integers, base 1). list_name = la liste concernee.
+- "list": afficher une liste. items = []. list_name = nom de la liste (null = toutes les listes).
+- "stats": statistiques. items = []. list_name = nom de la liste (null = global).
+- "create_list": creer une nouvelle liste vide. items = []. list_name = nom de la nouvelle liste.
+- "show_lists": voir toutes les listes. items = []. list_name = null.
+- "delete_list": supprimer une liste entiere et tous ses todos. items = []. list_name = nom de la liste.
+
+GESTION DES LISTES:
+- "cree une liste poney" → create_list, list_name: "poney"
+- "ajoute pain dans poney" → add, items: ["Pain"], list_name: "poney"
+- "ma liste poney" → list, list_name: "poney"
+- "mes listes" → show_lists
+- "supprime la liste poney" → delete_list, list_name: "poney"
+- Si l'utilisateur mentionne une liste existante, utilise son nom exact.
+- Si l'utilisateur dit "dans X" ou "liste X", list_name = X (en minuscule).
+- Sans liste specifiee, list_name = null (liste par defaut).
 
 FORMAT RECURRENCE (uniquement pour "add"):
 - "daily:HH:MM" — chaque jour a HH:MM
@@ -150,9 +214,9 @@ FORMAT RECURRENCE (uniquement pour "add"):
 - null si pas de recurrence
 
 CATEGORY (uniquement pour "add"):
-- Extraire la categorie si l'utilisateur mentionne une liste/categorie : "ajoute pain dans courses" → category: "courses"
-- Mots-cles : "dans", "liste", "categorie", "dossier"
-- null si pas de categorie mentionnee
+- Extraire la categorie si l'utilisateur mentionne une categorie : "ajoute pain categorie alimentation" → category: "alimentation"
+- IMPORTANT: Ne pas confondre list_name et category. "ajoute pain dans courses" → list_name: "courses", category: null
+- null si pas de categorie mentionnee explicitement avec "categorie"
 
 PRIORITY (uniquement pour "add"):
 - "high" si l'utilisateur dit "urgent", "important", "prioritaire", "URGENT", "critique"
@@ -162,23 +226,30 @@ PRIORITY (uniquement pour "add"):
 DUE_AT (uniquement pour "add"):
 - Extraire la date/heure limite si mentionnee : "pour vendredi", "avant le 15 mars", "pour demain"
 - Format : "YYYY-MM-DD HH:MM" (utiliser 23:59 si pas d'heure precise)
-- Utiliser la date actuelle fournie dans le message pour calculer les dates relatives
 - null si pas de deadline
 
 EXEMPLES:
-- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ajoute pain dans courses" → {"action": "add", "items": ["Pain"], "recurrence": null, "category": "courses", "priority": "normal", "due_at": null}
-- "ajoute URGENT appeler le dentiste" → {"action": "add", "items": ["Appeler le dentiste"], "recurrence": null, "category": null, "priority": "high", "due_at": null}
-- "ajoute finir le rapport pour vendredi" → {"action": "add", "items": ["Finir le rapport"], "recurrence": null, "category": null, "priority": "normal", "due_at": "2026-03-06 23:59"}
-- "coche le 2" → {"action": "check", "items": [2], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "supprime le 1 et le 3" → {"action": "delete", "items": [1, 3], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ma liste" → {"action": "list", "items": [], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "mes stats" → {"action": "stats", "items": [], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ajoute sortir les poubelles chaque jeudi a 9h" → {"action": "add", "items": ["Sortir les poubelles"], "recurrence": "weekly:thursday:09:00", "category": null, "priority": "normal", "due_at": null}
-- "ajoute faire du sport tous les jours a 7h" → {"action": "add", "items": ["Faire du sport"], "recurrence": "daily:07:00", "category": null, "priority": "normal", "due_at": null}
+- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "list_name": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "cree moi une todo list poney" → {"action": "create_list", "items": [], "list_name": "poney", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ajoute carottes dans courses" → {"action": "add", "items": ["Carottes"], "list_name": "courses", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ma liste courses" → {"action": "list", "items": [], "list_name": "courses", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mes listes" → {"action": "show_lists", "items": [], "list_name": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "coche le 2 dans poney" → {"action": "check", "items": [2], "list_name": "poney", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "supprime la liste poney" → {"action": "delete_list", "items": [], "list_name": "poney", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ma liste" → {"action": "list", "items": [], "list_name": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mes stats" → {"action": "stats", "items": [], "list_name": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
+    }
+
+    private function filterByList($todos, ?string $listName)
+    {
+        if ($listName === null) {
+            return $todos;
+        }
+
+        return $todos->filter(fn ($t) => strtolower($t->list_name ?? '') === strtolower($listName))->values();
     }
 
     private function formatList($todos): string
@@ -191,11 +262,12 @@ PROMPT;
         foreach ($todos->values() as $i => $todo) {
             $num = $i + 1;
             $check = $todo->is_done ? 'x' : ' ';
+            $listHint = $todo->list_name ? " [liste:{$todo->list_name}]" : '';
             $recurrenceHint = $todo->reminder_id ? $this->formatRecurrenceHint($todo) : '';
-            $categoryHint = $todo->category ? " [{$todo->category}]" : '';
+            $categoryHint = $todo->category ? " [cat:{$todo->category}]" : '';
             $priorityHint = $todo->priority !== 'normal' ? " ({$todo->priority})" : '';
             $dueHint = $todo->due_at ? " (echeance: {$todo->due_at->format('Y-m-d')})" : '';
-            $lines[] = "#{$num} [{$check}] {$todo->title}{$categoryHint}{$priorityHint}{$dueHint}{$recurrenceHint}";
+            $lines[] = "#{$num} [{$check}] {$todo->title}{$listHint}{$categoryHint}{$priorityHint}{$dueHint}{$recurrenceHint}";
         }
 
         return implode("\n", $lines);
@@ -232,25 +304,69 @@ PROMPT;
         };
     }
 
-    private function buildReply($todos): string
+    private function buildReply($todos, ?string $listName = null): string
     {
         if ($todos->isEmpty()) {
+            if ($listName) {
+                return "📋 La liste *{$listName}* est vide !";
+            }
             return "📋 Ta liste de todos est vide !";
         }
+
+        $header = $listName
+            ? "📋 *Liste {$listName} :*"
+            : "📋 *Ta liste de todos :*";
 
         // Check if any todo has a category
         $hasCategories = $todos->whereNotNull('category')->isNotEmpty();
 
         if ($hasCategories) {
-            return $this->buildGroupedReply($todos);
+            return $this->buildGroupedReply($todos, $header);
         }
 
-        return $this->buildFlatReply($todos);
+        return $this->buildFlatReply($todos, $header);
     }
 
-    private function buildFlatReply($todos): string
+    private function buildAllListsOverview(AgentContext $context): string
     {
-        $lines = ["📋 *Ta liste de todos :*"];
+        $todos = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderBy('id')
+            ->get();
+
+        if ($todos->isEmpty()) {
+            return "📋 Tu n'as aucune liste de todos !";
+        }
+
+        $lines = ["📋 *Tes listes de todos :*", ''];
+
+        // Default list (no list_name)
+        $defaultTodos = $todos->whereNull('list_name');
+        if ($defaultTodos->isNotEmpty()) {
+            $done = $defaultTodos->where('is_done', true)->count();
+            $total = $defaultTodos->count();
+            $lines[] = "📌 *Liste par défaut* — {$done}/{$total} ✅";
+        }
+
+        // Named lists
+        $namedTodos = $todos->whereNotNull('list_name');
+        $grouped = $namedTodos->groupBy('list_name');
+
+        foreach ($grouped as $name => $listTodos) {
+            $done = $listTodos->where('is_done', true)->count();
+            $total = $listTodos->count();
+            $lines[] = "📝 *{$name}* — {$done}/{$total} ✅";
+        }
+
+        $lines[] = '';
+        $lines[] = "_Dis \"ma liste X\" pour voir une liste en détail._";
+
+        return implode("\n", $lines);
+    }
+
+    private function buildFlatReply($todos, string $header): string
+    {
+        $lines = [$header];
         foreach ($todos->values() as $i => $todo) {
             $num = $i + 1;
             $lines[] = "{$num}. " . $this->formatTodoLine($todo);
@@ -259,9 +375,9 @@ PROMPT;
         return implode("\n", $lines);
     }
 
-    private function buildGroupedReply($todos): string
+    private function buildGroupedReply($todos, string $header): string
     {
-        $lines = ["📋 *Ta liste de todos :*"];
+        $lines = [$header];
 
         // Group by category
         $grouped = $todos->groupBy(fn ($todo) => $todo->category ?? '__sans_categorie__');
@@ -371,11 +487,16 @@ PROMPT;
         return $map[strtolower($category)] ?? '📌';
     }
 
-    private function buildStats(AgentContext $context): string
+    private function buildStats(AgentContext $context, ?string $listName = null): string
     {
-        $allTodos = Todo::where('requester_phone', $context->from)
-            ->where('agent_id', $context->agent->id)
-            ->get();
+        $query = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id);
+
+        if ($listName) {
+            $query->where('list_name', $listName);
+        }
+
+        $allTodos = $query->get();
 
         $completed = $allTodos->where('is_done', true)->count();
         $pending = $allTodos->where('is_done', false)->count();
@@ -387,8 +508,9 @@ PROMPT;
 
         $rate = round(($completed / $total) * 100);
 
+        $title = $listName ? "Tes stats ({$listName}) :" : "Tes stats :";
         $lines = [
-            "📊 *Tes stats :*",
+            "📊 *{$title}*",
             "✅ {$completed} completee" . ($completed > 1 ? 's' : ''),
             "⬜ {$pending} en cours",
             "📈 Taux : {$rate}%",
@@ -414,6 +536,20 @@ PROMPT;
                 $catTotal = $catTodos->count();
                 $emoji = $this->getCategoryEmoji($cat);
                 $lines[] = "{$emoji} " . ucfirst($cat) . " : {$catDone}/{$catTotal}";
+            }
+        }
+
+        // List breakdown if no specific list and multiple lists exist
+        if (!$listName) {
+            $namedLists = $allTodos->whereNotNull('list_name')->groupBy('list_name');
+            if ($namedLists->isNotEmpty()) {
+                $lines[] = '';
+                $lines[] = '*Par liste :*';
+                foreach ($namedLists as $name => $listTodos) {
+                    $listDone = $listTodos->where('is_done', true)->count();
+                    $listTotal = $listTodos->count();
+                    $lines[] = "📝 {$name} : {$listDone}/{$listTotal}";
+                }
             }
         }
 

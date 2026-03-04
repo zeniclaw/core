@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Todo extends Model
 {
-    protected $fillable = ['agent_id', 'requester_phone', 'requester_name', 'title', 'category', 'priority', 'due_at', 'is_done', 'reminder_id'];
+    protected $fillable = ['agent_id', 'requester_phone', 'requester_name', 'list_name', 'title', 'category', 'priority', 'due_at', 'is_done', 'reminder_id'];
 
     protected $casts = [
         'is_done' => 'boolean',

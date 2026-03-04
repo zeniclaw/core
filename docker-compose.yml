@@ -27,6 +27,7 @@ services:
       QUEUE_CONNECTION: redis
     volumes:
       - app_storage:/var/www/html/storage
+      - /home/ubuntu/zeniclaw:/home/ubuntu/zeniclaw
     depends_on:
       db:
         condition: service_healthy

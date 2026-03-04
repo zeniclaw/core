@@ -81,48 +81,68 @@ class RunSubAgentJob implements ShouldQueue
             $this->subAgent->update(['branch_name' => $branchName]);
 
             // Step 3: Run ZeniClaw AI with context from previous tasks
-            $this->notifyRequester("[2/8] ZeniClaw AI analyse et applique les modifications...");
+            $isReadonly = (bool) $this->subAgent->is_readonly;
+
+            if ($isReadonly) {
+                $this->notifyRequester("Investigation en cours...");
+            } else {
+                $this->notifyRequester("[2/8] ZeniClaw AI analyse et applique les modifications...");
+            }
             $this->runClaudeCode();
 
-            // Step 3.5: Verify the work and retry if needed
-            $this->notifyRequester("[3/8] Verification du code...");
-            $this->verifyAndRetryIfNeeded();
+            if ($isReadonly) {
+                // Readonly task: report findings, skip commit/push/MR/deploy
+                $this->subAgent->update([
+                    'status' => 'completed',
+                    'completed_at' => now(),
+                ]);
+                $this->subAgent->project->update(['status' => 'completed']);
+                $this->subAgent->appendLog("[DONE] Investigation terminee (readonly)");
 
-            // Step 4: Commit and push
-            $this->notifyRequester("[4/8] Push du code...");
-            $commitHash = $this->commitAndPush($branchName);
-            $this->subAgent->update(['commit_hash' => $commitHash]);
+                // Extract Claude's findings from the log to send to user
+                $findings = $this->extractReadonlyFindings();
+                $this->notifyRequester($findings ?: "Investigation terminee. Consulte les logs pour les details.");
+            } else {
+                // Step 3.5: Verify the work and retry if needed
+                $this->notifyRequester("[3/8] Verification du code...");
+                $this->verifyAndRetryIfNeeded();
 
-            // Step 4.5: Send diff preview to user
-            $this->sendDiffPreview();
+                // Step 4: Commit and push
+                $this->notifyRequester("[4/8] Push du code...");
+                $commitHash = $this->commitAndPush($branchName);
+                $this->subAgent->update(['commit_hash' => $commitHash]);
 
-            // Step 4.6: Security analysis
-            $this->notifyRequester("[5/8] Analyse de securite...");
-            $this->runSecurityAnalysis();
+                // Step 4.5: Send diff preview to user
+                $this->sendDiffPreview();
 
-            // Step 5: Create Merge Request (only if none exists for this branch)
-            $this->notifyRequester("[6/8] Creation et merge de la MR...");
-            $mrUrl = $this->findOrCreateMergeRequest($branchName);
+                // Step 4.6: Security analysis
+                $this->notifyRequester("[5/8] Analyse de securite...");
+                $this->runSecurityAnalysis();
 
-            // Step 7: Verify deployment on Laravel Cloud
-            $this->notifyRequester("[7/8] Verification du deploiement...");
-            $deployStatus = $this->checkLaravelCloudDeployment();
+                // Step 5: Create Merge Request (only if none exists for this branch)
+                $this->notifyRequester("[6/8] Creation et merge de la MR...");
+                $mrUrl = $this->findOrCreateMergeRequest($branchName);
 
-            $this->subAgent->update([
-                'status' => 'completed',
-                'completed_at' => now(),
-            ]);
-            $this->subAgent->project->update(['status' => 'completed']);
-            $this->subAgent->appendLog("[DONE] Termine. Branche: {$branchName}, Commit: {$commitHash}");
+                // Step 7: Verify deployment on Laravel Cloud
+                $this->notifyRequester("[7/8] Verification du deploiement...");
+                $deployStatus = $this->checkLaravelCloudDeployment();
 
-            $message = "C'est fait !\nCommit: {$commitHash}";
-            if ($mrUrl) {
-                $message .= "\nMerge Request: {$mrUrl}";
+                $this->subAgent->update([
+                    'status' => 'completed',
+                    'completed_at' => now(),
+                ]);
+                $this->subAgent->project->update(['status' => 'completed']);
+                $this->subAgent->appendLog("[DONE] Termine. Branche: {$branchName}, Commit: {$commitHash}");
+
+                $message = "C'est fait !\nCommit: {$commitHash}";
+                if ($mrUrl) {
+                    $message .= "\nMerge Request: {$mrUrl}";
+                }
+                if ($deployStatus) {
+                    $message .= "\nDeploy: {$deployStatus}";
+                }
+                $this->notifyRequester($message);
             }
-            if ($deployStatus) {
-                $message .= "\nDeploy: {$deployStatus}";
-            }
-            $this->notifyRequester($message);
 
         } catch (\Throwable $e) {
             Log::error("SubAgent #{$this->subAgent->id} failed: " . $e->getMessage());
@@ -556,6 +576,8 @@ class RunSubAgentJob implements ShouldQueue
             ->pluck('task_description')
             ->toArray();
 
+        $isReadonly = (bool) $this->subAgent->is_readonly;
+
         $prompt = "Tu travailles dans un repository git.";
         if ($previousTasks) {
             $prompt .= "\n\nModifications deja effectuees precedemment sur ce projet:\n";
@@ -564,7 +586,13 @@ class RunSubAgentJob implements ShouldQueue
             }
             $prompt .= "\nCes modifs sont deja dans le code. Ne les refais pas.";
         }
-        $prompt .= "\n\nNouvelle tache a realiser maintenant:\n{$task}\n\nApplique les modifications necessaires directement sur les fichiers du projet.";
+
+        if ($isReadonly) {
+            $prompt .= "\n\nIMPORTANT: C'est une tache de diagnostic/lecture UNIQUEMENT. Tu ne dois modifier AUCUN fichier. Investigate, analyse, et rapporte tes trouvailles de maniere claire et concise.";
+            $prompt .= "\n\nTache a investiguer:\n{$task}";
+        } else {
+            $prompt .= "\n\nNouvelle tache a realiser maintenant:\n{$task}\n\nApplique les modifications necessaires directement sur les fichiers du projet.";
+        }
 
         $models = ['opus', 'sonnet'];
 
@@ -750,6 +778,32 @@ class RunSubAgentJob implements ShouldQueue
                 }
                 break;
         }
+    }
+
+    private function extractReadonlyFindings(): string
+    {
+        $log = $this->subAgent->output_log ?? '';
+        $findings = [];
+
+        // Extract [RESULT] lines (final Claude output)
+        foreach (explode("\n", $log) as $line) {
+            if (str_starts_with($line, '[RESULT] ')) {
+                $findings[] = substr($line, 9);
+            }
+        }
+
+        if ($findings) {
+            return implode("\n", $findings);
+        }
+
+        // Fallback: extract [CLAUDE] text blocks
+        foreach (explode("\n", $log) as $line) {
+            if (str_starts_with($line, '[CLAUDE] ')) {
+                $findings[] = substr($line, 9);
+            }
+        }
+
+        return $findings ? implode("\n", $findings) : '';
     }
 
     private function commitAndPush(string $branchName): string
@@ -998,8 +1052,35 @@ class RunSubAgentJob implements ShouldQueue
         }
 
         if (($now - $this->lastProgressNotification) >= 60 && $this->lastToolUsed) {
-            $this->notifyRequester("⏳ En cours : {$this->lastToolUsed}...");
+            $friendly = $this->humanizeProgress($this->lastToolUsed);
+            $this->notifyRequester("⏳ {$friendly}");
             $this->lastProgressNotification = $now;
+        }
+    }
+
+    /**
+     * Convert technical tool description into a friendly, casual progress message.
+     */
+    private function humanizeProgress(string $technicalDesc): string
+    {
+        try {
+            $claude = new AnthropicClient();
+            $result = $claude->chat(
+                "Description technique: {$technicalDesc}",
+                'claude-haiku-4-5-20251001',
+                "Transforme cette description technique en un message de progression court et cool pour l'utilisateur. "
+                . "Maximum 10 mots. Pas de details techniques (pas de chemins de fichiers, pas de commandes). "
+                . "Sois naturel et decontracte. Exemples:\n"
+                . "- 'Lecture: /var/www/html/routes/web.php' → 'Je regarde le code des routes...'\n"
+                . "- 'Edition: /var/www/html/app/Http/Controllers/TodoController.php' → 'Je modifie le contrôleur des todos...'\n"
+                . "- 'Commande: grep -n project-todos routes/web.php' → 'Je cherche les routes du projet...'\n"
+                . "- 'Recherche fichiers: **/*.blade.php' → 'Je cherche les fichiers de vue...'\n"
+                . "- 'Outil: TodoWrite' → 'Je note les prochaines étapes...'\n"
+                . "Reponds UNIQUEMENT avec le message, rien d'autre."
+            );
+            return $result ?: 'Je bosse dessus...';
+        } catch (\Throwable $e) {
+            return 'Je bosse dessus...';
         }
     }
 

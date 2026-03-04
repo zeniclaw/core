@@ -20,11 +20,13 @@ class SubAgent extends Model
         'api_calls_count',
         'timeout_minutes',
         'pid',
+        'is_readonly',
         'started_at',
         'completed_at',
     ];
 
     protected $casts = [
+        'is_readonly' => 'boolean',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
     ];

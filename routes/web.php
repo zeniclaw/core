@@ -15,6 +15,7 @@ use App\Http\Controllers\LogController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\SelfImprovementController;
 use App\Http\Controllers\SubAgentController;
 use Illuminate\Support\Facades\Route;
 
@@ -74,6 +75,13 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/subagents/{subAgent}/kill', [SubAgentController::class, 'kill'])->name('subagents.kill');
     Route::post('/subagents/{subAgent}/retry', [SubAgentController::class, 'retry'])->name('subagents.retry');
     Route::post('/subagents/{subAgent}/relaunch', [SubAgentController::class, 'relaunch'])->name('subagents.relaunch');
+
+    // Improvements (auto-amelioration)
+    Route::get('/improvements', [SelfImprovementController::class, 'index'])->name('improvements.index');
+    Route::get('/improvements/{improvement}', [SelfImprovementController::class, 'show'])->name('improvements.show');
+    Route::post('/improvements/{improvement}/approve', [SelfImprovementController::class, 'approve'])->name('improvements.approve');
+    Route::post('/improvements/{improvement}/reject', [SelfImprovementController::class, 'reject'])->name('improvements.reject');
+    Route::put('/improvements/{improvement}', [SelfImprovementController::class, 'update'])->name('improvements.update');
 
     // Logs
     Route::get('/logs', [LogController::class, 'index'])->name('logs.index');

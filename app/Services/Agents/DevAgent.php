@@ -114,6 +114,11 @@ class DevAgent extends BaseAgent
             return $this->createPendingProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
         }
 
+        // Autonomy: auto-execute safe read/diagnostic tasks without confirmation
+        if ($context->autonomy === 'auto') {
+            return $this->createAndLaunchAutoProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
+        }
+
         return $this->createAwaitingValidationProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
     }
 
@@ -138,6 +143,41 @@ class DevAgent extends BaseAgent
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'SubAgent launched', ['project_id' => $project->id, 'sub_agent_id' => $subAgent->id]);
+
+        return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id, 'reply' => $reply]);
+    }
+
+    private function createAndLaunchAutoProject(AgentContext $context, string $repoName, string $gitlabUrl, string $description, ?array $gitlabData): AgentResult
+    {
+        $project = Project::create([
+            'name' => $repoName,
+            'gitlab_url' => $gitlabUrl,
+            'request_description' => $description,
+            'requester_phone' => $context->from,
+            'requester_name' => $context->senderName,
+            'agent_id' => $context->agent->id,
+            'status' => 'approved',
+            'approved_at' => now(),
+        ]);
+
+        $defaultTimeout = (int) (AppSetting::get('subagent_default_timeout') ?: 10);
+        $subAgent = SubAgent::create([
+            'project_id' => $project->id,
+            'status' => 'queued',
+            'task_description' => $description,
+            'timeout_minutes' => $defaultTimeout,
+            'is_readonly' => true,
+        ]);
+
+        RunSubAgentJob::dispatch($subAgent);
+
+        $reply = "[{$repoName}] Je regarde ca...";
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Auto-launched readonly SubAgent (autonomy=auto)', [
+            'project_id' => $project->id,
+            'sub_agent_id' => $subAgent->id,
+        ]);
 
         return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id, 'reply' => $reply]);
     }

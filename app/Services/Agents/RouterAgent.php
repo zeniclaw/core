@@ -25,6 +25,7 @@ class RouterAgent
                 'agent' => 'dev',
                 'model' => 'claude-haiku-4-5-20251001',
                 'complexity' => 'simple',
+                'autonomy' => 'confirm',
                 'reasoning' => 'GitLab URL detected — fast-path to dev agent',
             ];
         }
@@ -52,7 +53,7 @@ class RouterAgent
 Tu es un routeur intelligent. Tu classes des messages WhatsApp et choisis le bon agent et modele Claude.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"agent": "...", "model": "...", "complexity": "...", "reasoning": "..."}
+{"agent": "...", "model": "...", "complexity": "...", "autonomy": "auto|confirm", "reasoning": "..."}
 
 AGENTS DISPONIBLES:
 - "chat" = conversation, question, salutation, conseil, aide generale
@@ -85,6 +86,11 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - ANALYSIS = demande d'analyse profonde, document a reviewer, strategie, audit
 - TODO = gestion de checklist, todo list, ajouter/cocher/decocher une tache, "ma liste", "ma todo"
 - CHAT = tout le reste
+
+AUTONOMIE (champ obligatoire pour TOUS les agents):
+- "auto" = LECTURE/DIAGNOSTIC : consulter logs, verifier statut, inspecter code, lister, afficher, analyser, tester, reviewer, chercher, debug, expliquer, montrer, "regarde", "c'est quoi", "montre moi", "qu'est-ce que", "verifie", "check"
+- "confirm" = ECRITURE/MODIFICATION : modifier code, ajouter feature, fix bug, deployer, push, merge, supprimer, refactorer, creer
+- En cas de doute → "confirm"
 
 REGLE CRITIQUE — UTILISE LE CONTEXTE UTILISATEUR:
 Tu recevras le contexte de l'utilisateur (ses todos actifs, reminders en cours, projet actif, etc.).
@@ -134,10 +140,16 @@ PROMPT;
             $parsed['agent'] = 'chat';
         }
 
+        $autonomy = $parsed['autonomy'] ?? 'confirm';
+        if (!in_array($autonomy, ['auto', 'confirm'])) {
+            $autonomy = 'confirm';
+        }
+
         return [
             'agent' => $parsed['agent'],
             'model' => $parsed['model'] ?? $default['model'],
             'complexity' => $parsed['complexity'] ?? 'simple',
+            'autonomy' => $autonomy,
             'reasoning' => $parsed['reasoning'] ?? '',
         ];
     }

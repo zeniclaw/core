@@ -62,14 +62,32 @@ chmod -R 775 storage bootstrap/cache
 echo "✅ Starting nginx + php-fpm..."
 service nginx start
 
-# Clear stale jobs from previous container, then re-queue orphaned SubAgents
-echo "🧹 Cleaning up stale queue + orphaned SubAgents..."
-php artisan queue:clear redis --force 2>/dev/null || true
+# Re-queue orphaned SubAgents (don't clear queues — preserves pending improvement jobs)
+echo "🧹 Cleaning up orphaned SubAgents + stuck improvements..."
 php artisan subagents:cleanup --no-interaction
+
+# Re-queue stuck self-improvements (in_progress with a queued/running SubAgent that lost its process)
+php artisan tinker --execute='
+$stuck = \App\Models\SelfImprovement::where("status", "in_progress")
+    ->whereNotNull("sub_agent_id")
+    ->get();
+foreach ($stuck as $si) {
+    $sa = $si->subAgent;
+    if ($sa && in_array($sa->status, ["queued", "running"]) && !$sa->pid) {
+        $sa->update(["status" => "queued", "pid" => null]);
+        \App\Jobs\RunSelfImprovementJob::dispatch($si, $sa);
+        echo "Re-queued improvement #{$si->id}: {$si->improvement_title}\n";
+    }
+}
+' 2>/dev/null || true
 
 # Start queue worker as www-data (Claude Code refuses --dangerously-skip-permissions as root)
 echo "⚙️ Starting queue worker (www-data)..."
 su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" &
+
+# Start low-priority queue worker (self-improvement analysis — lightweight, non-blocking)
+echo "🧠 Starting low-priority queue worker..."
+su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=low --tries=1 --timeout=120 --sleep=5" &
 
 # Start Laravel scheduler (runs reminders:process every minute)
 echo "⏰ Starting scheduler..."
