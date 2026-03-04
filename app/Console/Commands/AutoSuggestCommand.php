@@ -213,7 +213,11 @@ RÈGLES POUR LE PLAN DE DÉVELOPPEMENT :
 - Suivre les patterns existants (ex: créer un nouvel agent = hériter de BaseAgent, implémenter handle())
 - Inclure les étapes : création du fichier, modification du RouterAgent, tests
 - 4-8 étapes numérotées, chaque étape = une action précise
-- Si c'est un nouvel agent : inclure la création de app/Services/Agents/XxxAgent.php + modification du RouterAgent + enregistrement dans AgentOrchestrator
+- Si c'est un nouvel agent, TOUJOURS inclure ces 4 étapes obligatoires :
+  a) Créer app/Services/Agents/XxxAgent.php (hériter de BaseAgent, implémenter name() et handle())
+  b) Modifier app/Services/Agents/RouterAgent.php pour router les messages vers le nouvel agent
+  c) Modifier app/Services/AgentOrchestrator.php pour enregistrer le nouvel agent dans registerAgents()
+  d) Modifier app/Http/Controllers/AgentController.php pour ajouter le nouvel agent dans le const SUB_AGENTS (clé = nom retourné par name(), avec label, icon emoji, color parmi blue/purple/orange/green/red/teal/indigo/pink/cyan/amber, et description courte)
 
 FORMAT DE RÉPONSE (JSON strict) :
 {

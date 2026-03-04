@@ -75,7 +75,13 @@
             'green'  => ['bg' => 'bg-green-50',  'border' => 'border-green-200', 'icon_bg' => 'bg-green-100', 'text' => 'text-green-700', 'badge' => 'bg-green-100 text-green-600'],
             'red'    => ['bg' => 'bg-red-50',    'border' => 'border-red-200', 'icon_bg' => 'bg-red-100', 'text' => 'text-red-700', 'badge' => 'bg-red-100 text-red-600'],
             'teal'   => ['bg' => 'bg-teal-50',   'border' => 'border-teal-200', 'icon_bg' => 'bg-teal-100', 'text' => 'text-teal-700', 'badge' => 'bg-teal-100 text-teal-600'],
+            'indigo' => ['bg' => 'bg-indigo-50', 'border' => 'border-indigo-200', 'icon_bg' => 'bg-indigo-100', 'text' => 'text-indigo-700', 'badge' => 'bg-indigo-100 text-indigo-600'],
+            'pink'   => ['bg' => 'bg-pink-50',   'border' => 'border-pink-200', 'icon_bg' => 'bg-pink-100', 'text' => 'text-pink-700', 'badge' => 'bg-pink-100 text-pink-600'],
+            'cyan'   => ['bg' => 'bg-cyan-50',   'border' => 'border-cyan-200', 'icon_bg' => 'bg-cyan-100', 'text' => 'text-cyan-700', 'badge' => 'bg-cyan-100 text-cyan-600'],
+            'amber'  => ['bg' => 'bg-amber-50',  'border' => 'border-amber-200', 'icon_bg' => 'bg-amber-100', 'text' => 'text-amber-700', 'badge' => 'bg-amber-100 text-amber-600'],
         ];
+        // Fallback for unknown colors
+        $defaultColor = $colorMap['blue'];
     @endphp
     @foreach($agents as $agent)
     <div>
@@ -83,7 +89,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             @foreach($subAgentMeta as $key => $meta)
             @php
-                $colors = $colorMap[$meta['color']];
+                $colors = $colorMap[$meta['color']] ?? $defaultColor;
                 $count = ($subAgentData[$agent->id]['counts'] ?? collect())->get($key, 0);
                 $lastAt = $subAgentData[$agent->id]['lastActivity'][$key] ?? null;
             @endphp
