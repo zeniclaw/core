@@ -3,7 +3,7 @@ FROM php:8.4-fpm
 # System deps
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
-    libxml2-dev nginx supervisor procps \
+    libxml2-dev nginx supervisor procps docker.io docker-compose \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
