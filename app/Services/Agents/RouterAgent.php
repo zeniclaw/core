@@ -30,6 +30,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Music keywords → music agent with Haiku
+        if ($context->body && $this->detectMusicKeywords($context->body)) {
+            return [
+                'agent' => 'music',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Music keyword detected — fast-path to music agent',
+            ];
+        }
+
         $body = $context->body ?? '[media sans texte]';
         $userContext = $this->buildUserContext($context);
 
@@ -62,6 +73,7 @@ AGENTS DISPONIBLES:
 - "project" = changer de projet actif, selectionner un projet (SANS tache concrete)
 - "analysis" = analyse approfondie, revue de document, strategie, audit, comparaison detaillee
 - "todo" = gestion de liste de taches, checklist, cocher/decocher, to-do list
+- "music" = musique, chanson, artiste, playlist, recommandation musicale, spotify, top charts, paroles
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -72,6 +84,7 @@ REGLES DE SELECTION DU MODELE:
 - project simple → "claude-haiku-4-5-20251001", project medium → "claude-sonnet-4-5-20241022"
 - analysis medium → "claude-sonnet-4-5-20241022", analysis complex → "claude-opus-4-20250514"
 - todo → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- music → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -85,6 +98,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - REMINDER = mots-cles: rappel, rappelle-moi, alarme, dans X minutes, a Xh
 - ANALYSIS = demande d'analyse profonde, document a reviewer, strategie, audit
 - TODO = gestion de checklist, todo list, ajouter/cocher/decocher une tache, "ma liste", "ma todo"
+- MUSIC = musique, chanson, artiste, playlist, recommandation, spotify, top charts, paroles, "mets de la musique", "ecouter", genre musical
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -135,7 +149,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -206,5 +220,19 @@ PROMPT;
     private function detectGitlabUrl(string $body): bool
     {
         return (bool) preg_match('#https?://gitlab\.[^\s]+#i', $body);
+    }
+
+    private function detectMusicKeywords(string $body): bool
+    {
+        $keywords = [
+            'musique', 'chanson', 'artiste', 'playlist',
+            'spotify', 'top charts', 'paroles', 'recommend',
+            'ecouter', 'écouter', 'mets de la musique',
+            'cherche.*chanson', 'cherche.*artiste', 'cherche.*musique',
+            'recommande.*musique', 'recommande.*chanson',
+        ];
+
+        $pattern = '/\b(' . implode('|', $keywords) . ')/iu';
+        return (bool) preg_match($pattern, $body);
     }
 }
