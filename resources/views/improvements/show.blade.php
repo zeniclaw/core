@@ -11,14 +11,16 @@
 
     {{-- Header --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div class="flex items-start justify-between mb-4">
-            <div>
-                <h2 class="text-lg font-semibold text-gray-900">{{ $improvement->improvement_title }}</h2>
-                <p class="text-sm text-gray-500 mt-1">
-                    Agent: {{ $improvement->agent->name ?? '-' }}
-                    &middot; Route: {{ $improvement->routed_agent }}
-                    &middot; {{ $improvement->created_at->diffForHumans() }}
-                </p>
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+            <div class="min-w-0">
+                <h2 class="text-base sm:text-lg font-semibold text-gray-900 break-words">{{ $improvement->improvement_title }}</h2>
+                <div class="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-gray-500">
+                    <span>{{ $improvement->agent->name ?? '-' }}</span>
+                    <span>&middot;</span>
+                    <span>{{ $improvement->routed_agent }}</span>
+                    <span>&middot;</span>
+                    <span>{{ $improvement->created_at->diffForHumans() }}</span>
+                </div>
             </div>
             @php
                 $statusColors = [

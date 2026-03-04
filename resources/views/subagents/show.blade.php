@@ -178,7 +178,7 @@
             </div>
         </div>
         <div x-ref="terminal"
-             class="bg-gray-900 rounded-lg p-4 h-96 overflow-y-auto font-mono text-xs leading-relaxed">
+             class="bg-gray-900 rounded-lg p-3 sm:p-4 h-[60vh] sm:h-96 overflow-y-auto font-mono text-[11px] sm:text-xs leading-relaxed">
             <pre class="text-green-400 whitespace-pre-wrap" x-text="log || 'En attente de logs...'"></pre>
         </div>
     </div>
