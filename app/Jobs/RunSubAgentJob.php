@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\AppSetting;
+use App\Models\SelfImprovement;
 use App\Models\SubAgent;
 use App\Services\AnthropicClient;
 use Illuminate\Bus\Queueable;
@@ -97,6 +98,7 @@ class RunSubAgentJob implements ShouldQueue
                     'completed_at' => now(),
                 ]);
                 $this->subAgent->project->update(['status' => 'completed']);
+                $this->syncImprovementStatus('completed');
                 $this->subAgent->appendLog("[DONE] Investigation terminee (readonly)");
 
                 // Extract Claude's findings from the log to send to user
@@ -132,6 +134,7 @@ class RunSubAgentJob implements ShouldQueue
                     'completed_at' => now(),
                 ]);
                 $this->subAgent->project->update(['status' => 'completed']);
+                $this->syncImprovementStatus('completed');
                 $this->subAgent->appendLog("[DONE] Termine. Branche: {$branchName}, Commit: {$commitHash}");
 
                 $message = "C'est fait !\nCommit: {$commitHash}";
@@ -157,6 +160,7 @@ class RunSubAgentJob implements ShouldQueue
                     'completed_at' => now(),
                 ]);
                 $this->subAgent->project->update(['status' => 'failed']);
+                $this->syncImprovementStatus('failed');
                 $this->notifyRequester(
                     "Oups, j'ai pas reussi cette fois.\nErreur: " . substr($e->getMessage(), 0, 200)
                 );
@@ -1225,6 +1229,21 @@ class RunSubAgentJob implements ShouldQueue
                 ]);
         } catch (\Throwable $e) {
             Log::warning("Failed to notify requester: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Sync any SelfImprovement linked to this SubAgent.
+     */
+    private function syncImprovementStatus(string $status): void
+    {
+        try {
+            $improvement = SelfImprovement::where('sub_agent_id', $this->subAgent->id)->first();
+            if ($improvement && $improvement->status !== $status) {
+                $improvement->update(['status' => $status]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Failed to sync improvement status: " . $e->getMessage());
         }
     }
 }
