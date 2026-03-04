@@ -10,7 +10,7 @@ class Reminder extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['agent_id', 'user_id', 'message', 'channel', 'scheduled_at', 'sent_at', 'recurrence_rule', 'status'];
+    protected $fillable = ['agent_id', 'user_id', 'requester_phone', 'requester_name', 'message', 'channel', 'scheduled_at', 'sent_at', 'recurrence_rule', 'status'];
 
     protected $casts = [
         'scheduled_at' => 'datetime',

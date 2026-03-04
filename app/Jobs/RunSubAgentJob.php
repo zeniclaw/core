@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\AppSetting;
 use App\Models\SubAgent;
+use App\Services\AnthropicClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,28 +20,32 @@ class RunSubAgentJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 600; // default, overridden in handle()
-    public int $tries = 1;
+    public int $tries = 2; // allow 1 retry after container restart
 
     /**
-     * Run SubAgent jobs one at a time (never in parallel).
-     * If a job is already running, the next one waits up to 30 min.
+     * No queue middleware — sequential execution is handled by tries=1 + single worker.
      */
     public function middleware(): array
     {
-        return [
-            (new WithoutOverlapping('subagent-global'))
-                ->releaseAfter(1800)
-                ->expireAfter($this->timeout + 120),
-        ];
+        return [];
     }
 
     /**
-     * Dynamic timeout based on subAgent's timeout_minutes setting.
+     * Handle job failure (container killed, timeout, etc.)
      */
-    public function retryUntil(): \DateTime
+    public function failed(?\Throwable $exception): void
     {
-        $minutes = $this->subAgent->timeout_minutes ?: 10;
-        return now()->addMinutes($minutes + 2); // +2 min grace for git ops
+        $this->subAgent->refresh();
+        if (in_array($this->subAgent->status, ['running', 'queued'])) {
+            $this->subAgent->update([
+                'status' => 'failed',
+                'error_message' => 'Job interrompu: ' . ($exception?->getMessage() ?? 'container redemarré'),
+                'completed_at' => now(),
+                'pid' => null,
+            ]);
+            $this->subAgent->project->update(['status' => 'failed']);
+            $this->subAgent->appendLog('[ERROR] Job interrompu (container redemarré ou timeout)');
+        }
     }
 
     private string $workspace;
@@ -66,23 +71,33 @@ class RunSubAgentJob implements ShouldQueue
             $this->subAgent->appendLog("[START] SubAgent #{$this->subAgent->id} demarré");
 
             // Step 1: Clone the repo
+            $this->notifyRequester("[1/6] Recuperation du repo...");
             $this->cloneRepo();
-            $this->notifyRequester("Repo recupere. ZeniClaw AI analyse le code et applique les modifications...");
 
             // Step 2: Reuse existing branch or create new one
             $branchName = $this->resolveOrCreateBranch();
             $this->subAgent->update(['branch_name' => $branchName]);
 
             // Step 3: Run ZeniClaw AI with context from previous tasks
+            $this->notifyRequester("[2/6] ZeniClaw AI analyse et applique les modifications...");
             $this->runClaudeCode();
 
+            // Step 3.5: Verify the work and retry if needed
+            $this->notifyRequester("[3/6] Verification du code...");
+            $this->verifyAndRetryIfNeeded();
+
             // Step 4: Commit and push
-            $this->notifyRequester("Modifications terminees ! Je pousse le code...");
+            $this->notifyRequester("[4/6] Push du code...");
             $commitHash = $this->commitAndPush($branchName);
             $this->subAgent->update(['commit_hash' => $commitHash]);
 
             // Step 5: Create Merge Request (only if none exists for this branch)
+            $this->notifyRequester("[5/6] Creation et merge de la MR...");
             $mrUrl = $this->findOrCreateMergeRequest($branchName);
+
+            // Step 6: Verify deployment on Laravel Cloud
+            $this->notifyRequester("[6/6] Verification du deploiement...");
+            $deployStatus = $this->checkLaravelCloudDeployment();
 
             $this->subAgent->update([
                 'status' => 'completed',
@@ -91,10 +106,12 @@ class RunSubAgentJob implements ShouldQueue
             $this->subAgent->project->update(['status' => 'completed']);
             $this->subAgent->appendLog("[DONE] Termine. Branche: {$branchName}, Commit: {$commitHash}");
 
-            $message = "C'est fait ! Les modifications ont ete mergees.\n"
-                . "Commit: {$commitHash}";
+            $message = "C'est fait !\nCommit: {$commitHash}";
             if ($mrUrl) {
                 $message .= "\nMerge Request: {$mrUrl}";
+            }
+            if ($deployStatus) {
+                $message .= "\nDeploy: {$deployStatus}";
             }
             $this->notifyRequester($message);
 
@@ -129,8 +146,298 @@ class RunSubAgentJob implements ShouldQueue
         }
     }
 
+    /**
+     * Verify the work done by Claude Code and retry once if issues are found.
+     * Uses Claude Haiku to review the git diff + check for syntax errors.
+     */
+    private function verifyAndRetryIfNeeded(): void
+    {
+        $this->subAgent->appendLog("[VERIFY] Verification des modifications...");
+
+        // Get the diff of what was changed
+        $diffResult = Process::path($this->workspace)->run('git diff HEAD');
+        $diff = $diffResult->output();
+
+        // Also get list of new/modified files
+        $statusResult = Process::path($this->workspace)->run('git status --porcelain');
+        $status = $statusResult->output();
+
+        if (empty(trim($status))) {
+            $this->subAgent->appendLog("[VERIFY] Aucune modification detectee - rien a verifier");
+            return;
+        }
+
+        // Run PHP syntax check on modified/added PHP files
+        $syntaxErrors = [];
+        foreach (explode("\n", trim($status)) as $line) {
+            $file = trim(substr($line, 3));
+            if (!str_ends_with($file, '.php') || !file_exists("{$this->workspace}/{$file}")) {
+                continue;
+            }
+            $check = Process::path($this->workspace)->run("php -l " . escapeshellarg($file));
+            if (!$check->successful()) {
+                $syntaxErrors[] = "{$file}: " . trim($check->errorOutput());
+            }
+        }
+
+        // Build verification prompt
+        $task = $this->subAgent->task_description;
+        $verifyPrompt = "Tache demandee:\n{$task}\n\n"
+            . "Fichiers modifies:\n{$status}\n\n"
+            . "Diff des modifications:\n" . substr($diff, 0, 8000) . "\n\n";
+
+        if ($syntaxErrors) {
+            $verifyPrompt .= "ERREURS DE SYNTAXE PHP DETECTEES:\n" . implode("\n", $syntaxErrors) . "\n\n";
+        }
+
+        $verifyPrompt .= "Analyse ces modifications et reponds UNIQUEMENT par un JSON:\n"
+            . "{\"ok\": true/false, \"issues\": [\"probleme 1\", \"probleme 2\"]}\n"
+            . "- ok=true si les modifications realisent correctement la tache demandee\n"
+            . "- ok=false si il y a des problemes: fichiers manquants, routes non ajoutees, erreurs de syntaxe, "
+            . "imports manquants, controller/vue incomplets, etc.\n"
+            . "- Sois strict: verifie que TOUT ce qui est necessaire est present (routes, controller, vue, model, migration si besoin)\n"
+            . "Reponds UNIQUEMENT avec le JSON.";
+
+        $claude = new AnthropicClient();
+        $response = $claude->chat($verifyPrompt, 'claude-haiku-4-5-20251001');
+
+        // Parse response
+        $clean = trim($response ?? '');
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        $result = json_decode($clean, true);
+
+        if (!$result) {
+            $this->subAgent->appendLog("[VERIFY] Impossible de parser la reponse de verification - on continue");
+            return;
+        }
+
+        // Add syntax errors as issues even if Haiku says ok
+        if ($syntaxErrors && ($result['ok'] ?? false)) {
+            $result['ok'] = false;
+            $result['issues'] = array_merge($result['issues'] ?? [], $syntaxErrors);
+        }
+
+        if ($result['ok'] ?? false) {
+            $this->subAgent->appendLog("[VERIFY] Verification OK !");
+            return;
+        }
+
+        // Issues found — retry with Claude Code
+        $issues = $result['issues'] ?? ['Problemes non specifies'];
+        $issueList = implode("\n- ", $issues);
+        $this->subAgent->appendLog("[VERIFY] Problemes detectes:\n- {$issueList}");
+        $this->subAgent->appendLog("[VERIFY] Relance de Claude Code pour corriger...");
+        $this->notifyRequester("Verification en cours... des corrections sont necessaires, je relance.");
+
+        // Build fix prompt and re-run Claude Code
+        $fixPrompt = "Tu travailles dans un repository git. Tu as deja fait des modifications mais la verification a detecte des problemes.\n\n"
+            . "Tache originale:\n{$task}\n\n"
+            . "Problemes detectes:\n- {$issueList}\n\n"
+            . "Corrige ces problemes. Verifie que tout est complet: routes, controllers, vues, models, migrations, imports.";
+
+        $apiKey = AppSetting::get('anthropic_api_key');
+        $apiCalls = 0;
+        $this->executeClaudeCode($fixPrompt, 'opus', $apiKey, $apiCalls);
+        $currentCalls = $this->subAgent->api_calls_count ?? 0;
+        $this->subAgent->update(['api_calls_count' => $currentCalls + $apiCalls]);
+        $this->subAgent->appendLog("[VERIFY] Corrections appliquees (retry termine)");
+    }
+
+    /**
+     * Check Laravel Cloud deployment status after merge, then check app logs for errors.
+     */
+    private function checkLaravelCloudDeployment(): ?string
+    {
+        $cloudToken = AppSetting::get('laravel_cloud_token');
+        if (!$cloudToken) {
+            $this->subAgent->appendLog("[DEPLOY] Pas de token Laravel Cloud configure, skip");
+            return null;
+        }
+
+        try {
+            $envId = $this->findCloudEnvironment($cloudToken);
+            if (!$envId) {
+                return null;
+            }
+
+            // Step 1: Wait for deployment to finish
+            $deployResult = $this->waitForDeployment($cloudToken, $envId);
+            if (!$deployResult['success']) {
+                return $deployResult['message'];
+            }
+
+            // Step 2: After deploy succeeds, wait a bit then check app logs for errors
+            $this->subAgent->appendLog("[DEPLOY] Deploiement reussi ! Verification des logs applicatifs...");
+            $this->notifyRequester("[6/6] Deploy OK. Verification des logs pour erreurs...");
+            sleep(20); // Wait for app to start serving requests
+
+            $errors = $this->checkCloudAppLogs($cloudToken, $envId);
+            if ($errors) {
+                $this->subAgent->appendLog("[DEPLOY] Erreurs detectees dans les logs apres deploy:\n{$errors}");
+                $this->notifyRequester("Deploy OK mais des erreurs ont ete detectees dans les logs:\n{$errors}");
+                return "Deploy OK mais erreurs detectees ({$deployResult['appName']})";
+            }
+
+            $this->subAgent->appendLog("[DEPLOY] Aucune erreur dans les logs. Tout est bon !");
+            return "OK (deploye sur {$deployResult['appName']})";
+
+        } catch (\Throwable $e) {
+            $this->subAgent->appendLog("[DEPLOY] Erreur: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    private function findCloudEnvironment(string $cloudToken): ?string
+    {
+        $gitlabUrl = $this->subAgent->project->gitlab_url;
+        $repoPath = trim(parse_url($gitlabUrl, PHP_URL_PATH), '/');
+        $repoPath = rtrim($repoPath, '.git');
+
+        $this->subAgent->appendLog("[DEPLOY] Recherche de l'app Laravel Cloud pour {$repoPath}...");
+
+        $appsResponse = Http::timeout(15)
+            ->withHeaders([
+                'Authorization' => "Bearer {$cloudToken}",
+                'Accept' => 'application/json',
+            ])
+            ->get('https://cloud.laravel.com/api/applications', [
+                'include' => 'environments',
+            ]);
+
+        if (!$appsResponse->successful()) {
+            $this->subAgent->appendLog("[DEPLOY] Erreur API Laravel Cloud: " . $appsResponse->status());
+            return null;
+        }
+
+        foreach ($appsResponse->json('data') as $app) {
+            $appRepo = $app['attributes']['repository']['full_name'] ?? '';
+            if (strcasecmp($appRepo, $repoPath) === 0) {
+                $this->cloudAppName = $app['attributes']['name'];
+                $envs = $app['relationships']['environments']['data'] ?? [];
+                if (!empty($envs)) {
+                    $envId = $envs[0]['id'];
+                    $this->subAgent->appendLog("[DEPLOY] App trouvee: {$this->cloudAppName} (env: {$envId})");
+                    return $envId;
+                }
+            }
+        }
+
+        $this->subAgent->appendLog("[DEPLOY] App non trouvee sur Laravel Cloud pour {$repoPath}");
+        return null;
+    }
+
+    private string $cloudAppName = '';
+    private string $cloudEnvId = '';
+
+    private function waitForDeployment(string $cloudToken, string $envId): array
+    {
+        $this->cloudEnvId = $envId;
+
+        for ($i = 0; $i < 12; $i++) {
+            sleep(15);
+
+            $deplResponse = Http::timeout(15)
+                ->withHeaders([
+                    'Authorization' => "Bearer {$cloudToken}",
+                    'Accept' => 'application/json',
+                ])
+                ->get("https://cloud.laravel.com/api/environments/{$envId}/deployments");
+
+            if (!$deplResponse->successful()) {
+                continue;
+            }
+
+            $deployments = $deplResponse->json('data');
+            if (empty($deployments)) {
+                continue;
+            }
+
+            $latest = $deployments[0];
+            $status = $latest['attributes']['status'] ?? 'unknown';
+            $deplCommit = substr($latest['attributes']['commit_hash'] ?? '', 0, 8);
+
+            $this->subAgent->appendLog("[DEPLOY] Status: {$status} (commit: {$deplCommit}) - " . ($i + 1) . "/12");
+
+            if ($status === 'deployment.succeeded') {
+                return ['success' => true, 'appName' => $this->cloudAppName];
+            }
+
+            if ($status === 'deployment.failed') {
+                $logResponse = Http::timeout(15)
+                    ->withHeaders([
+                        'Authorization' => "Bearer {$cloudToken}",
+                        'Accept' => 'application/json',
+                    ])
+                    ->get("https://cloud.laravel.com/api/deployments/{$latest['id']}/logs");
+
+                $logs = $logResponse->successful() ? substr(json_encode($logResponse->json()), 0, 500) : '';
+
+                $this->subAgent->appendLog("[DEPLOY] ECHEC du deploiement !\n{$logs}");
+                $this->notifyRequester("Le deploiement sur {$this->cloudAppName} a echoue !");
+                return ['success' => false, 'message' => "ECHEC (deploy echoue sur {$this->cloudAppName})"];
+            }
+        }
+
+        $this->subAgent->appendLog("[DEPLOY] Timeout - deploiement toujours en cours apres 3 min");
+        return ['success' => false, 'message' => "Timeout (deploy en cours sur {$this->cloudAppName})"];
+    }
+
+    /**
+     * Check app logs on Laravel Cloud for errors after deployment.
+     */
+    private function checkCloudAppLogs(string $cloudToken, string $envId): ?string
+    {
+        $from = now()->subSeconds(30)->toIso8601String();
+        $to = now()->toIso8601String();
+
+        $logResponse = Http::timeout(15)
+            ->withHeaders([
+                'Authorization' => "Bearer {$cloudToken}",
+                'Accept' => 'application/json',
+            ])
+            ->get("https://cloud.laravel.com/api/environments/{$envId}/logs", [
+                'from' => $from,
+                'to' => $to,
+            ]);
+
+        if (!$logResponse->successful()) {
+            $this->subAgent->appendLog("[DEPLOY] Impossible de recuperer les logs (HTTP " . $logResponse->status() . ")");
+            return null;
+        }
+
+        $entries = $logResponse->json('data') ?? [];
+        $errors = [];
+
+        foreach ($entries as $entry) {
+            $level = $entry['level'] ?? '';
+            $message = $entry['message'] ?? '';
+            if (in_array($level, ['error', 'critical', 'emergency'])) {
+                $errors[] = "[{$level}] {$message}";
+            }
+        }
+
+        if (empty($errors)) {
+            $this->subAgent->appendLog("[DEPLOY] " . count($entries) . " log entries, aucune erreur");
+            return null;
+        }
+
+        return implode("\n", array_slice($errors, 0, 5)); // Max 5 errors
+    }
+
     private function cloneRepo(): void
     {
+        // Clean up any leftover workspace from a previous run
+        if (is_dir($this->workspace)) {
+            Process::run("rm -rf " . escapeshellarg($this->workspace));
+            $this->subAgent->appendLog("[GIT] Ancien workspace nettoye");
+        }
+
         $gitlabUrl = $this->subAgent->project->gitlab_url;
         $token = AppSetting::get('gitlab_access_token');
 

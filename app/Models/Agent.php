@@ -11,7 +11,11 @@ class Agent extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status'];
+    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status', 'whitelist_enabled'];
+
+    protected $casts = [
+        'whitelist_enabled' => 'boolean',
+    ];
 
     public function user(): BelongsTo        { return $this->belongsTo(User::class); }
     public function secrets(): HasMany       { return $this->hasMany(AgentSecret::class); }

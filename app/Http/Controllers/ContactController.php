@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AgentLog;
 use App\Models\AgentSession;
 use App\Models\Project;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -61,12 +62,14 @@ class ContactController extends Controller
             $projectCount = Project::where('requester_phone', $peerId)->count();
 
             return (object) [
+                'id' => $session->id,
                 'peer_id' => $peerId,
                 'name' => $name,
                 'type' => $isGroup ? 'group' : 'dm',
                 'message_count' => $session->message_count,
                 'last_message_at' => $session->last_message_at,
                 'project_count' => $projectCount,
+                'whitelisted' => $session->whitelisted,
             ];
         });
 
@@ -136,5 +139,13 @@ class ContactController extends Controller
             Log::warning('Failed to fetch WAHA groups: ' . $e->getMessage());
             return [];
         }
+    }
+
+    public function toggleWhitelist(AgentSession $session): RedirectResponse
+    {
+        $session->update(['whitelisted' => !$session->whitelisted]);
+
+        $status = $session->whitelisted ? 'whitelisté' : 'retiré de la whitelist';
+        return back()->with('success', "Contact {$status}.");
     }
 }

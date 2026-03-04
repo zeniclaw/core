@@ -62,9 +62,18 @@ chmod -R 775 storage bootstrap/cache
 echo "✅ Starting nginx + php-fpm..."
 service nginx start
 
+# Clear stale jobs from previous container, then re-queue orphaned SubAgents
+echo "🧹 Cleaning up stale queue + orphaned SubAgents..."
+php artisan queue:clear redis --force 2>/dev/null || true
+php artisan subagents:cleanup --no-interaction
+
 # Start queue worker as www-data (Claude Code refuses --dangerously-skip-permissions as root)
 echo "⚙️ Starting queue worker (www-data)..."
 su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" &
+
+# Start Laravel scheduler (runs reminders:process every minute)
+echo "⏰ Starting scheduler..."
+su -s /bin/bash www-data -c "php /var/www/html/artisan schedule:work --no-interaction" &
 
 # Auto-start WAHA WhatsApp session in background
 (

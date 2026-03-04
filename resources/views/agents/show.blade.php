@@ -21,7 +21,15 @@
                     </div>
                 </div>
             </div>
-            <div class="flex gap-2">
+            <div class="flex gap-2 items-center">
+                <form method="POST" action="{{ route('agents.toggle-whitelist', $agent) }}">
+                    @csrf
+                    <button type="submit" class="px-3 py-2 rounded-lg text-sm font-medium transition-colors border
+                        {{ $agent->whitelist_enabled ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100' }}"
+                        title="{{ $agent->whitelist_enabled ? 'Whitelist active : seuls les contacts autorisés peuvent interagir' : 'Whitelist désactivée : tout le monde peut interagir' }}">
+                        {{ $agent->whitelist_enabled ? 'Whitelist ON' : 'Whitelist OFF' }}
+                    </button>
+                </form>
                 <a href="{{ route('agents.edit', $agent) }}" class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">Edit</a>
                 <form method="POST" action="{{ route('agents.destroy', $agent) }}"
                       x-data @submit.prevent="if(confirm('Delete this agent?')) $el.submit()">
@@ -42,7 +50,7 @@
     {{-- Tabs --}}
     <div x-data="{ tab: 'logs' }">
         <div class="flex gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-4">
-            @foreach(['logs'=>'📋 Logs', 'reminders'=>'⏰ Reminders', 'memory'=>'🧠 Mémoire', 'sessions'=>'💬 Sessions'] as $t => $l)
+            @foreach(['logs'=>'📋 Logs', 'reminders'=>'⏰ Reminders', 'memory'=>'🧠 Mémoire', 'sessions'=>'💬 Sessions', 'orchestrator'=>'🧠 Orchestrator'] as $t => $l)
             <button @click="tab = '{{ $t }}'"
                     :class="tab === '{{ $t }}' ? 'bg-indigo-600 text-white shadow' : 'text-gray-500 hover:text-gray-800'"
                     class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all">{{ $l }}</button>
@@ -185,6 +193,113 @@
                 @empty
                 <p class="px-5 py-8 text-sm text-gray-400 text-center">No active sessions.</p>
                 @endforelse
+            </div>
+        </div>
+
+        {{-- ORCHESTRATOR tab --}}
+        <div x-show="tab === 'orchestrator'">
+            {{-- Stats cards --}}
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                {{-- Total routed --}}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Messages routés</p>
+                    <p class="text-3xl font-bold text-indigo-600">{{ $totalRouted }}</p>
+                </div>
+
+                {{-- Agent distribution --}}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Par agent</p>
+                    @php
+                        $agentColors = [
+                            'chat' => 'bg-blue-500',
+                            'dev' => 'bg-purple-500',
+                            'reminder' => 'bg-orange-500',
+                            'project' => 'bg-green-500',
+                            'analysis' => 'bg-red-500',
+                            'todo' => 'bg-teal-500',
+                        ];
+                    @endphp
+                    @forelse($agentStats->sortDesc() as $name => $count)
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full {{ $agentColors[$name] ?? 'bg-gray-400' }}"></span>
+                            <span class="text-sm text-gray-700 capitalize">{{ $name }}</span>
+                        </div>
+                        <span class="text-sm font-medium text-gray-600">{{ $count }} <span class="text-xs text-gray-400">({{ $totalRouted ? round($count / $totalRouted * 100) : 0 }}%)</span></span>
+                    </div>
+                    @empty
+                    <p class="text-sm text-gray-400">Aucune donnée</p>
+                    @endforelse
+                </div>
+
+                {{-- Model distribution --}}
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Par modèle</p>
+                    @forelse($modelStats->sortDesc() as $model => $count)
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span class="text-sm text-gray-700">{{ $model }}</span>
+                        <span class="text-sm font-medium text-gray-600">{{ $count }}</span>
+                    </div>
+                    @empty
+                    <p class="text-sm text-gray-400">Aucune donnée</p>
+                    @endforelse
+                </div>
+            </div>
+
+            {{-- Routing history table --}}
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+                <div class="px-5 py-4 border-b border-gray-100">
+                    <h3 class="font-semibold text-gray-800">Historique de routage</h3>
+                </div>
+                <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Message</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Agent</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Modèle</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Complexité</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Raisonnement</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-50">
+                            @php
+                                $agentBadgeColors = [
+                                    'chat' => 'bg-blue-100 text-blue-700',
+                                    'dev' => 'bg-purple-100 text-purple-700',
+                                    'reminder' => 'bg-orange-100 text-orange-700',
+                                    'project' => 'bg-green-100 text-green-700',
+                                    'analysis' => 'bg-red-100 text-red-700',
+                                    'todo' => 'bg-teal-100 text-teal-700',
+                                ];
+                                $complexityColors = [
+                                    'simple' => 'bg-green-100 text-green-700',
+                                    'medium' => 'bg-yellow-100 text-yellow-700',
+                                    'complex' => 'bg-red-100 text-red-700',
+                                ];
+                            @endphp
+                            @forelse($routingHistory as $row)
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2.5 text-xs text-gray-500 whitespace-nowrap">{{ $row->created_at->format('d/m H:i') }}</td>
+                                <td class="px-4 py-2.5 text-gray-700 max-w-[200px] truncate" title="{{ $row->body }}">{{ Str::limit($row->body, 60) }}</td>
+                                <td class="px-4 py-2.5">
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $agentBadgeColors[$row->agent] ?? 'bg-gray-100 text-gray-600' }}">{{ $row->agent }}</span>
+                                </td>
+                                <td class="px-4 py-2.5 text-xs font-mono text-gray-600">{{ $row->model }}</td>
+                                <td class="px-4 py-2.5">
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $complexityColors[$row->complexity] ?? 'bg-gray-100 text-gray-600' }}">{{ $row->complexity }}</span>
+                                </td>
+                                <td class="px-4 py-2.5 text-xs text-gray-500 max-w-[250px] truncate" title="{{ $row->reasoning }}">{{ $row->reasoning }}</td>
+                            </tr>
+                            @empty
+                            <tr>
+                                <td colspan="6" class="px-5 py-8 text-sm text-gray-400 text-center">Aucune décision de routage enregistrée.</td>
+                            </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 

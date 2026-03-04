@@ -22,6 +22,7 @@
             @php
                 $statusColors = [
                     'pending' => 'bg-yellow-100 text-yellow-700',
+                    'awaiting_validation' => 'bg-orange-100 text-orange-700',
                     'approved' => 'bg-blue-100 text-blue-700',
                     'rejected' => 'bg-red-100 text-red-700',
                     'in_progress' => 'bg-purple-100 text-purple-700',

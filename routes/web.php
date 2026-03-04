@@ -33,6 +33,9 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/agents/{agent}/memory/{memory}', [AgentMemoryController::class, 'destroy'])->name('agents.memory.destroy');
     Route::post('/agents/{agent}/memory/clear', [AgentMemoryController::class, 'clearAll'])->name('agents.memory.clear');
     Route::delete('/agents/{agent}/sessions/{session}', [AgentSessionController::class, 'destroy'])->name('agents.sessions.destroy');
+    Route::get('/agents/{agent}/sub/{subAgent}', [AgentController::class, 'showSubAgent'])
+        ->name('agents.sub-agent')
+        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo');
 
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');
@@ -46,6 +49,8 @@ Route::middleware(['auth'])->group(function () {
 
     // Contacts
     Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
+    Route::post('/contacts/{session}/toggle-whitelist', [ContactController::class, 'toggleWhitelist'])->name('contacts.toggle-whitelist');
+    Route::post('/agents/{agent}/toggle-whitelist', [AgentController::class, 'toggleWhitelist'])->name('agents.toggle-whitelist');
 
     // Projects
     Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
@@ -67,6 +72,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/subagents/{subAgent}', [SubAgentController::class, 'show'])->name('subagents.show');
     Route::get('/subagents/{subAgent}/output', [SubAgentController::class, 'output'])->name('subagents.output');
     Route::post('/subagents/{subAgent}/kill', [SubAgentController::class, 'kill'])->name('subagents.kill');
+    Route::post('/subagents/{subAgent}/retry', [SubAgentController::class, 'retry'])->name('subagents.retry');
+    Route::post('/subagents/{subAgent}/relaunch', [SubAgentController::class, 'relaunch'])->name('subagents.relaunch');
 
     // Logs
     Route::get('/logs', [LogController::class, 'index'])->name('logs.index');

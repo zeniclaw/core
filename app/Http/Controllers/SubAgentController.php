@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunSubAgentJob;
 use App\Models\AppSetting;
 use App\Models\SubAgent;
 use Illuminate\Http\JsonResponse;
@@ -88,6 +89,60 @@ class SubAgentController extends Controller
         $subAgent->project->update(['status' => 'failed']);
 
         return redirect()->back()->with('success', "SubAgent #{$subAgent->id} arrete.");
+    }
+
+    /**
+     * Retry a failed/killed SubAgent by creating a new one with the same task.
+     */
+    public function retry(Request $request, SubAgent $subAgent)
+    {
+        $user = $request->user();
+        abort_unless(in_array($user->role, ['superadmin', 'admin']), 403);
+        abort_unless(in_array($subAgent->status, ['failed', 'killed']), 422, 'Seuls les SubAgents echoues ou arretes peuvent etre relances.');
+
+        $newSubAgent = SubAgent::create([
+            'project_id' => $subAgent->project_id,
+            'task_description' => $subAgent->task_description,
+            'model' => $subAgent->model ?? 'opus',
+            'timeout_minutes' => $subAgent->timeout_minutes ?? (int) (AppSetting::get('subagent_default_timeout') ?: 10),
+            'status' => 'queued',
+            'branch_name' => $subAgent->branch_name,
+        ]);
+
+        $subAgent->project->update(['status' => 'in_progress']);
+
+        RunSubAgentJob::dispatch($newSubAgent);
+
+        return redirect()->route('subagents.show', $newSubAgent)
+            ->with('success', "SubAgent #{$newSubAgent->id} relance (copie de #{$subAgent->id}).");
+    }
+
+    /**
+     * Relaunch a SubAgent with a custom prompt on the same project.
+     */
+    public function relaunch(Request $request, SubAgent $subAgent)
+    {
+        $user = $request->user();
+        abort_unless(in_array($user->role, ['superadmin', 'admin']), 403);
+        abort_unless(in_array($subAgent->status, ['completed', 'failed', 'killed']), 422);
+
+        $request->validate(['prompt' => 'required|string|min:5']);
+
+        $newSubAgent = SubAgent::create([
+            'project_id' => $subAgent->project_id,
+            'task_description' => $request->prompt,
+            'model' => $subAgent->model ?? 'opus',
+            'timeout_minutes' => $subAgent->timeout_minutes ?? (int) (AppSetting::get('subagent_default_timeout') ?: 10),
+            'status' => 'queued',
+            'branch_name' => $subAgent->branch_name,
+        ]);
+
+        $subAgent->project->update(['status' => 'in_progress']);
+
+        RunSubAgentJob::dispatch($newSubAgent);
+
+        return redirect()->route('subagents.show', $newSubAgent)
+            ->with('success', "SubAgent #{$newSubAgent->id} lance sur {$subAgent->project->name}.");
     }
 
     /**

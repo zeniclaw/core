@@ -45,6 +45,15 @@
                     </button>
                 </form>
                 @endif
+                @if(in_array($subAgent->status, ['failed', 'killed']))
+                <form method="POST" action="{{ route('subagents.retry', $subAgent) }}" class="inline"
+                      x-data @submit.prevent="if(confirm('Relancer ce SubAgent avec la meme tache ?')) $el.submit()">
+                    @csrf
+                    <button class="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                        Relancer
+                    </button>
+                </form>
+                @endif
             </div>
         </div>
 
@@ -97,6 +106,23 @@
         </div>
         @endif
     </div>
+
+    {{-- Relaunch with custom prompt --}}
+    @if(in_array($subAgent->status, ['completed', 'failed', 'killed']) && in_array(auth()->user()->role, ['superadmin', 'admin']))
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-900 mb-3">Relancer avec un nouveau prompt</h3>
+        <form method="POST" action="{{ route('subagents.relaunch', $subAgent) }}">
+            @csrf
+            <textarea name="prompt" rows="3" placeholder="Ex: La page /manager/notifications fait une 404, verifie la route et corrige..."
+                      class="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y">{{ old('prompt') }}</textarea>
+            <div class="flex items-center justify-end mt-3">
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                    Lancer
+                </button>
+            </div>
+        </form>
+    </div>
+    @endif
 
     {{-- Terminal output --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"

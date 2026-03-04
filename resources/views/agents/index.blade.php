@@ -2,7 +2,7 @@
 @section('title', 'Agents')
 
 @section('content')
-<div class="space-y-4">
+<div class="space-y-6">
     <div class="flex items-center justify-between">
         <p class="text-sm text-gray-500">{{ $agents->total() }} agent(s)</p>
         <a href="{{ route('agents.create') }}" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors">+ New Agent</a>
@@ -64,5 +64,48 @@
         <div class="px-6 py-4 border-t border-gray-100">{{ $agents->links() }}</div>
         @endif
     </div>
+
+    {{-- Sub-Agents Orchestrateur --}}
+    @if($agents->isNotEmpty())
+    @php
+        $colorMap = [
+            'blue'   => ['bg' => 'bg-blue-50',   'border' => 'border-blue-200', 'icon_bg' => 'bg-blue-100', 'text' => 'text-blue-700', 'badge' => 'bg-blue-100 text-blue-600'],
+            'purple' => ['bg' => 'bg-purple-50', 'border' => 'border-purple-200', 'icon_bg' => 'bg-purple-100', 'text' => 'text-purple-700', 'badge' => 'bg-purple-100 text-purple-600'],
+            'orange' => ['bg' => 'bg-orange-50', 'border' => 'border-orange-200', 'icon_bg' => 'bg-orange-100', 'text' => 'text-orange-700', 'badge' => 'bg-orange-100 text-orange-600'],
+            'green'  => ['bg' => 'bg-green-50',  'border' => 'border-green-200', 'icon_bg' => 'bg-green-100', 'text' => 'text-green-700', 'badge' => 'bg-green-100 text-green-600'],
+            'red'    => ['bg' => 'bg-red-50',    'border' => 'border-red-200', 'icon_bg' => 'bg-red-100', 'text' => 'text-red-700', 'badge' => 'bg-red-100 text-red-600'],
+            'teal'   => ['bg' => 'bg-teal-50',   'border' => 'border-teal-200', 'icon_bg' => 'bg-teal-100', 'text' => 'text-teal-700', 'badge' => 'bg-teal-100 text-teal-600'],
+        ];
+    @endphp
+    @foreach($agents as $agent)
+    <div>
+        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-3">Sub-Agents Orchestrateur — {{ $agent->name }}</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            @foreach($subAgentMeta as $key => $meta)
+            @php
+                $colors = $colorMap[$meta['color']];
+                $count = ($subAgentData[$agent->id]['counts'] ?? collect())->get($key, 0);
+                $lastAt = $subAgentData[$agent->id]['lastActivity'][$key] ?? null;
+            @endphp
+            <a href="{{ route('agents.sub-agent', [$agent, $key]) }}"
+               class="{{ $colors['bg'] }} border {{ $colors['border'] }} rounded-xl p-4 hover:shadow-md transition-all block">
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="w-10 h-10 rounded-lg {{ $colors['icon_bg'] }} flex items-center justify-center text-xl">{{ $meta['icon'] }}</div>
+                    <div>
+                        <p class="font-semibold text-gray-900 text-sm">{{ $meta['label'] }}</p>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-medium {{ $colors['badge'] }}">virtual</span>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">{{ $meta['description'] }}</p>
+                <div class="flex items-center justify-between text-xs">
+                    <span class="{{ $colors['text'] }} font-medium">{{ $count }} message{{ $count !== 1 ? 's' : '' }}</span>
+                    <span class="text-gray-400">{{ $lastAt ? $lastAt->diffForHumans() : 'No activity' }}</span>
+                </div>
+            </a>
+            @endforeach
+        </div>
+    </div>
+    @endforeach
+    @endif
 </div>
 @endsection

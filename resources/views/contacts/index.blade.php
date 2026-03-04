@@ -44,6 +44,7 @@
                         <th class="text-left px-4 py-3 font-medium text-gray-600">Messages</th>
                         <th class="text-left px-4 py-3 font-medium text-gray-600">Derniere activite</th>
                         <th class="text-left px-4 py-3 font-medium text-gray-600">Projets</th>
+                        <th class="text-center px-4 py-3 font-medium text-gray-600">Whitelist</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-50">
@@ -71,6 +72,15 @@
                             @else
                                 <span class="text-gray-400 text-xs">-</span>
                             @endif
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <form method="POST" action="{{ route('contacts.toggle-whitelist', $contact->id) }}">
+                                @csrf
+                                <button type="submit" class="px-2.5 py-1 rounded-full text-xs font-medium transition-colors
+                                    {{ $contact->whitelisted ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' }}">
+                                    {{ $contact->whitelisted ? 'Autorise' : 'Bloque' }}
+                                </button>
+                            </form>
                         </td>
                     </tr>
                     @endforeach

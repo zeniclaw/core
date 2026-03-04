@@ -35,7 +35,7 @@
                     <td class="px-6 py-4">
                         <span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">{{ $reminder->channel }}</span>
                     </td>
-                    <td class="px-6 py-4 text-gray-500 text-xs">{{ $reminder->scheduled_at->format('d M Y H:i') }}</td>
+                    <td class="px-6 py-4 text-gray-500 text-xs">{{ $reminder->scheduled_at->setTimezone('Europe/Brussels')->format('d M Y H:i') }}</td>
                     <td class="px-6 py-4">
                         @php
                             $colors = ['pending'=>'bg-orange-100 text-orange-700','sent'=>'bg-green-100 text-green-700','done'=>'bg-gray-100 text-gray-500','snoozed'=>'bg-yellow-100 text-yellow-700'];

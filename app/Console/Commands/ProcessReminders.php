@@ -4,12 +4,18 @@ namespace App\Console\Commands;
 
 use App\Models\AgentLog;
 use App\Models\Reminder;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ProcessReminders extends Command
 {
     protected $signature = 'reminders:process';
-    protected $description = 'Process pending reminders and mark them as sent';
+    protected $description = 'Process pending reminders and send notifications';
+
+    private string $wahaBase = 'http://waha:3000';
+    private string $wahaApiKey = 'zeniclaw-waha-2026';
 
     public function handle(): void
     {
@@ -20,20 +26,94 @@ class ProcessReminders extends Command
         foreach ($reminders as $reminder) {
             $this->info("Processing reminder #{$reminder->id}: {$reminder->message}");
 
+            // Send WhatsApp message if we have a phone number
+            if ($reminder->requester_phone) {
+                $this->sendWhatsApp($reminder);
+            }
+
             // Log the reminder dispatch
             AgentLog::create([
                 'agent_id' => $reminder->agent_id,
                 'level' => 'info',
-                'message' => "Reminder dispatched via {$reminder->channel}: {$reminder->message}",
+                'message' => "Reminder sent via {$reminder->channel}: {$reminder->message}",
                 'context' => ['reminder_id' => $reminder->id, 'channel' => $reminder->channel],
             ]);
 
-            $reminder->update([
-                'status' => 'sent',
-                'sent_at' => now(),
-            ]);
+            if ($reminder->recurrence_rule) {
+                $nextAt = $this->getNextOccurrence($reminder->recurrence_rule, now('Europe/Paris'));
+                if ($nextAt) {
+                    $reminder->update([
+                        'scheduled_at' => $nextAt->utc(),
+                        'sent_at' => now(),
+                    ]);
+                    $this->info("  ↳ Recurring — next occurrence: {$nextAt}");
+                } else {
+                    $reminder->update(['status' => 'sent', 'sent_at' => now()]);
+                }
+            } else {
+                $reminder->update(['status' => 'sent', 'sent_at' => now()]);
+            }
         }
 
         $this->info("Processed {$reminders->count()} reminders.");
+    }
+
+    private function getNextOccurrence(string $rule, Carbon $from): ?Carbon
+    {
+        $parts = explode(':', $rule);
+        $type = $parts[0] ?? '';
+
+        return match ($type) {
+            'daily' => $this->nextDaily($parts, $from),
+            'weekly' => $this->nextWeekly($parts, $from),
+            'monthly' => $this->nextMonthly($parts, $from),
+            default => null,
+        };
+    }
+
+    private function nextDaily(array $parts, Carbon $from): Carbon
+    {
+        $time = $parts[1] ?? '08:00';
+        [$h, $m] = explode(':', $time) + [0 => 8, 1 => 0];
+
+        return $from->copy()->addDay()->setTime((int) $h, (int) $m, 0);
+    }
+
+    private function nextWeekly(array $parts, Carbon $from): Carbon
+    {
+        $day = strtolower($parts[1] ?? 'monday');
+        $time = $parts[2] ?? '09:00';
+        [$h, $m] = explode(':', $time) + [0 => 9, 1 => 0];
+
+        return $from->copy()->next($day)->setTime((int) $h, (int) $m, 0);
+    }
+
+    private function nextMonthly(array $parts, Carbon $from): Carbon
+    {
+        $dayOfMonth = (int) ($parts[1] ?? 1);
+        $time = $parts[2] ?? '09:00';
+        [$h, $m] = explode(':', $time) + [0 => 9, 1 => 0];
+
+        $next = $from->copy()->day($dayOfMonth)->setTime((int) $h, (int) $m, 0);
+        if ($next->lte($from)) {
+            $next->addMonth();
+        }
+
+        return $next;
+    }
+
+    private function sendWhatsApp(Reminder $reminder): void
+    {
+        try {
+            Http::timeout(10)
+                ->withHeaders(['X-Api-Key' => $this->wahaApiKey])
+                ->post("{$this->wahaBase}/api/sendText", [
+                    'chatId' => $reminder->requester_phone,
+                    'text' => "Rappel : {$reminder->message}",
+                    'session' => 'default',
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning("Failed to send reminder #{$reminder->id} via WhatsApp: " . $e->getMessage());
+        }
     }
 }
