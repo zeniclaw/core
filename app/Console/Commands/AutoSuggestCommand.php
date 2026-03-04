@@ -2,131 +2,138 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Agent;
 use App\Models\SelfImprovement;
 use App\Services\AnthropicClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AutoSuggestCommand extends Command
 {
     protected $signature = 'zeniclaw:auto-suggest';
-    protected $description = 'Auto-suggest a new feature idea to the WhatsApp autoupdate group';
-
-    private string $groupId = '120363407463497155@g.us';
-    private string $cacheKey = 'auto_suggest_history';
-    private int $maxHistory = 50;
+    protected $description = 'Generate a creative sub-agent improvement idea and add it to the backlog as approved';
 
     public function handle(): int
     {
-        $this->info('🔍 Generating auto-suggestion...');
+        $this->info('🔍 Generating improvement idea...');
 
-        // 1. Get existing SelfImprovement titles
+        // 1. Get existing improvement titles to avoid duplicates
         $existingTitles = SelfImprovement::whereNotNull('improvement_title')
             ->pluck('improvement_title')
             ->toArray();
 
-        // 2. Get recent suggestions from cache
-        $history = Cache::get($this->cacheKey, []);
+        // 2. Get recent suggestions from cache (extra anti-duplicate layer)
+        $history = Cache::get('auto_suggest_history', []);
+        $exclusions = array_unique(array_merge($existingTitles, $history));
 
-        // 3. Build exclusion list
-        $exclusions = array_merge($existingTitles, $history);
         $exclusionText = !empty($exclusions)
-            ? "SUGGESTIONS DÉJÀ FAITES (ne PAS répéter) :\n- " . implode("\n- ", array_slice($exclusions, -50))
+            ? "AMÉLIORATIONS DÉJÀ PROPOSÉES (NE PAS RÉPÉTER) :\n- " . implode("\n- ", array_slice($exclusions, -50))
             : '';
 
-        // 4. Call Claude Haiku
+        // 3. Call Claude Haiku for the idea
         $claude = new AnthropicClient();
-        $message = $claude->chat(
-            "Génère UNE SEULE suggestion de fonctionnalité pour ZeniClaw.\n\n{$exclusionText}",
+        $response = $claude->chat(
+            "Propose UNE amélioration créative pour ZeniClaw.\n\n{$exclusionText}\n\nRéponds UNIQUEMENT en JSON valide avec ce format :\n{\"title\": \"...\", \"analysis\": \"...\", \"plan\": \"...\"}",
             'claude-haiku-4-5-20251001',
             $this->buildSystemPrompt()
         );
 
-        if (!$message) {
-            $this->error('Failed to generate suggestion from Claude.');
+        if (!$response) {
+            $this->error('Failed to generate idea from Claude.');
             return self::FAILURE;
         }
 
-        $message = trim($message);
-        $this->info("💡 Suggestion: {$message}");
+        // 4. Parse JSON response
+        $response = trim($response);
+        // Strip markdown code fences if present
+        $response = preg_replace('/^```json?\s*/', '', $response);
+        $response = preg_replace('/\s*```$/', '', $response);
 
-        // 5. Send to WhatsApp group
-        try {
-            $response = Http::timeout(10)
-                ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
-                ->post('http://waha:3000/api/sendText', [
-                    'chatId' => $this->groupId,
-                    'text' => $message,
-                    'session' => 'default',
-                ]);
-
-            if (!$response->successful()) {
-                $this->error("WAHA sendText failed: {$response->status()}");
-                Log::error('AutoSuggest WAHA failed', ['status' => $response->status(), 'body' => $response->body()]);
-                return self::FAILURE;
-            }
-        } catch (\Exception $e) {
-            $this->error("WAHA error: {$e->getMessage()}");
-            Log::error('AutoSuggest WAHA error', ['error' => $e->getMessage()]);
+        $idea = json_decode($response, true);
+        if (!$idea || empty($idea['title']) || empty($idea['plan'])) {
+            $this->error("Invalid response from Claude: {$response}");
+            Log::warning('AutoSuggest: invalid Claude response', ['response' => $response]);
             return self::FAILURE;
         }
 
-        // 6. Store in cache history
-        $history[] = $message;
-        if (count($history) > $this->maxHistory) {
-            $history = array_slice($history, -$this->maxHistory);
+        // 5. Create approved SelfImprovement
+        $agent = Agent::first();
+        if (!$agent) {
+            $this->error('No agent found in database.');
+            return self::FAILURE;
         }
-        Cache::put($this->cacheKey, $history);
 
-        $this->info('✅ Suggestion sent to autoupdate group.');
+        $improvement = SelfImprovement::create([
+            'agent_id' => $agent->id,
+            'trigger_message' => '[Auto-Suggest] ' . $idea['title'],
+            'agent_response' => 'Suggestion automatique générée par l\'Improvement Scout',
+            'routed_agent' => 'auto-suggest',
+            'analysis' => [
+                'improve' => true,
+                'title' => $idea['title'],
+                'analysis' => $idea['analysis'] ?? $idea['title'],
+                'plan' => $idea['plan'],
+            ],
+            'improvement_title' => $idea['title'],
+            'development_plan' => $idea['plan'],
+            'status' => 'approved',
+        ]);
+
+        // 6. Update cache history
+        $history[] = $idea['title'];
+        if (count($history) > 50) {
+            $history = array_slice($history, -50);
+        }
+        Cache::put('auto_suggest_history', $history);
+
+        $this->info("✅ Improvement #{$improvement->id} created: {$idea['title']}");
+
         return self::SUCCESS;
     }
 
     private function buildSystemPrompt(): string
     {
         return <<<'PROMPT'
-Tu es l'Improvement Scout de ZeniClaw, un assistant WhatsApp intelligent.
+Tu es l'Improvement Scout de ZeniClaw, un assistant WhatsApp intelligent basé sur Laravel + Claude.
 
-CAPACITÉS ACTUELLES DE ZENICLAW (6 agents) :
-- ChatAgent : conversation générale, questions-réponses, humour, culture
-- DevAgent : gestion de projets de développement, création de tâches, sous-agents autonomes
-- ReminderAgent : rappels, alarmes, récurrences
-- TodoAgent : listes de tâches, courses, checklists
-- AnalysisAgent : analyse d'images et de PDF
-- ProjectAgent : gestion et suivi de projets
+TON RÔLE : Proposer des améliorations concrètes et développables — soit améliorer un agent existant, soit créer un nouveau sub-agent utile et original.
 
-FONCTIONNALITÉS DES ASSISTANTS CONCURRENTS À EXPLORER :
-- Recherche web en temps réel (Google, Bing, Perplexity)
-- Génération d'images (DALL-E, Midjourney, Stable Diffusion)
-- Text-to-Speech et Speech-to-Text
-- Traduction multilingue instantanée
-- Intégration calendrier (Google Calendar, Outlook)
-- Gestion d'emails (lecture, rédaction, envoi)
-- Météo et prévisions
-- Domotique (lumières, thermostat, serrures)
-- Finance personnelle (budget, dépenses, crypto)
-- Santé et fitness (calories, exercices, sommeil)
-- Navigation et itinéraires
-- Musique et podcasts (recherche, recommandations)
-- Résumé de vidéos YouTube
-- Actualités personnalisées
-- Recettes de cuisine
-- Contrôle d'appareils connectés (IoT)
-- Calculs et conversions avancés
-- Prise de notes vocales
-- Intégration réseaux sociaux
-- Automatisations et workflows (style IFTTT/Zapier)
+ARCHITECTURE ACTUELLE (6 agents) :
+- ChatAgent : conversation générale, Q&A, humour, culture générale
+- DevAgent : gestion de projets dev, création de tâches, sous-agents autonomes qui codent
+- ReminderAgent : rappels, alarmes, récurrences (cron-based)
+- TodoAgent : listes de tâches multi-listes, courses, checklists
+- AnalysisAgent : analyse d'images (OCR, description) et de PDF
+- ProjectAgent : gestion et suivi de projets, statuts, assignations
+- RouterAgent : routing intelligent des messages vers le bon agent
 
-RÈGLES :
-- Écris UN SEUL message court, naturel, style WhatsApp (comme si un utilisateur demandait vraiment cette fonctionnalité)
-- Le message doit être en français, informel, 1-3 phrases max
-- Ne mets PAS de guillemets autour du message
-- Ne mets PAS de préfixe comme "Suggestion:" ou "Idée:"
-- Écris directement comme un utilisateur qui demande une feature
-- Sois créatif et varié dans les formulations
-- Exemples de style : "Ce serait cool si tu pouvais me donner la météo quand je te demande", "Hey ZeniClaw, tu pourrais me résumer des vidéos YouTube ?"
+STACK TECHNIQUE :
+- Laravel 11, PHP 8.4, PostgreSQL, Redis
+- Claude API (Haiku pour le routing, Sonnet pour les réponses)
+- WAHA pour WhatsApp (envoi/réception de messages, groupes)
+- Docker, queue workers, scheduler
+
+TYPES D'AMÉLIORATIONS À PROPOSER :
+1. **Nouveaux sub-agents** : météo, traduction, finance, recettes, sport scores, musique, actualités, email, calendrier, domotique, santé/fitness, voyages, jeux, quiz, résumé de liens/articles, génération d'images, text-to-speech, dictionnaire, calculs avancés, suivi de colis, alertes prix, résumé YouTube, bookmarks, pomodoro, habitudes tracker, journal intime, flashcards/apprentissage, générateur de mots de passe, conversion devises, horoscope, citations du jour, blagues du jour, code review, regex helper, cron expression builder, color palette generator, QR code generator
+2. **Améliorations d'agents existants** : meilleure compréhension du contexte, nouvelles commandes, intégrations, formats de réponse plus riches, gestion d'erreurs améliorée, personnalisation utilisateur
+3. **Features transversales** : système de plugins, préférences utilisateur, multi-langue, analytics, notifications proactives, gamification
+
+RÈGLES POUR LE PLAN DE DÉVELOPPEMENT :
+- Le plan doit être CONCRET et IMPLÉMENTABLE : noms de fichiers Laravel à créer/modifier, classes, méthodes
+- Suivre les patterns existants (ex: créer un nouvel agent = hériter de BaseAgent, implémenter handle())
+- Inclure les étapes : création du fichier, modification du RouterAgent, tests
+- 4-8 étapes numérotées, chaque étape = une action précise
+- Si c'est un nouvel agent : inclure la création de app/Services/Agents/XxxAgent.php + modification du RouterAgent + enregistrement dans AgentOrchestrator
+
+FORMAT DE RÉPONSE (JSON strict) :
+{
+  "title": "Titre court et descriptif (max 80 chars)",
+  "analysis": "Pourquoi cette amélioration est utile — 2-3 phrases expliquant le besoin et la valeur ajoutée",
+  "plan": "1. Créer app/Services/Agents/XxxAgent.php...\n2. Implémenter handle()...\n3. ..."
+}
+
+SOIS CRÉATIF ET VARIÉ. Alterne entre nouveaux agents, améliorations d'existants, et features transversales.
 PROMPT;
     }
 }
