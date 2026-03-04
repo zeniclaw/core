@@ -8,14 +8,14 @@ use Illuminate\Support\Facades\Log;
 
 class SpotifyService
 {
-    private string $clientId;
-    private string $clientSecret;
+    private ?string $clientId;
+    private ?string $clientSecret;
     private string $baseUrl = 'https://api.spotify.com/v1';
 
     public function __construct()
     {
-        $this->clientId = config('services.spotify.client_id', '');
-        $this->clientSecret = config('services.spotify.client_secret', '');
+        $this->clientId = config('services.spotify.client_id');
+        $this->clientSecret = config('services.spotify.client_secret');
     }
 
     /**
