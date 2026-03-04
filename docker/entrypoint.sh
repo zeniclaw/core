@@ -35,6 +35,9 @@ SESSION_DRIVER=${SESSION_DRIVER:-redis}
 QUEUE_CONNECTION=${QUEUE_CONNECTION:-redis}
 EOF
 
+# Mark mounted repo as safe for git
+git config --global --add safe.directory /opt/zeniclaw-repo
+
 cd /var/www/html
 
 # Health check before start

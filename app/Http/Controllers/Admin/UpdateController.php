@@ -54,11 +54,19 @@ class UpdateController extends Controller
     public function update(Request $request): JsonResponse
     {
         try {
-            $output = [];
-            Artisan::call('zeniclaw:update', [], $outputBuffer = new \Symfony\Component\Console\Output\BufferedOutput());
+            $outputBuffer = new \Symfony\Component\Console\Output\BufferedOutput();
+            $exitCode = Artisan::call('zeniclaw:update', [], $outputBuffer);
             $output = $outputBuffer->fetch();
 
             $newVersion = trim(file_get_contents(storage_path('app/version.txt')) ?: '1.0.0');
+
+            if ($exitCode !== 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'La mise à jour a échoué',
+                    'output' => $output,
+                ], 500);
+            }
 
             return response()->json([
                 'success' => true,
