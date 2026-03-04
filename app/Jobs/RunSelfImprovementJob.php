@@ -20,7 +20,7 @@ class RunSelfImprovementJob implements ShouldQueue
     public int $timeout = 600;
     public int $tries = 1;
 
-    private string $workdir = '/home/ubuntu/zeniclaw';
+    private string $workdir = '/opt/zeniclaw-repo';
 
     public function __construct(
         public SelfImprovement $improvement,
