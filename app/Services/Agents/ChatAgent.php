@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\Project;
 use App\Services\AgentContext;
 use App\Services\WhisperService;
+use Illuminate\Support\Facades\Cache;
 
 class ChatAgent extends BaseAgent
 {
@@ -69,7 +70,8 @@ class ChatAgent extends BaseAgent
             "Tu tutoies, tu es direct, drôle et bienveillant. " .
             "Tu utilises un langage naturel et détendu (pas trop formel). " .
             "Tu peux utiliser des emojis avec modération. " .
-            "Réponds de manière concise (2-3 phrases max sauf si on te demande plus). " .
+            "Réponds dans la même langue que l'utilisateur. " .
+            $this->buildLengthDirective($context->complexity) .
             "Le message vient de {$context->senderName}.";
 
         $projectContext = $this->buildProjectContext($context);
@@ -77,12 +79,57 @@ class ChatAgent extends BaseAgent
             $systemPrompt .= "\n\n" . $projectContext;
         }
 
+        // Build memory context with longterm summary for long conversations
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $totalEntries = count($memoryData['entries'] ?? []);
         $memoryContext = $this->memory->formatForPrompt($context->agent->id, $context->from);
+
+        if ($totalEntries > 20) {
+            $olderEntries = array_slice($memoryData['entries'], 0, $totalEntries - 20);
+            $longtermSummary = $this->buildLongtermSummary($olderEntries);
+            if ($longtermSummary) {
+                $systemPrompt .= "\n\n--- Résumé des conversations précédentes ---\n" . $longtermSummary . "\n--- Fin résumé ---";
+            }
+        }
+
         if ($memoryContext) {
             $systemPrompt .= "\n\n" . $memoryContext;
         }
 
         return $systemPrompt;
+    }
+
+    private function buildLengthDirective(?string $complexity): string
+    {
+        return match ($complexity) {
+            'complex' => "Tu peux faire des réponses longues et détaillées avec des sections, listes et formatage markdown si nécessaire. ",
+            'medium' => "Tu peux faire des réponses structurées avec des listes à puces et du formatage markdown si utile. Reste clair et organisé. ",
+            default => "Réponds de manière concise (2-3 phrases max sauf si on te demande plus). ",
+        };
+    }
+
+    private function buildLongtermSummary(array $olderEntries): string
+    {
+        $topics = [];
+        foreach ($olderEntries as $entry) {
+            $summary = $entry['summary'] ?? '';
+            if ($summary) {
+                $topics[] = $summary;
+            } else {
+                $msg = mb_substr($entry['sender_message'] ?? '', 0, 80);
+                if ($msg) {
+                    $topics[] = $msg;
+                }
+            }
+        }
+
+        if (empty($topics)) {
+            return '';
+        }
+
+        // Keep only a reasonable number of summarized topics
+        $topics = array_slice($topics, -30);
+        return "Sujets abordés précédemment (" . count($olderEntries) . " échanges) :\n- " . implode("\n- ", $topics);
     }
 
     private function buildMessageContent(AgentContext $context): string|array
@@ -199,60 +246,64 @@ class ChatAgent extends BaseAgent
     private function buildProjectContext(AgentContext $context): ?string
     {
         $phone = $context->from;
-        $session = $context->session;
+        $agentId = $context->agent->id;
+        $activeProjectId = $context->session->active_project_id;
+        $cacheKey = "project_context:{$agentId}:{$phone}";
 
-        $ownedProjects = Project::where('requester_phone', $phone)
-            ->whereIn('status', ['approved', 'in_progress', 'completed'])
-            ->orderByDesc('created_at')
-            ->get();
+        return Cache::remember($cacheKey, 300, function () use ($phone, $activeProjectId) {
+            $ownedProjects = Project::where('requester_phone', $phone)
+                ->whereIn('status', ['approved', 'in_progress', 'completed'])
+                ->orderByDesc('created_at')
+                ->get();
 
-        $allowedProjects = Project::whereNotNull('allowed_phones')
-            ->whereIn('status', ['approved', 'in_progress', 'completed'])
-            ->where('requester_phone', '!=', $phone)
-            ->get()
-            ->filter(fn($p) => is_array($p->allowed_phones) && in_array($phone, $p->allowed_phones));
+            $allowedProjects = Project::whereNotNull('allowed_phones')
+                ->whereIn('status', ['approved', 'in_progress', 'completed'])
+                ->where('requester_phone', '!=', $phone)
+                ->get()
+                ->filter(fn($p) => is_array($p->allowed_phones) && in_array($phone, $p->allowed_phones));
 
-        $allProjects = $ownedProjects->merge($allowedProjects)->unique('id');
+            $allProjects = $ownedProjects->merge($allowedProjects)->unique('id');
 
-        if ($allProjects->isEmpty()) {
-            return "PROJETS: Aucun projet n'est configure pour cet utilisateur. "
-                . "S'il demande de modifier du code ou un projet, dis-lui d'envoyer l'URL GitLab du repo.";
-        }
+            if ($allProjects->isEmpty()) {
+                return "PROJETS: Aucun projet n'est configure pour cet utilisateur. "
+                    . "S'il demande de modifier du code ou un projet, dis-lui d'envoyer l'URL GitLab du repo.";
+            }
 
-        $lines = ["PROJETS CONFIGURES POUR CET UTILISATEUR (donnees reelles de la base de donnees):"];
-        foreach ($allProjects as $project) {
-            $status = match ($project->status) {
-                'approved' => 'pret',
-                'in_progress' => 'en cours',
-                'completed' => 'termine',
-                default => $project->status,
-            };
-
-            $lastTask = $project->subAgents()->orderByDesc('created_at')->first();
-            $line = "- {$project->name} (GitLab: {$project->gitlab_url}, statut: {$status})";
-            if ($lastTask) {
-                $taskStatus = match ($lastTask->status) {
-                    'queued' => 'en attente',
-                    'running' => 'en cours',
+            $lines = ["PROJETS CONFIGURES POUR CET UTILISATEUR (donnees reelles de la base de donnees):"];
+            foreach ($allProjects as $project) {
+                $status = match ($project->status) {
+                    'approved' => 'pret',
+                    'in_progress' => 'en cours',
                     'completed' => 'termine',
-                    'failed' => 'echoue',
-                    'killed' => 'arrete',
-                    default => $lastTask->status,
+                    default => $project->status,
                 };
-                $line .= " — derniere tache: \"{$lastTask->task_description}\" ({$taskStatus})";
+
+                $lastTask = $project->subAgents()->orderByDesc('created_at')->first();
+                $line = "- {$project->name} (GitLab: {$project->gitlab_url}, statut: {$status})";
+                if ($lastTask) {
+                    $taskStatus = match ($lastTask->status) {
+                        'queued' => 'en attente',
+                        'running' => 'en cours',
+                        'completed' => 'termine',
+                        'failed' => 'echoue',
+                        'killed' => 'arrete',
+                        default => $lastTask->status,
+                    };
+                    $line .= " — derniere tache: \"{$lastTask->task_description}\" ({$taskStatus})";
+                }
+                $lines[] = $line;
             }
-            $lines[] = $line;
-        }
 
-        if ($session->active_project_id) {
-            $activeProject = $allProjects->firstWhere('id', $session->active_project_id);
-            if ($activeProject) {
-                $lines[] = "\nPROJET ACTIF ACTUELLEMENT: {$activeProject->name} ({$activeProject->gitlab_url})";
+            if ($activeProjectId) {
+                $activeProject = $allProjects->firstWhere('id', $activeProjectId);
+                if ($activeProject) {
+                    $lines[] = "\nPROJET ACTIF ACTUELLEMENT: {$activeProject->name} ({$activeProject->gitlab_url})";
+                }
             }
-        }
 
-        $lines[] = "Quand l'utilisateur pose une question sur ses projets, utilise UNIQUEMENT ces informations reelles.";
+            $lines[] = "Quand l'utilisateur pose une question sur ses projets, utilise UNIQUEMENT ces informations reelles.";
 
-        return implode("\n", $lines);
+            return implode("\n", $lines);
+        });
     }
 }

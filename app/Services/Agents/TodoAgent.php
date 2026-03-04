@@ -24,13 +24,14 @@ class TodoAgent extends BaseAgent
     {
         $todos = Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
+            ->orderByRaw("FIELD(priority, 'high', 'normal', 'low')")
             ->orderBy('id')
             ->get();
 
         $listText = $this->formatList($todos);
 
         $response = $this->claude->chat(
-            "Message: \"{$context->body}\"\n\nListe actuelle des todos:\n{$listText}",
+            "Message: \"{$context->body}\"\n\nListe actuelle des todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)'),
             'claude-haiku-4-5-20251001',
             $this->buildPrompt()
         );
@@ -46,16 +47,31 @@ class TodoAgent extends BaseAgent
         $action = $parsed['action'];
         $items = $parsed['items'] ?? [];
         $recurrence = $parsed['recurrence'] ?? null;
+        $category = $parsed['category'] ?? null;
+        $priority = $parsed['priority'] ?? 'normal';
+        $dueAt = $parsed['due_at'] ?? null;
 
         switch ($action) {
             case 'add':
                 foreach ($items as $title) {
-                    $todo = Todo::create([
+                    $todoData = [
                         'agent_id' => $context->agent->id,
                         'requester_phone' => $context->from,
                         'requester_name' => $context->senderName,
                         'title' => $title,
-                    ]);
+                        'category' => $category,
+                        'priority' => in_array($priority, ['high', 'normal', 'low']) ? $priority : 'normal',
+                    ];
+
+                    if ($dueAt) {
+                        try {
+                            $todoData['due_at'] = Carbon::parse($dueAt, 'Europe/Paris')->utc();
+                        } catch (\Exception $e) {
+                            // Ignore invalid date
+                        }
+                    }
+
+                    $todo = Todo::create($todoData);
 
                     if ($recurrence) {
                         $reminder = $this->createRecurringReminder($context, $title, $recurrence);
@@ -78,6 +94,12 @@ class TodoAgent extends BaseAgent
                 $this->deleteTodos($todos, $items);
                 break;
 
+            case 'stats':
+                $reply = $this->buildStats($context);
+                $this->sendText($context->from, $reply);
+                $this->log($context, "Todo action: stats", ['todo_count' => $todos->count()]);
+                return AgentResult::reply($reply, ['action' => 'todo_stats']);
+
             case 'list':
                 break;
         }
@@ -85,6 +107,7 @@ class TodoAgent extends BaseAgent
         // Reload and reply
         $todos = Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
+            ->orderByRaw("FIELD(priority, 'high', 'normal', 'low')")
             ->orderBy('id')
             ->get();
 
@@ -94,6 +117,9 @@ class TodoAgent extends BaseAgent
         $this->log($context, "Todo action: {$action}", [
             'items' => $items,
             'recurrence' => $recurrence,
+            'category' => $category,
+            'priority' => $priority,
+            'due_at' => $dueAt,
             'todo_count' => $todos->count(),
         ]);
 
@@ -107,7 +133,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur te donne un message et tu dois determiner l'action a effectuer.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list", "items": [...], "recurrence": "weekly:thursday:09:00" | null}
+{"action": "add|check|uncheck|delete|list|stats", "items": [...], "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). Si l'utilisateur mentionne un horaire recurrent (chaque jour/semaine/mois), remplis "recurrence".
@@ -115,6 +141,7 @@ ACTIONS:
 - "uncheck": decocher des taches. items = liste de numeros (integers, base 1).
 - "delete": supprimer des taches. items = liste de numeros (integers, base 1).
 - "list": afficher la liste. items = [] (vide).
+- "stats": afficher les statistiques. items = [] (vide). Declenchee par "mes stats", "statistiques", "mon historique", "bilan", etc.
 
 FORMAT RECURRENCE (uniquement pour "add"):
 - "daily:HH:MM" — chaque jour a HH:MM
@@ -122,13 +149,33 @@ FORMAT RECURRENCE (uniquement pour "add"):
 - "monthly:DAY:HH:MM" — chaque mois le jour du mois (1-31)
 - null si pas de recurrence
 
+CATEGORY (uniquement pour "add"):
+- Extraire la categorie si l'utilisateur mentionne une liste/categorie : "ajoute pain dans courses" → category: "courses"
+- Mots-cles : "dans", "liste", "categorie", "dossier"
+- null si pas de categorie mentionnee
+
+PRIORITY (uniquement pour "add"):
+- "high" si l'utilisateur dit "urgent", "important", "prioritaire", "URGENT", "critique"
+- "low" si l'utilisateur dit "quand j'ai le temps", "pas urgent", "basse priorite", "optionnel"
+- "normal" par defaut
+
+DUE_AT (uniquement pour "add"):
+- Extraire la date/heure limite si mentionnee : "pour vendredi", "avant le 15 mars", "pour demain"
+- Format : "YYYY-MM-DD HH:MM" (utiliser 23:59 si pas d'heure precise)
+- Utiliser la date actuelle fournie dans le message pour calculer les dates relatives
+- null si pas de deadline
+
 EXEMPLES:
-- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "recurrence": null}
-- "coche le 2" → {"action": "check", "items": [2], "recurrence": null}
-- "supprime le 1 et le 3" → {"action": "delete", "items": [1, 3], "recurrence": null}
-- "ma liste" → {"action": "list", "items": [], "recurrence": null}
-- "ajoute sortir les poubelles chaque jeudi a 9h" → {"action": "add", "items": ["Sortir les poubelles"], "recurrence": "weekly:thursday:09:00"}
-- "ajoute faire du sport tous les jours a 7h" → {"action": "add", "items": ["Faire du sport"], "recurrence": "daily:07:00"}
+- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ajoute pain dans courses" → {"action": "add", "items": ["Pain"], "recurrence": null, "category": "courses", "priority": "normal", "due_at": null}
+- "ajoute URGENT appeler le dentiste" → {"action": "add", "items": ["Appeler le dentiste"], "recurrence": null, "category": null, "priority": "high", "due_at": null}
+- "ajoute finir le rapport pour vendredi" → {"action": "add", "items": ["Finir le rapport"], "recurrence": null, "category": null, "priority": "normal", "due_at": "2026-03-06 23:59"}
+- "coche le 2" → {"action": "check", "items": [2], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "supprime le 1 et le 3" → {"action": "delete", "items": [1, 3], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ma liste" → {"action": "list", "items": [], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mes stats" → {"action": "stats", "items": [], "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ajoute sortir les poubelles chaque jeudi a 9h" → {"action": "add", "items": ["Sortir les poubelles"], "recurrence": "weekly:thursday:09:00", "category": null, "priority": "normal", "due_at": null}
+- "ajoute faire du sport tous les jours a 7h" → {"action": "add", "items": ["Faire du sport"], "recurrence": "daily:07:00", "category": null, "priority": "normal", "due_at": null}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -145,7 +192,10 @@ PROMPT;
             $num = $i + 1;
             $check = $todo->is_done ? 'x' : ' ';
             $recurrenceHint = $todo->reminder_id ? $this->formatRecurrenceHint($todo) : '';
-            $lines[] = "#{$num} [{$check}] {$todo->title}{$recurrenceHint}";
+            $categoryHint = $todo->category ? " [{$todo->category}]" : '';
+            $priorityHint = $todo->priority !== 'normal' ? " ({$todo->priority})" : '';
+            $dueHint = $todo->due_at ? " (echeance: {$todo->due_at->format('Y-m-d')})" : '';
+            $lines[] = "#{$num} [{$check}] {$todo->title}{$categoryHint}{$priorityHint}{$dueHint}{$recurrenceHint}";
         }
 
         return implode("\n", $lines);
@@ -188,12 +238,183 @@ PROMPT;
             return "📋 Ta liste de todos est vide !";
         }
 
+        // Check if any todo has a category
+        $hasCategories = $todos->whereNotNull('category')->isNotEmpty();
+
+        if ($hasCategories) {
+            return $this->buildGroupedReply($todos);
+        }
+
+        return $this->buildFlatReply($todos);
+    }
+
+    private function buildFlatReply($todos): string
+    {
         $lines = ["📋 *Ta liste de todos :*"];
         foreach ($todos->values() as $i => $todo) {
             $num = $i + 1;
-            $check = $todo->is_done ? '✅' : '⬜';
-            $recurrenceHint = $todo->reminder_id ? $this->formatRecurrenceHint($todo) : '';
-            $lines[] = "{$num}. {$check} {$todo->title}{$recurrenceHint}";
+            $lines[] = "{$num}. " . $this->formatTodoLine($todo);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function buildGroupedReply($todos): string
+    {
+        $lines = ["📋 *Ta liste de todos :*"];
+
+        // Group by category
+        $grouped = $todos->groupBy(fn ($todo) => $todo->category ?? '__sans_categorie__');
+
+        // Global numbering across all categories
+        $num = 1;
+
+        // Uncategorized first if they exist
+        if ($grouped->has('__sans_categorie__')) {
+            $lines[] = '';
+            foreach ($grouped->get('__sans_categorie__') as $todo) {
+                $lines[] = "{$num}. " . $this->formatTodoLine($todo);
+                $num++;
+            }
+            $grouped->forget('__sans_categorie__');
+        }
+
+        // Then each category
+        foreach ($grouped as $category => $categoryTodos) {
+            $emoji = $this->getCategoryEmoji($category);
+            $lines[] = '';
+            $lines[] = "{$emoji} *" . ucfirst($category) . " :*";
+            foreach ($categoryTodos as $todo) {
+                $lines[] = "{$num}. " . $this->formatTodoLine($todo);
+                $num++;
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function formatTodoLine(Todo $todo): string
+    {
+        $priorityIcon = match ($todo->priority) {
+            'high' => '🔴',
+            'low' => '🔵',
+            default => $todo->is_done ? '✅' : '⬜',
+        };
+
+        // For high/low priority, still show check status
+        if ($todo->priority !== 'normal') {
+            $check = $todo->is_done ? '✅' : $priorityIcon;
+        } else {
+            $check = $priorityIcon;
+        }
+
+        $line = "{$check} {$todo->title}";
+
+        // Add deadline info
+        if ($todo->due_at) {
+            $line .= $this->formatDueDate($todo);
+        }
+
+        // Add recurrence info
+        if ($todo->reminder_id) {
+            $line .= $this->formatRecurrenceHint($todo);
+        }
+
+        return $line;
+    }
+
+    private function formatDueDate(Todo $todo): string
+    {
+        $now = now('Europe/Paris');
+        $due = $todo->due_at->copy()->timezone('Europe/Paris');
+
+        $dayNames = [
+            'Monday' => 'lun.',
+            'Tuesday' => 'mar.',
+            'Wednesday' => 'mer.',
+            'Thursday' => 'jeu.',
+            'Friday' => 'ven.',
+            'Saturday' => 'sam.',
+            'Sunday' => 'dim.',
+        ];
+
+        $dayName = $dayNames[$due->format('l')] ?? $due->format('l');
+        $dateStr = $dayName . ' ' . $due->format('d/m');
+
+        // Check if overdue (and not done)
+        if (!$todo->is_done && $due->lt($now)) {
+            return " (📅 {$dateStr} ⚠️ EN RETARD)";
+        }
+
+        return " (📅 {$dateStr})";
+    }
+
+    private function getCategoryEmoji(string $category): string
+    {
+        $map = [
+            'courses' => '🛒',
+            'travail' => '💼',
+            'boulot' => '💼',
+            'perso' => '🏠',
+            'personnel' => '🏠',
+            'maison' => '🏠',
+            'sante' => '🏥',
+            'santé' => '🏥',
+            'sport' => '🏃',
+            'admin' => '📄',
+            'administratif' => '📄',
+            'projet' => '🚀',
+            'projets' => '🚀',
+            'urgent' => '🔴',
+        ];
+
+        return $map[strtolower($category)] ?? '📌';
+    }
+
+    private function buildStats(AgentContext $context): string
+    {
+        $allTodos = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->get();
+
+        $completed = $allTodos->where('is_done', true)->count();
+        $pending = $allTodos->where('is_done', false)->count();
+        $total = $allTodos->count();
+
+        if ($total === 0) {
+            return "📊 Pas encore de todos ! Ajoute ta premiere tache.";
+        }
+
+        $rate = round(($completed / $total) * 100);
+
+        $lines = [
+            "📊 *Tes stats :*",
+            "✅ {$completed} completee" . ($completed > 1 ? 's' : ''),
+            "⬜ {$pending} en cours",
+            "📈 Taux : {$rate}%",
+        ];
+
+        // Overdue count
+        $overdue = $allTodos->where('is_done', false)
+            ->filter(fn ($t) => $t->due_at && $t->due_at->lt(now()))
+            ->count();
+
+        if ($overdue > 0) {
+            $lines[] = "⚠️ {$overdue} en retard";
+        }
+
+        // Category breakdown if categories exist
+        $withCategories = $allTodos->whereNotNull('category');
+        if ($withCategories->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = '*Par categorie :*';
+            $grouped = $withCategories->groupBy('category');
+            foreach ($grouped as $cat => $catTodos) {
+                $catDone = $catTodos->where('is_done', true)->count();
+                $catTotal = $catTodos->count();
+                $emoji = $this->getCategoryEmoji($cat);
+                $lines[] = "{$emoji} " . ucfirst($cat) . " : {$catDone}/{$catTotal}";
+            }
         }
 
         return implode("\n", $lines);

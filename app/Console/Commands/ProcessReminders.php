@@ -46,7 +46,7 @@ class ProcessReminders extends Command
                         'scheduled_at' => $nextAt->utc(),
                         'sent_at' => now(),
                     ]);
-                    $this->info("  ↳ Recurring — next occurrence: {$nextAt}");
+                    $this->info("  -> Recurring — next occurrence: {$nextAt}");
                 } else {
                     $reminder->update(['status' => 'sent', 'sent_at' => now()]);
                 }
@@ -65,6 +65,7 @@ class ProcessReminders extends Command
 
         return match ($type) {
             'daily' => $this->nextDaily($parts, $from),
+            'weekdays' => $this->nextWeekdays($parts, $from),
             'weekly' => $this->nextWeekly($parts, $from),
             'monthly' => $this->nextMonthly($parts, $from),
             default => null,
@@ -77,6 +78,25 @@ class ProcessReminders extends Command
         [$h, $m] = explode(':', $time) + [0 => 8, 1 => 0];
 
         return $from->copy()->addDay()->setTime((int) $h, (int) $m, 0);
+    }
+
+    /**
+     * Weekdays (Monday-Friday) recurrence
+     * Format: weekdays:HH:MM
+     */
+    private function nextWeekdays(array $parts, Carbon $from): Carbon
+    {
+        $time = $parts[1] ?? '08:00';
+        [$h, $m] = explode(':', $time) + [0 => 8, 1 => 0];
+
+        $next = $from->copy()->addDay()->setTime((int) $h, (int) $m, 0);
+
+        // Skip Saturday (6) and Sunday (7)
+        while ($next->isWeekend()) {
+            $next->addDay();
+        }
+
+        return $next;
     }
 
     private function nextWeekly(array $parts, Carbon $from): Carbon
@@ -104,12 +124,20 @@ class ProcessReminders extends Command
 
     private function sendWhatsApp(Reminder $reminder): void
     {
+        // Build the message text
+        $text = "Rappel : {$reminder->message}";
+
+        // Add snooze hint for non-recurring reminders
+        if (!$reminder->recurrence_rule) {
+            $text .= "\n\n_Reponds 'fait' pour confirmer ou '5min'/'1h'/'demain' pour reporter._";
+        }
+
         try {
             Http::timeout(10)
                 ->withHeaders(['X-Api-Key' => $this->wahaApiKey])
                 ->post("{$this->wahaBase}/api/sendText", [
                     'chatId' => $reminder->requester_phone,
-                    'text' => "Rappel : {$reminder->message}",
+                    'text' => $text,
                     'session' => 'default',
                 ]);
         } catch (\Throwable $e) {

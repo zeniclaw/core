@@ -49,6 +49,8 @@ class RunSubAgentJob implements ShouldQueue
     }
 
     private string $workspace;
+    private string $lastToolUsed = '';
+    private float $lastProgressNotification = 0;
 
     public function __construct(
         public SubAgent $subAgent
@@ -71,7 +73,7 @@ class RunSubAgentJob implements ShouldQueue
             $this->subAgent->appendLog("[START] SubAgent #{$this->subAgent->id} demarré");
 
             // Step 1: Clone the repo
-            $this->notifyRequester("[1/6] Recuperation du repo...");
+            $this->notifyRequester("[1/8] Recuperation du repo...");
             $this->cloneRepo();
 
             // Step 2: Reuse existing branch or create new one
@@ -79,24 +81,31 @@ class RunSubAgentJob implements ShouldQueue
             $this->subAgent->update(['branch_name' => $branchName]);
 
             // Step 3: Run ZeniClaw AI with context from previous tasks
-            $this->notifyRequester("[2/6] ZeniClaw AI analyse et applique les modifications...");
+            $this->notifyRequester("[2/8] ZeniClaw AI analyse et applique les modifications...");
             $this->runClaudeCode();
 
             // Step 3.5: Verify the work and retry if needed
-            $this->notifyRequester("[3/6] Verification du code...");
+            $this->notifyRequester("[3/8] Verification du code...");
             $this->verifyAndRetryIfNeeded();
 
             // Step 4: Commit and push
-            $this->notifyRequester("[4/6] Push du code...");
+            $this->notifyRequester("[4/8] Push du code...");
             $commitHash = $this->commitAndPush($branchName);
             $this->subAgent->update(['commit_hash' => $commitHash]);
 
+            // Step 4.5: Send diff preview to user
+            $this->sendDiffPreview();
+
+            // Step 4.6: Security analysis
+            $this->notifyRequester("[5/8] Analyse de securite...");
+            $this->runSecurityAnalysis();
+
             // Step 5: Create Merge Request (only if none exists for this branch)
-            $this->notifyRequester("[5/6] Creation et merge de la MR...");
+            $this->notifyRequester("[6/8] Creation et merge de la MR...");
             $mrUrl = $this->findOrCreateMergeRequest($branchName);
 
-            // Step 6: Verify deployment on Laravel Cloud
-            $this->notifyRequester("[6/6] Verification du deploiement...");
+            // Step 7: Verify deployment on Laravel Cloud
+            $this->notifyRequester("[7/8] Verification du deploiement...");
             $deployStatus = $this->checkLaravelCloudDeployment();
 
             $this->subAgent->update([
@@ -184,7 +193,7 @@ class RunSubAgentJob implements ShouldQueue
         $task = $this->subAgent->task_description;
         $verifyPrompt = "Tache demandee:\n{$task}\n\n"
             . "Fichiers modifies:\n{$status}\n\n"
-            . "Diff des modifications:\n" . substr($diff, 0, 8000) . "\n\n";
+            . "Diff des modifications:\n" . substr($diff, 0, 15000) . "\n\n";
 
         if ($syntaxErrors) {
             $verifyPrompt .= "ERREURS DE SYNTAXE PHP DETECTEES:\n" . implode("\n", $syntaxErrors) . "\n\n";
@@ -274,7 +283,7 @@ class RunSubAgentJob implements ShouldQueue
 
             // Step 2: After deploy succeeds, wait a bit then check app logs for errors
             $this->subAgent->appendLog("[DEPLOY] Deploiement reussi ! Verification des logs applicatifs...");
-            $this->notifyRequester("[6/6] Deploy OK. Verification des logs pour erreurs...");
+            $this->notifyRequester("[8/8] Deploy OK. Verification des logs pour erreurs...");
             sleep(20); // Wait for app to start serving requests
 
             $errors = $this->checkCloudAppLogs($cloudToken, $envId);
@@ -631,6 +640,7 @@ class RunSubAgentJob implements ShouldQueue
             }
 
             $this->consumeProcessOutput($process, $apiCalls);
+            $this->sendProgressNotificationIfNeeded();
             usleep(500_000);
         }
 
@@ -724,6 +734,7 @@ class RunSubAgentJob implements ShouldQueue
                             'Grep' => "Recherche code: " . ($input['pattern'] ?? '?'),
                             default => "Outil: {$tool}",
                         };
+                        $this->lastToolUsed = $desc;
                         $this->subAgent->appendLog("[TOOL] {$desc}");
                     }
                 }
@@ -971,6 +982,147 @@ class RunSubAgentJob implements ShouldQueue
             Process::run("kill -KILL -{$pid} 2>/dev/null || kill -KILL {$pid} 2>/dev/null");
         } catch (\Throwable $e) {
             // Process may already be dead
+        }
+    }
+
+    /**
+     * Send a progress notification every 60 seconds during Claude Code execution.
+     * Shows the last tool being used.
+     */
+    private function sendProgressNotificationIfNeeded(): void
+    {
+        $now = microtime(true);
+        if ($this->lastProgressNotification === 0.0) {
+            $this->lastProgressNotification = $now;
+            return;
+        }
+
+        if (($now - $this->lastProgressNotification) >= 60 && $this->lastToolUsed) {
+            $this->notifyRequester("⏳ En cours : {$this->lastToolUsed}...");
+            $this->lastProgressNotification = $now;
+        }
+    }
+
+    /**
+     * Send a diff preview summary to the user after commit.
+     * Uses Haiku to summarize the diff in max 5 lines.
+     */
+    private function sendDiffPreview(): void
+    {
+        try {
+            $diffResult = Process::path($this->workspace)->run('git diff HEAD~1 HEAD');
+            $diff = $diffResult->output();
+
+            if (empty(trim($diff))) {
+                return;
+            }
+
+            // Get list of changed files
+            $filesResult = Process::path($this->workspace)->run('git diff --name-only HEAD~1 HEAD');
+            $files = trim($filesResult->output());
+
+            $claude = new AnthropicClient();
+            $summary = $claude->chat(
+                "Voici le diff d'un commit:\n\nFichiers modifies:\n{$files}\n\nDiff:\n" . substr($diff, 0, 15000),
+                'claude-haiku-4-5-20251001',
+                "Tu resumes un diff git en 5 lignes maximum.\n"
+                . "Format STRICT a respecter:\n"
+                . "Modifications :\n"
+                . "- fichier1 : description courte du changement\n"
+                . "- fichier2 : description courte du changement\n"
+                . "Regroupe les fichiers lies. Sois concis (1 ligne par fichier ou groupe). Max 5 lignes."
+            );
+
+            if ($summary) {
+                $this->notifyRequester($summary);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Failed to send diff preview: " . $e->getMessage());
+            $this->subAgent->appendLog("[PREVIEW] Erreur lors du resume du diff: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Run a security analysis on the committed diff using Haiku.
+     * Scans for: hardcoded secrets, SQL/XSS injections, OWASP vulnerabilities.
+     * Logs warnings and notifies user if critical issues found, but does not block.
+     */
+    private function runSecurityAnalysis(): void
+    {
+        try {
+            $diffResult = Process::path($this->workspace)->run('git diff HEAD~1 HEAD');
+            $diff = $diffResult->output();
+
+            if (empty(trim($diff))) {
+                $this->subAgent->appendLog("[SECURITY] Aucune modification a analyser");
+                return;
+            }
+
+            $claude = new AnthropicClient();
+            $response = $claude->chat(
+                "Analyse ce diff git pour des problemes de securite:\n\n" . substr($diff, 0, 15000),
+                'claude-haiku-4-5-20251001',
+                "Tu es un expert en securite applicative. Analyse ce diff pour detecter:\n"
+                . "1. Secrets/credentials/API keys hardcodes (tokens, mots de passe, cles privees)\n"
+                . "2. Injections SQL (requetes non parametrees, concatenation de variables dans du SQL)\n"
+                . "3. Failles XSS (output non echappe, {!! !!} avec input utilisateur)\n"
+                . "4. Autres failles OWASP (CSRF manquant, IDOR, path traversal, deserialisation non securisee)\n\n"
+                . "Reponds UNIQUEMENT par un JSON:\n"
+                . "{\"safe\": true/false, \"issues\": [{\"severity\": \"critical|warning\", \"file\": \"fichier\", \"description\": \"description\"}]}\n"
+                . "- safe=true si aucun probleme detecte\n"
+                . "- safe=false si au moins un probleme\n"
+                . "- Ne signale PAS les faux positifs evidents (ex: cles dans .env.example, mots de passe de test)\n"
+                . "Reponds UNIQUEMENT avec le JSON."
+            );
+
+            $clean = trim($response ?? '');
+            if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+                $clean = $m[1];
+            }
+            if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+                $clean = $m[1];
+            }
+
+            $result = json_decode($clean, true);
+
+            if (!$result) {
+                $this->subAgent->appendLog("[SECURITY] Impossible de parser la reponse de l'analyse de securite");
+                return;
+            }
+
+            if ($result['safe'] ?? true) {
+                $this->subAgent->appendLog("[SECURITY] Aucun probleme de securite detecte");
+                return;
+            }
+
+            $issues = $result['issues'] ?? [];
+            $criticalIssues = [];
+            $allIssueLines = [];
+
+            foreach ($issues as $issue) {
+                $severity = $issue['severity'] ?? 'warning';
+                $file = $issue['file'] ?? '?';
+                $desc = $issue['description'] ?? '?';
+                $line = "[{$severity}] {$file}: {$desc}";
+                $allIssueLines[] = $line;
+
+                if ($severity === 'critical') {
+                    $criticalIssues[] = "- {$file}: {$desc}";
+                }
+            }
+
+            $logMessage = "[SECURITY] Problemes detectes:\n" . implode("\n", $allIssueLines);
+            $this->subAgent->appendLog($logMessage);
+            Log::warning("SubAgent #{$this->subAgent->id} security issues", ['issues' => $issues]);
+
+            if (!empty($criticalIssues)) {
+                $notification = "⚠️ Alerte securite :\n" . implode("\n", array_slice($criticalIssues, 0, 5))
+                    . "\n\nLe code a ete pousse malgre tout. Verifie ces points.";
+                $this->notifyRequester($notification);
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Security analysis failed: " . $e->getMessage());
+            $this->subAgent->appendLog("[SECURITY] Erreur lors de l'analyse: " . $e->getMessage());
         }
     }
 
