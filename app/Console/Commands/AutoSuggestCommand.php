@@ -2,8 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\RunSelfImprovementJob;
 use App\Models\Agent;
+use App\Models\AppSetting;
+use App\Models\Project;
 use App\Models\SelfImprovement;
+use App\Models\SubAgent;
 use App\Services\AnthropicClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
@@ -64,6 +68,19 @@ class AutoSuggestCommand extends Command
             return self::FAILURE;
         }
 
+        // 5. Get or create the ZeniClaw project
+        $project = $this->getOrCreateZeniclawProject($agent);
+
+        // 6. Create SubAgent
+        $defaultTimeout = (int) (AppSetting::get('subagent_default_timeout') ?: 10);
+        $subAgent = SubAgent::create([
+            'project_id' => $project->id,
+            'status' => 'queued',
+            'task_description' => "Auto-amelioration: {$idea['title']}\n\n{$idea['plan']}",
+            'timeout_minutes' => $defaultTimeout,
+        ]);
+
+        // 7. Create improvement linked to SubAgent, status in_progress
         $improvement = SelfImprovement::create([
             'agent_id' => $agent->id,
             'trigger_message' => '[Auto-Suggest] ' . $idea['title'],
@@ -77,19 +94,50 @@ class AutoSuggestCommand extends Command
             ],
             'improvement_title' => $idea['title'],
             'development_plan' => $idea['plan'],
-            'status' => 'approved',
+            'status' => 'in_progress',
+            'sub_agent_id' => $subAgent->id,
         ]);
 
-        // 6. Update cache history
+        // 8. Dispatch the job
+        RunSelfImprovementJob::dispatch($improvement, $subAgent);
+
+        // 9. Update cache history
         $history[] = $idea['title'];
         if (count($history) > 50) {
             $history = array_slice($history, -50);
         }
         Cache::put('auto_suggest_history', $history);
 
-        $this->info("✅ Improvement #{$improvement->id} created: {$idea['title']}");
+        $this->info("✅ Improvement #{$improvement->id} created + SubAgent #{$subAgent->id} launched: {$idea['title']}");
 
         return self::SUCCESS;
+    }
+
+    private function getOrCreateZeniclawProject(Agent $agent): Project
+    {
+        $projectId = AppSetting::get('zeniclaw_project_id');
+        if ($projectId) {
+            $project = Project::find($projectId);
+            if ($project) return $project;
+        }
+
+        $project = Project::where('name', 'ZeniClaw (Auto-Improve)')->first();
+        if ($project) return $project;
+
+        $project = Project::create([
+            'name' => 'ZeniClaw (Auto-Improve)',
+            'gitlab_url' => 'https://gitlab.com/zenidev/zeniclaw.git',
+            'request_description' => 'Projet auto-genere pour les auto-ameliorations de ZeniClaw.',
+            'requester_phone' => 'system',
+            'requester_name' => 'ZeniClaw Auto-Improve',
+            'agent_id' => $agent->id,
+            'status' => 'approved',
+            'approved_at' => now(),
+        ]);
+
+        AppSetting::set('zeniclaw_project_id', (string) $project->id);
+
+        return $project;
     }
 
     private function buildSystemPrompt(): string
