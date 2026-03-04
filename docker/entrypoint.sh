@@ -66,14 +66,21 @@ service nginx start
 echo "🧹 Cleaning up orphaned SubAgents + stuck improvements..."
 php artisan subagents:cleanup --no-interaction
 
-# Re-queue stuck self-improvements (in_progress with a queued/running SubAgent that lost its process)
+# Sync improvement statuses with their sub-agents + re-queue stuck ones
 php artisan tinker --execute='
-$stuck = \App\Models\SelfImprovement::where("status", "in_progress")
+$improvements = \App\Models\SelfImprovement::whereIn("status", ["in_progress", "approved"])
     ->whereNotNull("sub_agent_id")
     ->get();
-foreach ($stuck as $si) {
+foreach ($improvements as $si) {
     $sa = $si->subAgent;
-    if ($sa && in_array($sa->status, ["queued", "running"]) && !$sa->pid) {
+    if (!$sa) continue;
+    if ($sa->status === "failed") {
+        $si->update(["status" => "failed"]);
+        echo "Synced improvement #{$si->id} to failed (sub-agent failed)\n";
+    } elseif ($sa->status === "completed") {
+        $si->update(["status" => "completed"]);
+        echo "Synced improvement #{$si->id} to completed\n";
+    } elseif (in_array($sa->status, ["queued", "running"]) && !$sa->pid) {
         $sa->update(["status" => "queued", "pid" => null]);
         \App\Jobs\RunSelfImprovementJob::dispatch($si, $sa);
         echo "Re-queued improvement #{$si->id}: {$si->improvement_title}\n";
