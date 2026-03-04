@@ -61,7 +61,15 @@ class AutoSuggestCommand extends Command
             return self::FAILURE;
         }
 
-        // 5. Create approved SelfImprovement
+        // 4b. Check for similar existing improvement (anti-doublon)
+        $similar = $this->findSimilarImprovement($idea['title'], $exclusions, $claude);
+        if ($similar) {
+            $this->warn("⚠ Similar improvement exists: \"{$similar}\" — skipping.");
+            Log::info('AutoSuggest: skipped duplicate', ['proposed' => $idea['title'], 'similar' => $similar]);
+            return self::SUCCESS;
+        }
+
+        // 5. Create improvement + SubAgent + dispatch job
         $agent = Agent::first();
         if (!$agent) {
             $this->error('No agent found in database.');
@@ -111,6 +119,39 @@ class AutoSuggestCommand extends Command
         $this->info("✅ Improvement #{$improvement->id} created + SubAgent #{$subAgent->id} launched: {$idea['title']}");
 
         return self::SUCCESS;
+    }
+
+    private function findSimilarImprovement(string $title, array $existingTitles, AnthropicClient $claude): ?string
+    {
+        if (empty($existingTitles)) {
+            return null;
+        }
+
+        // Quick exact match
+        foreach ($existingTitles as $existing) {
+            if (mb_strtolower(trim($existing)) === mb_strtolower(trim($title))) {
+                return $existing;
+            }
+        }
+
+        // Use Claude to detect semantic duplicates
+        $titlesList = implode("\n", array_map(fn($t, $i) => ($i + 1) . ". {$t}", array_values($existingTitles), array_keys($existingTitles)));
+        $response = $claude->chat(
+            "Nouvelle proposition: \"{$title}\"\n\nListe existante:\n{$titlesList}\n\n"
+            . "Y a-t-il une entrée dans la liste qui couvre EXACTEMENT le même sujet ou la même fonctionnalité ? "
+            . "Réponds UNIQUEMENT par le numéro de l'entrée similaire, ou \"0\" si aucune n'est similaire.",
+            'claude-haiku-4-5-20251001',
+            "Tu détectes les doublons sémantiques. Deux entrées sont similaires si elles proposent la même fonctionnalité, "
+            . "même si les mots diffèrent. Exemple: 'agent météo' et 'WeatherAgent pour prévisions' = SIMILAIRE. "
+            . "Mais 'agent météo' et 'agent traduction' = PAS SIMILAIRE. Réponds UNIQUEMENT par un numéro."
+        );
+
+        $num = (int) trim($response ?? '0');
+        if ($num > 0 && $num <= count($existingTitles)) {
+            return array_values($existingTitles)[$num - 1];
+        }
+
+        return null;
     }
 
     private function getOrCreateZeniclawProject(Agent $agent): Project
