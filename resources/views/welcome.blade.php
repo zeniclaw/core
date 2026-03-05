@@ -1,9 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ZeniClaw - AI-Powered WhatsApp Platform</title>
+
+{{-- SEO --}}
+<title>ZeniClaw — Plateforme IA WhatsApp Self-Hosted | 19 Agents Autonomes</title>
+<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 19 agents specialises. Gerez vos projets, finances, rappels et plus depuis un simple chat WhatsApp. Propulse par Claude et GPT-4.">
+<meta name="keywords" content="zeniclaw, whatsapp ia, chatbot whatsapp, ai agents, self-hosted, open source, claude, gpt-4, assistant ia, automatisation whatsapp, crm whatsapp">
+<meta name="author" content="ZeniBiz">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{ url('/') }}">
+
+{{-- Open Graph (Facebook, Instagram, WhatsApp, LinkedIn) --}}
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ url('/') }}">
+<meta property="og:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
+<meta property="og:description" content="Plateforme IA self-hosted avec 19 agents autonomes. Projets, finances, rappels, code reviews, flashcards — tout depuis WhatsApp. Open source et gratuit.">
+<meta property="og:image" content="{{ url('/og-image.php') }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:site_name" content="ZeniClaw">
+<meta property="og:locale" content="fr_FR">
+
+{{-- Twitter Card --}}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
+<meta name="twitter:description" content="Plateforme IA self-hosted avec 19 agents autonomes. Projets, finances, rappels, code reviews — tout depuis WhatsApp.">
+<meta name="twitter:image" content="{{ url('/og-image.php') }}">
+
+{{-- Favicon --}}
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+
+{{-- Structured Data (JSON-LD) --}}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "ZeniClaw",
+  "description": "Plateforme IA open source et self-hosted avec 19 agents specialises accessibles via WhatsApp.",
+  "url": "{{ url('/') }}",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Linux",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "EUR"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "ZeniBiz",
+    "url": "https://www.zenibiz.com"
+  },
+  "screenshot": "{{ url('/og-image.php') }}",
+  "featureList": "19 AI Agents, WhatsApp Integration, Self-Hosted, Open Source, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Flashcards, Reminders"
+}
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
