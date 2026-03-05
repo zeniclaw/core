@@ -131,6 +131,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Habit keywords → habit agent with Haiku
+        if ($context->body && $this->detectHabitKeywords($context->body)) {
+            return [
+                'agent' => 'habit',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Habit/streak/tracker pattern detected — fast-path to habit agent',
+            ];
+        }
+
         // Fast-path: Event reminder keywords → event_reminder agent with Haiku
         if ($context->body && $this->detectEventReminderKeywords($context->body)) {
             return [
@@ -229,6 +240,7 @@ AGENTS DISPONIBLES:
 - "code_review" = revue de code, analyse de code, verifier du code, code review, bugs, securite code
 - "screenshot" = capture ecran, screenshot, OCR, extract text, annoter image, comparer images, annotation
 - "event_reminder" = evenement a planifier, rappel d'evenement, calendrier, remind me about, add event, list events, rendez-vous
+- "habit" = suivi d'habitudes, streaks, tracker d'habitudes, challenge quotidien, ajouter/cocher habitude, stats habitudes
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -249,6 +261,7 @@ REGLES DE SELECTION DU MODELE:
 - screenshot → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - content_summarizer → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - event_reminder → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- habit → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -272,6 +285,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - SCREENSHOT = "screenshot", "capture ecran", "extract text", "OCR", "annoter", "annotate", "comparer images", "lire le texte", "@screenshot". Tout ce qui concerne le traitement d'images: extraction de texte, annotation, comparaison.
 - CONTENT_SUMMARIZER = resume de liens, articles web, videos YouTube. Si le message contient une URL (http/https) avec intention de resume ou simplement un lien partage.
 - EVENT_REMINDER = evenement planifie, "remind me about", "add event", "list events", "remove event", rendez-vous, calendrier, "event on", planifier un evenement. ATTENTION: ne pas confondre avec REMINDER (rappel simple/timer) — EVENT_REMINDER est pour les evenements avec date/heure/lieu specifiques.
+- HABIT = habitude, streak, tracker, challenge, "ajouter habitude", "cocher habitude", "mes habitudes", "stats habitudes", "j'ai fait" (dans le contexte d'habitudes), suivi quotidien. Tout ce qui concerne le suivi d'habitudes et de routines.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -322,7 +336,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer', 'event_reminder'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer', 'event_reminder', 'habit'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -577,6 +591,28 @@ PROMPT;
             '/\b(ajouter?|creer?|planifier)\s+(un\s+)?(evenement|event|rdv|rendez[\s-]?vous)\b/iu',
             '/\b(mes\s+)?(evenements?|events?|calendrier)\b/iu',
             '/\b(supprimer|annuler)\s+(un\s+)?(evenement|event)\b/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectHabitKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\bhabitude(s)?\b/iu',
+            '/\bstreak(s)?\b/i',
+            '/\btracker\s+(d\')?habitude/iu',
+            '/\b(ajouter|nouvelle|creer)\s+habitude\b/iu',
+            '/\bcocher\s+habitude\b/iu',
+            '/\bmes\s+habitudes\b/iu',
+            '/\bstats?\s+habitude/iu',
+            '/\bchallenge\s+(quotidien|daily|hebdo)/iu',
+            '/\bhabit\s+(tracker|log|check)\b/i',
+            '/\b(daily|weekly)\s+habit\b/i',
         ];
 
         foreach ($patterns as $pattern) {
