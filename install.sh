@@ -353,6 +353,52 @@ preflight_checks() {
     offer_install "openssl" "openssl" "true"
     offer_install "git"     "git"     "true"
 
+    # Check Node.js (needed for Claude Code CLI inside container and on host)
+    info "Checking Node.js..."
+    if check_command node; then
+        local node_ver
+        node_ver=$(node --version 2>/dev/null || echo "unknown")
+        success "Node.js found ($node_ver)"
+    else
+        warn "Node.js is not installed."
+        echo -ne "${PURPLE}🔹 Install Node.js 20 now? ${DIM}[Y/n]${NC}: "
+        read -r answer
+        if [[ "${answer,,}" != "n" ]]; then
+            info "Installing Node.js 20 via nodesource..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+            sudo apt-get install -y nodejs
+            if check_command node; then
+                success "Node.js installed ($(node --version))"
+            else
+                warn "Node.js installation failed. Claude Code CLI will not be available on host."
+            fi
+        else
+            warn "Skipping Node.js (Claude Code CLI will not be available on host)."
+        fi
+    fi
+
+    # Check Claude Code CLI
+    info "Checking Claude Code CLI..."
+    if check_command claude; then
+        success "Claude Code CLI found ($(claude --version 2>/dev/null | head -1))"
+    elif check_command node; then
+        echo -ne "${PURPLE}🔹 Install Claude Code CLI globally? ${DIM}[Y/n]${NC}: "
+        read -r answer
+        if [[ "${answer,,}" != "n" ]]; then
+            info "Installing @anthropic-ai/claude-code..."
+            sudo npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
+            if check_command claude; then
+                success "Claude Code CLI installed"
+            else
+                warn "Claude Code CLI installation failed. You can install it later: sudo npm i -g @anthropic-ai/claude-code"
+            fi
+        else
+            warn "Skipping Claude Code CLI (optional, install later with: sudo npm i -g @anthropic-ai/claude-code)"
+        fi
+    else
+        warn "Skipping Claude Code CLI (Node.js not available)"
+    fi
+
     # Check Docker
     info "Checking Docker..."
     if ! check_command docker; then
@@ -370,10 +416,31 @@ preflight_checks() {
     if $DOCKER_CMD compose version &>/dev/null; then
         success "Docker Compose found ($($DOCKER_CMD compose version --short 2>/dev/null || echo 'v2+'))"
     elif check_command docker-compose; then
-        success "Docker Compose (standalone) found ($(docker-compose --version | head -1))"
-        warn "Consider upgrading to Docker Compose v2 (docker compose plugin)."
-        # Wrap DOCKER_CMD to route "compose" to docker-compose
-        DOCKER_COMPOSE_STANDALONE=true
+        warn "Found docker-compose v1 (Python) which is incompatible with newer Docker engines."
+        warn "This causes 'KeyError: ContainerConfig' errors. Upgrading to v2..."
+        # Remove old v1 if installed via apt
+        if dpkg -l docker-compose &>/dev/null 2>&1; then
+            info "Removing old docker-compose v1 package..."
+            sudo apt-get remove -y docker-compose &>/dev/null || true
+        fi
+        # Install v2 plugin
+        info "Installing Docker Compose v2 plugin..."
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
+        if sudo curl -fsSL "$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose && \
+           sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; then
+            if $DOCKER_CMD compose version &>/dev/null; then
+                success "Docker Compose v2 installed ($($DOCKER_CMD compose version --short 2>/dev/null))"
+            else
+                error "Docker Compose v2 installation failed. Please install manually."
+                echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
+                exit 1
+            fi
+        else
+            error "Download failed. Please install Docker Compose v2 manually."
+            echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
+            exit 1
+        fi
     else
         error "Docker Compose not found."
         echo -ne "${PURPLE}🔹 Install Docker Compose plugin now? ${DIM}[Y/n]${NC}: "
@@ -628,6 +695,23 @@ initialize_database() {
         success "Database seeded successfully"
     else
         warn "Seeding returned a non-zero exit code (may be OK if already seeded)"
+    fi
+
+    # Setup Claude Code CLI token inside the container if Anthropic key is configured
+    if [[ -n "${CONF_ANTHROPIC_KEY:-}" ]]; then
+        info "Setting up Claude Code CLI token inside container..."
+        if dcompose exec -T app bash -c "echo '$CONF_ANTHROPIC_KEY' | claude setup-token 2>/dev/null" &>/dev/null; then
+            success "Claude Code CLI token configured in container"
+        else
+            warn "Claude Code CLI token setup skipped (will use ANTHROPIC_API_KEY env var)"
+        fi
+
+        # Also set it up on host if claude is available
+        if check_command claude; then
+            info "Setting up Claude Code CLI token on host..."
+            echo "$CONF_ANTHROPIC_KEY" | claude setup-token 2>/dev/null || true
+            success "Claude Code CLI token configured on host"
+        fi
     fi
 }
 

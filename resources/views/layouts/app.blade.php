@@ -181,5 +181,147 @@
         </nav>
     </div>
 </div>
+
+{{-- ── Chat Widget ──────────────────────────────────────────────────── --}}
+<div x-data="chatWidget()" x-cloak>
+    {{-- Toggle button --}}
+    <button @click="toggle()" class="fixed z-50 flex items-center justify-center"
+            :class="open ? 'bottom-[440px] lg:bottom-[480px]' : 'bottom-6'"
+            style="right:1.5rem;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6,#ec4899);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 15px rgba(99,102,241,0.4);transition:all 0.3s;">
+        <svg x-show="!open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        <svg x-show="open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+
+    {{-- Chat panel --}}
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+         class="fixed z-40 flex flex-col"
+         style="bottom:1.5rem;right:1.5rem;width:400px;max-width:calc(100vw - 2rem);height:420px;max-height:70vh;background:#111827;border:1px solid #1e293b;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,0.5);overflow:hidden;">
+
+        {{-- Header --}}
+        <div class="flex items-center gap-3 px-4 py-3 flex-shrink-0" style="border-bottom:1px solid #1e293b;background:#0d1220;">
+            <div style="width:36px;height:36px;background:linear-gradient(135deg,#3b82f6,#8b5cf6,#ec4899);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;">Z</div>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold" style="color:#f1f5f9;">ZeniClaw AI</p>
+                <p class="text-xs" style="color:#64748b;" x-text="loading ? 'Thinking...' : 'Online'"></p>
+            </div>
+            <select x-model="agentId" style="background:#0a0e17;border:1px solid #1e293b;color:#94a3b8;font-size:0.75rem;padding:4px 8px;border-radius:6px;max-width:120px;">
+                <option value="">Auto</option>
+                @foreach(auth()->user()->agents()->where('status','active')->get() as $a)
+                <option value="{{ $a->id }}">{{ $a->name }}</option>
+                @endforeach
+            </select>
+        </div>
+
+        {{-- Messages --}}
+        <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3" x-ref="messages" style="scrollbar-width:thin;">
+            <template x-for="(msg, i) in messages" :key="i">
+                <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                    <div class="max-w-[85%] px-3 py-2 rounded-xl text-sm" style="line-height:1.5;"
+                         :style="msg.role === 'user'
+                            ? 'background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;border-radius:16px 16px 4px 16px;'
+                            : 'background:#1a1f2e;color:#f1f5f9;border:1px solid #1e293b;border-radius:16px 16px 16px 4px;'">
+                        <div x-html="formatMessage(msg.text)"></div>
+                        <p class="mt-1 text-right" style="font-size:0.65rem;opacity:0.5;" x-text="msg.time"></p>
+                    </div>
+                </div>
+            </template>
+            <div x-show="loading" class="flex justify-start">
+                <div class="px-4 py-3 rounded-xl" style="background:#1a1f2e;border:1px solid #1e293b;border-radius:16px 16px 16px 4px;">
+                    <div class="flex gap-1">
+                        <span class="w-2 h-2 rounded-full" style="background:#64748b;animation:bounce 1.4s infinite;"></span>
+                        <span class="w-2 h-2 rounded-full" style="background:#64748b;animation:bounce 1.4s infinite 0.2s;"></span>
+                        <span class="w-2 h-2 rounded-full" style="background:#64748b;animation:bounce 1.4s infinite 0.4s;"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- Input --}}
+        <div class="px-3 py-3 flex-shrink-0" style="border-top:1px solid #1e293b;background:#0d1220;">
+            <form @submit.prevent="send()" class="flex gap-2">
+                <input x-model="input" x-ref="chatInput" type="text" placeholder="Type a message..."
+                       class="flex-1 text-sm rounded-xl px-4 py-2.5"
+                       style="background:#0a0e17;border:1px solid #1e293b;color:#f1f5f9;outline:none;"
+                       :disabled="loading"
+                       @focus="$el.style.borderColor='#3b82f6'" @blur="$el.style.borderColor='#1e293b'">
+                <button type="submit" :disabled="loading || !input.trim()" class="flex items-center justify-center rounded-xl px-4"
+                        style="background:linear-gradient(135deg,#3b82f6,#8b5cf6,#ec4899);color:#fff;border:none;cursor:pointer;opacity:0.9;"
+                        :style="(!input.trim() || loading) ? 'opacity:0.4;cursor:not-allowed;' : 'opacity:1;'">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+    [x-cloak] { display: none !important; }
+    @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-6px); } }
+</style>
+
+<script>
+function chatWidget() {
+    return {
+        open: false,
+        loading: false,
+        input: '',
+        agentId: '',
+        messages: [
+            { role: 'assistant', text: 'Hello! I\'m ZeniClaw AI. How can I help you today?', time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
+        ],
+
+        toggle() {
+            this.open = !this.open;
+            if (this.open) this.$nextTick(() => this.$refs.chatInput?.focus());
+        },
+
+        async send() {
+            const text = this.input.trim();
+            if (!text || this.loading) return;
+
+            this.messages.push({ role: 'user', text, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+            this.input = '';
+            this.loading = true;
+            this.$nextTick(() => this.scrollBottom());
+
+            try {
+                const res = await fetch('{{ route("api.chat") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                    body: JSON.stringify({ message: text, agent_id: this.agentId || null })
+                });
+                const data = await res.json();
+
+                if (data.ok) {
+                    this.messages.push({ role: 'assistant', text: data.reply, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                } else {
+                    this.messages.push({ role: 'assistant', text: '⚠ ' + (data.error || 'Something went wrong'), time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                }
+            } catch (e) {
+                this.messages.push({ role: 'assistant', text: '⚠ Network error: ' + e.message, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+            }
+
+            this.loading = false;
+            this.$nextTick(() => { this.scrollBottom(); this.$refs.chatInput?.focus(); });
+        },
+
+        scrollBottom() {
+            const el = this.$refs.messages;
+            if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        formatMessage(text) {
+            if (!text) return '';
+            // Basic markdown: bold, italic, code, newlines
+            return text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/`([^`]+)`/g, '<code style="background:#0a0e17;padding:1px 5px;border-radius:4px;font-size:0.85em;">$1</code>')
+                .replace(/\n/g, '<br>');
+        }
+    };
+}
+</script>
 </body>
 </html>

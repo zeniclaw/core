@@ -27,6 +27,9 @@ Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWeb
 // ── Authenticated ─────────────────────────────────────────────────────────────
 Route::middleware(['auth'])->group(function () {
 
+    // Web chat API
+    Route::post('/api/chat', [ChannelController::class, 'webChat'])->name('api.chat');
+
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     // Agents
@@ -50,6 +53,8 @@ Route::middleware(['auth'])->group(function () {
 
     // Contacts
     Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
+    Route::post('/contacts', [ContactController::class, 'store'])->name('contacts.store');
+    Route::delete('/contacts/{session}', [ContactController::class, 'destroy'])->name('contacts.destroy');
     Route::post('/contacts/{session}/toggle-whitelist', [ContactController::class, 'toggleWhitelist'])->name('contacts.toggle-whitelist');
     Route::post('/agents/{agent}/toggle-whitelist', [AgentController::class, 'toggleWhitelist'])->name('agents.toggle-whitelist');
 

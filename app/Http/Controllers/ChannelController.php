@@ -212,4 +212,68 @@ class ChannelController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * Web chat — process message through orchestrator and return reply directly.
+     */
+    public function webChat(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            $body = $request->input('message', '');
+            $agentId = $request->input('agent_id');
+
+            if (empty(trim($body))) {
+                return response()->json(['error' => 'Message is required'], 400);
+            }
+
+            // Use specified agent or first active agent
+            $agent = $agentId
+                ? $user->agents()->findOrFail($agentId)
+                : $user->agents()->where('status', 'active')->first();
+
+            if (!$agent) {
+                return response()->json(['error' => 'No active agent found. Create one first.'], 404);
+            }
+
+            // Create or reuse web chat session
+            $peerId = 'web-' . $user->id;
+            $sessionKey = AgentSession::keyFor($agent->id, 'web', $peerId);
+            $session = AgentSession::updateOrCreate(
+                ['session_key' => $sessionKey],
+                [
+                    'agent_id' => $agent->id,
+                    'channel' => 'web',
+                    'peer_id' => $peerId,
+                    'last_message_at' => now(),
+                ]
+            );
+            $session->increment('message_count');
+
+            $context = new AgentContext(
+                agent: $agent,
+                session: $session,
+                from: $peerId,
+                senderName: $user->name,
+                body: $body,
+                hasMedia: false,
+                mediaUrl: null,
+                mimetype: null,
+                media: null,
+            );
+
+            $orchestrator = new AgentOrchestrator();
+            $result = $orchestrator->process($context);
+
+            return response()->json([
+                'ok' => true,
+                'reply' => $result->reply ?? 'No response',
+                'action' => $result->action,
+                'agent' => $agent->name,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Web chat error: ' . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }

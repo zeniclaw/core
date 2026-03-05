@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Agent;
 use App\Models\AgentLog;
 use App\Models\AgentSession;
 use App\Models\Project;
@@ -141,11 +142,57 @@ class ContactController extends Controller
         }
     }
 
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'phone' => ['required', 'string', 'regex:/^\+?[0-9]{7,15}$/'],
+            'name' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $phone = preg_replace('/[^0-9]/', '', $request->input('phone'));
+        $peerId = $phone . '@s.whatsapp.net';
+
+        // Use the user's first active agent
+        $agent = $request->user()->agents()->where('status', 'active')->first()
+            ?? $request->user()->agents()->first();
+
+        if (!$agent) {
+            return back()->with('error', 'No agent found. Create an agent first.');
+        }
+
+        $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $peerId);
+
+        $existing = AgentSession::where('session_key', $sessionKey)->first();
+        if ($existing) {
+            return back()->with('error', 'This contact already exists.');
+        }
+
+        AgentSession::create([
+            'session_key' => $sessionKey,
+            'agent_id' => $agent->id,
+            'channel' => 'whatsapp',
+            'peer_id' => $peerId,
+            'last_message_at' => now(),
+            'message_count' => 0,
+            'whitelisted' => true,
+        ]);
+
+        $name = $request->input('name', $phone);
+        return back()->with('success', "Contact {$name} added successfully.");
+    }
+
+    public function destroy(AgentSession $session): RedirectResponse
+    {
+        $name = $session->displayName();
+        $session->delete();
+        return back()->with('success', "Contact {$name} deleted.");
+    }
+
     public function toggleWhitelist(AgentSession $session): RedirectResponse
     {
         $session->update(['whitelisted' => !$session->whitelisted]);
 
-        $status = $session->whitelisted ? 'whitelisté' : 'retiré de la whitelist';
+        $status = $session->whitelisted ? 'whitelisted' : 'removed from whitelist';
         return back()->with('success', "Contact {$status}.");
     }
 }

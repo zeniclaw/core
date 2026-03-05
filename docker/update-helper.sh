@@ -19,7 +19,17 @@ fi
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
 echo "VERSION=$VERSION"
 
+# Detect docker compose command (v2 plugin or standalone)
+if docker compose version &>/dev/null; then
+    COMPOSE_CMD="docker compose"
+elif command -v docker-compose &>/dev/null; then
+    COMPOSE_CMD="docker-compose"
+else
+    echo "ERROR: No docker compose found"
+    exit 1
+fi
+
 # Docker rebuild in background (survives container restart)
-nohup bash -c "cd $REPO && docker-compose build app 2>&1 && docker-compose up -d app 2>&1" > "$REPO/storage/app/update-rebuild.log" 2>&1 &
+nohup bash -c "cd $REPO && $COMPOSE_CMD build app 2>&1 && $COMPOSE_CMD up -d app 2>&1" > "$REPO/storage/app/update-rebuild.log" 2>&1 &
 
 echo "REBUILD_STARTED"

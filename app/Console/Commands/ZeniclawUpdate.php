@@ -80,10 +80,12 @@ class ZeniclawUpdate extends Command
         $newVersion = $m[1] ?? 'unknown';
         $this->info("▶ New version: v{$newVersion}");
 
-        // Docker rebuild
+        // Docker rebuild — prefer docker compose v2
         $this->info('▶ Rebuilding Docker containers...');
+        $composeCmd = trim(shell_exec('docker compose version 2>/dev/null && echo "docker compose" || echo "docker-compose"'));
+        $composeCmd = str_contains($composeCmd, 'docker compose') ? 'docker compose' : 'docker-compose';
         $rebuild = Process::fromShellCommandline(
-            'sudo docker-compose up -d --build app 2>&1',
+            "sudo {$composeCmd} up -d --build app 2>&1",
             $repoPath
         );
         $rebuild->setTimeout(600);
