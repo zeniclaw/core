@@ -35,8 +35,21 @@ SESSION_DRIVER=${SESSION_DRIVER:-redis}
 QUEUE_CONNECTION=${QUEUE_CONNECTION:-redis}
 EOF
 
-# Mark mounted repo as safe for git
+# Mark mounted repo as safe for git (root + www-data)
 git config --global --add safe.directory /opt/zeniclaw-repo
+mkdir -p /var/www/.config/git
+echo '[safe]' > /var/www/.config/git/config
+echo '    directory = /opt/zeniclaw-repo' >> /var/www/.config/git/config
+chown -R www-data:www-data /var/www/.config
+
+# Give www-data access to docker socket for self-update
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
+if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
+    groupadd -g "$DOCKER_GID" docker-host 2>/dev/null || true
+    usermod -aG "$DOCKER_GID" www-data 2>/dev/null || true
+fi
+# Fallback: make socket world-readable if group add fails
+chmod 666 /var/run/docker.sock 2>/dev/null || true
 
 cd /var/www/html
 

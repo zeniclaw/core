@@ -3,7 +3,7 @@ FROM php:8.4-fpm
 # System deps
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
-    libxml2-dev nginx supervisor procps docker.io docker-compose \
+    libxml2-dev nginx supervisor procps docker.io docker-compose sudo cron \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
@@ -36,7 +36,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 COPY docker/nginx/default.conf /etc/nginx/sites-available/default
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zeniclaw.ini
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker/update-helper.sh /usr/local/bin/zeniclaw-update
+RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
+    && echo "www-data ALL=(root) NOPASSWD: /usr/local/bin/zeniclaw-update" > /etc/sudoers.d/zeniclaw-update \
+    && chmod 0440 /etc/sudoers.d/zeniclaw-update
 
 # Version file for health check
 RUN echo "2.3.0" > storage/app/version.txt

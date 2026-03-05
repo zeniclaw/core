@@ -63,14 +63,14 @@ class UpdateController extends Controller
             if ($exitCode !== 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'La mise à jour a échoué',
+                    'message' => 'Update failed',
                     'output' => $output,
                 ], 500);
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Mise à jour effectuée',
+                'message' => 'Update completed',
                 'version' => $newVersion,
                 'output' => $output,
             ]);
