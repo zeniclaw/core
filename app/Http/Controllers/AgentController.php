@@ -99,6 +99,12 @@ class AgentController extends Controller
             'color' => 'cyan',
             'description' => 'Capture, extract & annotate images',
         ],
+        'content_summarizer' => [
+            'label' => 'Resume Contenu',
+            'icon' => '📰',
+            'color' => 'cyan',
+            'description' => 'Resume articles, videos & liens',
+        ],
     ];
 
     public function index(Request $request)

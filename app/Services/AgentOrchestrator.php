@@ -23,6 +23,7 @@ use App\Services\Agents\SmartContextAgent;
 use App\Services\Agents\VoiceCommandAgent;
 use App\Services\Agents\CodeReviewAgent;
 use App\Services\Agents\ScreenshotAgent;
+use App\Services\Agents\ContentSummarizerAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -69,6 +70,7 @@ class AgentOrchestrator
             new VoiceCommandAgent(),
             new CodeReviewAgent(),
             new ScreenshotAgent(),
+            new ContentSummarizerAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
