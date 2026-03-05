@@ -1,16 +1,2 @@
 User-agent: *
-Disallow:
-
-User-agent: facebookexternalhit
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: LinkedInBot
-Allow: /
-
-User-agent: WhatsApp
-Allow: /
-
-Sitemap: https://www.zeniclaw.io/sitemap.xml
+Disallow: /

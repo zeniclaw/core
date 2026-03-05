@@ -23,6 +23,20 @@ use Illuminate\Support\Facades\Route;
 // ── Public ────────────────────────────────────────────────────────────────────
 Route::get('/', fn() => view('welcome'));
 Route::get('/health', [HealthController::class, 'check'])->name('health');
+
+// Dynamic robots.txt — allow bots only on the official domain
+Route::get('/robots.txt', function () {
+    $officialDomain = 'www.zeniclaw.io';
+    $host = request()->getHost();
+
+    if ($host === $officialDomain || $host === 'zeniclaw.io') {
+        $content = "User-agent: *\nAllow: /\n\nSitemap: https://www.zeniclaw.io/sitemap.xml\n";
+    } else {
+        $content = "User-agent: *\nDisallow: /\n";
+    }
+
+    return response($content, 200, ['Content-Type' => 'text/plain']);
+});
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
 
 // ── Authenticated ─────────────────────────────────────────────────────────────
