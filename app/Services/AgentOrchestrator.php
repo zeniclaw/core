@@ -24,6 +24,7 @@ use App\Services\Agents\VoiceCommandAgent;
 use App\Services\Agents\CodeReviewAgent;
 use App\Services\Agents\ScreenshotAgent;
 use App\Services\Agents\ContentSummarizerAgent;
+use App\Services\Agents\EventReminderAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -71,6 +72,7 @@ class AgentOrchestrator
             new CodeReviewAgent(),
             new ScreenshotAgent(),
             new ContentSummarizerAgent(),
+            new EventReminderAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

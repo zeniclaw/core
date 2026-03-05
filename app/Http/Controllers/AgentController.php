@@ -105,6 +105,12 @@ class AgentController extends Controller
             'color' => 'cyan',
             'description' => 'Resume articles, videos & liens',
         ],
+        'event_reminder' => [
+            'label' => 'Event Reminder',
+            'icon' => '📅',
+            'color' => 'purple',
+            'description' => 'Evenements intelligents avec rappels contextuels',
+        ],
     ];
 
     public function index(Request $request)
