@@ -23,9 +23,9 @@ COPY . .
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
-# Install Node.js, build front-end assets, install Claude Code CLI
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+# Install Node.js + npm, build front-end assets, install Claude Code CLI
+RUN apt-get update \
+    && apt-get install -y nodejs npm \
     && npm ci \
     && npm run build \
     && rm -rf node_modules \
@@ -42,7 +42,7 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
     && chmod 0440 /etc/sudoers.d/zeniclaw-update
 
 # Version file for health check
-RUN echo "2.15.1" > storage/app/version.txt
+RUN echo "2.15.2" > storage/app/version.txt
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \
