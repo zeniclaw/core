@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Http;
 
 class UpdateController extends Controller
 {
-    private string $gitlabProject = 'zenibiz%2Fzeniclaw';
+    private string $gitlabProject = 'zenidev%2Fzeniclaw';
 
     public function index()
     {
