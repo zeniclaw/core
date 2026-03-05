@@ -111,6 +111,12 @@ class AgentController extends Controller
             'color' => 'purple',
             'description' => 'Evenements intelligents avec rappels contextuels',
         ],
+        'habit' => [
+            'label' => 'HabitAgent',
+            'icon' => '🎯',
+            'color' => 'green',
+            'description' => 'Suivi des habitudes quotidiennes, streaks et statistiques',
+        ],
     ];
 
     public function index(Request $request)
