@@ -131,6 +131,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: URL content → content_summarizer agent with Haiku
+        if ($context->body && $this->detectContentUrl($context->body)) {
+            return [
+                'agent' => 'content_summarizer',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'URL detected — fast-path to content_summarizer agent',
+            ];
+        }
+
         // Fast-path: Code review keywords → code_review agent with Sonnet
         if ($context->body && $this->detectCodeReviewKeywords($context->body)) {
             return [
@@ -224,6 +235,7 @@ REGLES DE SELECTION DU MODELE:
 - flashcard → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - code_review → toujours "claude-sonnet-4-5-20241022", complexity "medium"
 - screenshot → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- content_summarizer → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -245,6 +257,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - FLASHCARD = flashcard, /flashcard, "creer carte", "reviser", "deck", apprentissage, SRS, repetition espacee, "etudier", "apprendre".
 - CODE_REVIEW = "code review", "review my code", "verifier ce code", "check this code", "@codereviewer", code avec demande d'analyse. Si le message contient un bloc de code (```) avec une demande de review/verification.
 - SCREENSHOT = "screenshot", "capture ecran", "extract text", "OCR", "annoter", "annotate", "comparer images", "lire le texte", "@screenshot". Tout ce qui concerne le traitement d'images: extraction de texte, annotation, comparaison.
+- CONTENT_SUMMARIZER = resume de liens, articles web, videos YouTube. Si le message contient une URL (http/https) avec intention de resume ou simplement un lien partage.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -295,7 +308,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -516,6 +529,26 @@ PROMPT;
         }
         $base = explode(';', $mimetype)[0];
         return str_starts_with(trim($base), 'image/');
+    }
+
+    private function detectContentUrl(string $body): bool
+    {
+        // Must contain a URL (but not just a GitLab URL which has its own handler)
+        if (!preg_match('#https?://[^\s<>\[\]"\']+#i', $body)) {
+            return false;
+        }
+
+        // Exclude GitLab URLs (handled by dev agent)
+        if ($this->detectGitlabUrl($body)) {
+            return false;
+        }
+
+        // Exclude if it's clearly a code review request with code blocks
+        if ($this->detectCodeReviewKeywords($body)) {
+            return false;
+        }
+
+        return true;
     }
 
     private function detectMusicKeywords(string $body): bool
