@@ -40,6 +40,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Mood keywords → mood_check agent with Haiku
+        if ($context->body && $this->detectMoodKeywords($context->body)) {
+            return [
+                'agent' => 'mood_check',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Mood/emotional pattern detected — fast-path to mood_check agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -97,6 +108,7 @@ AGENTS DISPONIBLES:
 - "analysis" = analyse approfondie, revue de document, strategie, audit, comparaison detaillee
 - "todo" = gestion de liste de taches, checklist, cocher/decocher, to-do list
 - "music" = musique, chanson, artiste, playlist, recommandation musicale, spotify, top charts, paroles
+- "mood_check" = humeur, etat emotionnel, comment ca va (contexte emotionnel), mood, feeling, stress, fatigue, bien-etre
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -108,6 +120,7 @@ REGLES DE SELECTION DU MODELE:
 - analysis medium → "claude-sonnet-4-5-20241022", analysis complex → "claude-opus-4-20250514"
 - todo → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - music → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- mood_check → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -122,6 +135,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - ANALYSIS = demande d'analyse profonde, document a reviewer, strategie, audit
 - TODO = gestion de checklist, todo list, ajouter/cocher/decocher une tache, "ma liste", "ma todo"
 - MUSIC = musique, chanson, artiste, playlist, recommandation, spotify, top charts, paroles, "mets de la musique", "ecouter", genre musical
+- MOOD_CHECK = expression d'etat emotionnel: "comment ca va" (contexte emotionnel), "je me sens...", "mood", "je suis fatigue/stresse/triste/bien", "how am i doing", "mood check", "mood stats", etat de bien-etre. PRIORITE HAUTE si contexte emotionnel clair.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -172,7 +186,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -243,6 +257,25 @@ PROMPT;
     private function detectGitlabUrl(string $body): bool
     {
         return (bool) preg_match('#https?://gitlab\.[^\s]+#i', $body);
+    }
+
+    private function detectMoodKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\bmood\b/i',
+            '/\bmood[\s_-]?(check|stats?)\b/i',
+            '/\bhow\s+am\s+i\s+doing\b/i',
+            '/\bje\s+(me\s+sens|suis)\s+(bien|mal|triste|stresse|fatigue|energique|deprime|anxieux|epuise|down|super|top)\b/iu',
+            '/\bcomment\s+(tu\s+te\s+sens|je\s+me\s+sens)\b/iu',
+            '/\bstate\s+of\s+mind\b/i',
+            '/\bfeeling\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
     }
 
     private function detectMusicKeywords(string $body): bool

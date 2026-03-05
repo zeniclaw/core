@@ -51,6 +51,12 @@ class AgentController extends Controller
             'color' => 'blue',
             'description' => 'Memorisation intelligente du contexte utilisateur',
         ],
+        'mood_check' => [
+            'label' => 'Mood Check',
+            'icon' => '😊',
+            'color' => 'pink',
+            'description' => 'Suivi emotionnel & recommandations bien-etre',
+        ],
     ];
 
     public function index(Request $request)

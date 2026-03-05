@@ -14,6 +14,7 @@ use App\Services\Agents\ReminderAgent;
 use App\Services\Agents\RouterAgent;
 use App\Services\Agents\TodoAgent;
 use App\Services\Agents\MusicAgent;
+use App\Services\Agents\MoodCheckAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -42,6 +43,7 @@ class AgentOrchestrator
             new AnalysisAgent(),
             new TodoAgent(),
             new MusicAgent(),
+            new MoodCheckAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
