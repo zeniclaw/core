@@ -97,6 +97,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Flashcard keywords → flashcard agent with Haiku
+        if ($context->body && $this->detectFlashcardKeywords($context->body)) {
+            return [
+                'agent' => 'flashcard',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Flashcard/learning/SRS pattern detected — fast-path to flashcard agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -158,6 +169,7 @@ AGENTS DISPONIBLES:
 - "mood_check" = humeur, etat emotionnel, comment ca va (contexte emotionnel), mood, feeling, stress, fatigue, bien-etre
 - "smart_meeting" = reunion, synthese reunion, reunion start, reunion end, compte-rendu, meeting, capture de reunion
 - "hangman" = jeu du pendu, hangman, /hangman, deviner un mot, jeu de mots interactif
+- "flashcard" = flashcards, apprentissage, revision, SRS, repetition espacee, deck, creer carte, etudier
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -173,6 +185,7 @@ REGLES DE SELECTION DU MODELE:
 - mood_check → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - smart_meeting → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - hangman → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- flashcard → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -191,6 +204,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - MOOD_CHECK = expression d'etat emotionnel: "comment ca va" (contexte emotionnel), "je me sens...", "mood", "je suis fatigue/stresse/triste/bien", "how am i doing", "mood check", "mood stats", etat de bien-etre. PRIORITE HAUTE si contexte emotionnel clair.
 - SMART_MEETING = reunion, "reunion start", "reunion end", "synthese reunion", meeting, capture de reunion, compte-rendu. Tout ce qui concerne la gestion de reunions.
 - HANGMAN = jeu du pendu, hangman, /hangman, "nouvelle partie pendu", deviner un mot, jeu interactif de mots.
+- FLASHCARD = flashcard, /flashcard, "creer carte", "reviser", "deck", apprentissage, SRS, repetition espacee, "etudier", "apprendre".
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -241,7 +255,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'voice_command'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -393,6 +407,25 @@ PROMPT;
 
         $baseMime = explode(';', $mimetype)[0];
         return str_starts_with(trim($baseMime), 'audio/');
+    }
+
+    private function detectFlashcardKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\/flashcard\b/i',
+            '/\bflashcard(s)?\b/i',
+            '/\b(creer?|nouveau|nouvelle)\s+(deck|carte|card)\b/iu',
+            '/\b(reviser|revision)\s+(mes\s+)?(cartes?|flashcards?|deck)\b/iu',
+            '/\brepetition\s+espacee\b/iu',
+            '/\b(etudier|study)\s+(mes\s+)?(cartes?|flashcards?|deck)\b/iu',
+            '/\bsrs\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
     }
 
     private function detectMusicKeywords(string $body): bool
