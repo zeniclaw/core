@@ -61,8 +61,9 @@ php artisan zeniclaw:health || echo "⚠️  Health check warnings (continuing)"
 echo "📦 Running migrations..."
 php artisan migrate --force --no-interaction
 
-# Optimize
+# Optimize (clear first — volume persists old caches across rebuilds)
 echo "⚡ Optimizing..."
+php artisan view:clear --no-interaction   || true
 php artisan config:cache --no-interaction || true
 php artisan route:cache --no-interaction  || true
 php artisan view:cache --no-interaction   || true
