@@ -383,6 +383,23 @@
         </div>
     </div>
 
+    {{-- Auto-Update --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="font-semibold text-gray-900 mb-1">🔄 Mise à jour automatique</h2>
+                <p class="text-sm text-gray-500">Vérifie et installe les mises à jour tous les jours à 3h du matin.</p>
+            </div>
+            <form method="POST" action="{{ route('settings.auto-update') }}">
+                @csrf
+                <button type="submit"
+                        class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {{ $autoUpdateEnabled ? 'bg-indigo-600' : 'bg-gray-300' }}">
+                    <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {{ $autoUpdateEnabled ? 'translate-x-6' : 'translate-x-1' }}"></span>
+                </button>
+            </form>
+        </div>
+    </div>
+
     {{-- API Tokens --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🔑 API Tokens</h2>

@@ -96,6 +96,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::post('/settings/llm-keys', [SettingsController::class, 'saveLlmKeys'])->name('settings.llm-keys');
     Route::post('/settings/gitlab', [SettingsController::class, 'saveGitlabSettings'])->name('settings.gitlab');
+    Route::post('/settings/auto-update', [SettingsController::class, 'toggleAutoUpdate'])->name('settings.auto-update');
 
     // API Tokens
     Route::post('/settings/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');

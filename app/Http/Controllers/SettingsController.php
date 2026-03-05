@@ -14,8 +14,9 @@ class SettingsController extends Controller
         $hasOpenAiKey = AppSetting::has('openai_api_key');
         $hasGitlabToken = AppSetting::has('gitlab_access_token');
         $adminWhatsappPhone = AppSetting::get('admin_whatsapp_phone');
+        $autoUpdateEnabled = AppSetting::get('auto_update_enabled') !== 'false';
         $tokens = $user->tokens()->latest()->get();
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'tokens'));
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'autoUpdateEnabled', 'tokens'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -50,5 +51,14 @@ class SettingsController extends Controller
         }
 
         return redirect()->route('settings.index')->with('success', 'Parametres GitLab sauvegardes.');
+    }
+
+    public function toggleAutoUpdate()
+    {
+        $current = AppSetting::get('auto_update_enabled') !== 'false';
+        AppSetting::set('auto_update_enabled', $current ? 'false' : 'true');
+
+        $status = !$current ? 'activée' : 'désactivée';
+        return redirect()->route('settings.index')->with('success', "Mise à jour automatique {$status}.");
     }
 }
