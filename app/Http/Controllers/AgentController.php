@@ -45,6 +45,12 @@ class AgentController extends Controller
             'color' => 'teal',
             'description' => 'Gestion de checklist et to-do list',
         ],
+        'smart_context' => [
+            'label' => 'SmartContextAgent',
+            'icon' => '🧠',
+            'color' => 'blue',
+            'description' => 'Memorisation intelligente du contexte utilisateur',
+        ],
     ];
 
     public function index(Request $request)

@@ -82,6 +82,20 @@ class ChatAgent extends BaseAgent
             $this->buildLengthDirective($context->complexity) .
             "Le message vient de {$context->senderName}.";
 
+        // Inject user context memory (preferences, profile, humor level)
+        $contextMemory = $this->formatContextMemoryForPrompt($context->from);
+        if ($contextMemory) {
+            $systemPrompt .= "\n\n" . $contextMemory;
+            // Add humor hint based on preference
+            $facts = $this->getContextMemory($context->from);
+            foreach ($facts as $fact) {
+                if (($fact['key'] ?? '') === 'humor_style') {
+                    $systemPrompt .= "\nAdapte ton humour en fonction: {$fact['value']}.";
+                    break;
+                }
+            }
+        }
+
         $projectContext = $this->buildProjectContext($context);
         if ($projectContext) {
             $systemPrompt .= "\n\n" . $projectContext;

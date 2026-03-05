@@ -67,7 +67,7 @@ class DevAgent extends BaseAgent
         $newDescription = $project->request_description . "\n\nPrecision: " . $context->body;
         $project->update(['request_description' => $newDescription]);
 
-        $analysis = $this->analyzeTask($newDescription, $repoName);
+        $analysis = $this->analyzeTask($newDescription, $repoName, $context);
         $reply = "[{$repoName}] Voici ce que j'ai compris :\n{$analysis}\n\nC'est bon ? Reponds \"ok\" pour lancer ou precise ta demande.";
         $this->sendText($context->from, $reply);
 
@@ -222,7 +222,7 @@ class DevAgent extends BaseAgent
             'status' => 'awaiting_validation',
         ]);
 
-        $analysis = $this->analyzeTask($description, $repoName);
+        $analysis = $this->analyzeTask($description, $repoName, $context);
         $reply = "[{$repoName}] Voici ce que j'ai compris :\n{$analysis}\n\nC'est bon ? Reponds \"ok\" pour lancer ou precise ta demande.";
         $this->sendText($context->from, $reply);
 
@@ -308,15 +308,26 @@ class DevAgent extends BaseAgent
         return null;
     }
 
-    private function analyzeTask(string $body, string $repoName): string
+    private function analyzeTask(string $body, string $repoName, ?AgentContext $context = null): string
     {
+        $techContext = '';
+        if ($context) {
+            $facts = $this->getContextMemory($context->from);
+            $techFacts = array_filter($facts, fn($f) => in_array($f['category'] ?? '', ['profession', 'project']));
+            if (!empty($techFacts)) {
+                $techLines = array_map(fn($f) => $f['value'], $techFacts);
+                $techContext = "\nProfil technique de l'utilisateur: " . implode(', ', $techLines);
+            }
+        }
+
         $response = $this->claude->chat(
-            "Projet: {$repoName}\nDemande: {$body}",
+            "Projet: {$repoName}\nDemande: {$body}{$techContext}",
             'claude-haiku-4-5-20251001',
             "Tu es un assistant technique. Reformule cette demande en un plan d'action clair et concis.\n"
             . "Liste 3 a 5 etapes numerotees.\n"
             . "Sois precis mais bref (1 ligne par etape).\n"
             . "Pas de code, pas d'explications longues.\n"
+            . "Si tu connais le profil technique de l'utilisateur, propose des solutions adaptees a son stack.\n"
             . "Reponds directement avec la liste numerotee, rien d'autre."
         );
 

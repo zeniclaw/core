@@ -43,8 +43,12 @@ class TodoAgent extends BaseAgent
 
         $listText = $this->formatList($todos);
 
+        // Inject user context memory for smarter categorization
+        $contextMemory = $this->formatContextMemoryForPrompt($context->from);
+        $contextHint = $contextMemory ? "\n\n{$contextMemory}" : '';
+
         $response = $this->claude->chat(
-            "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)'),
+            "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)') . $contextHint,
             'claude-haiku-4-5-20251001',
             $this->buildPrompt()
         );
