@@ -647,10 +647,16 @@ class RunSubAgentJob implements ShouldQueue
             escapeshellarg($model)
         );
 
+        // OAuth tokens (sk-ant-oat*) from Max/Pro plans use CLAUDE_CODE_OAUTH_TOKEN,
+        // standard API keys (sk-ant-api*) use ANTHROPIC_API_KEY
+        $envKey = str_starts_with($apiKey, 'sk-ant-oat')
+            ? 'CLAUDE_CODE_OAUTH_TOKEN'
+            : 'ANTHROPIC_API_KEY';
+
         $process = Process::timeout($claudeTimeout)
             ->path($this->workspace)
             ->env([
-                'ANTHROPIC_API_KEY' => $apiKey,
+                $envKey => $apiKey,
                 'HOME' => '/tmp',
             ])
             ->start($cmd);

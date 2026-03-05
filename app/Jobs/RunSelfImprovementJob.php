@@ -127,11 +127,15 @@ class RunSelfImprovementJob implements ShouldQueue
             escapeshellarg($prompt)
         );
 
+        $envKey = str_starts_with($apiKey, 'sk-ant-oat')
+            ? 'CLAUDE_CODE_OAUTH_TOKEN'
+            : 'ANTHROPIC_API_KEY';
+
         $process = Process::timeout($claudeTimeout)
             ->path($this->workdir)
             ->env([
-                'ANTHROPIC_API_KEY' => $apiKey,
-                'HOME' => '/home/ubuntu',
+                $envKey => $apiKey,
+                'HOME' => '/tmp',
             ])
             ->start($cmd);
 
