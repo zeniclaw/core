@@ -30,6 +30,18 @@ class RouterAgent
             Log::warning('SmartContextAgent failed silently: ' . $e->getMessage());
         }
 
+        // Fast-path: Audio message → voice_command agent for transcription + re-routing
+        $effectiveMimetype = $context->mimetype ?? ($context->media['mimetype'] ?? null);
+        if ($context->hasMedia && $this->isAudioMessage($effectiveMimetype)) {
+            return [
+                'agent' => 'voice_command',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Audio message detected — fast-path to voice_command agent for transcription',
+            ];
+        }
+
         // Fast-path: GitLab URL → dev agent with Haiku
         if ($context->body && $this->detectGitlabUrl($context->body)) {
             return [
@@ -229,7 +241,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'voice_command'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -371,6 +383,16 @@ PROMPT;
         }
 
         return false;
+    }
+
+    private function isAudioMessage(?string $mimetype): bool
+    {
+        if (!$mimetype) {
+            return false;
+        }
+
+        $baseMime = explode(';', $mimetype)[0];
+        return str_starts_with(trim($baseMime), 'audio/');
     }
 
     private function detectMusicKeywords(string $body): bool
