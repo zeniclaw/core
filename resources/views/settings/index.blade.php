@@ -28,6 +28,50 @@
         </div>
     </div>
 
+    {{-- Change Password --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-4">🔒 Changer le mot de passe</h2>
+
+        @if(session('status') === 'password-updated')
+            <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                Mot de passe mis à jour avec succès.
+            </div>
+        @endif
+
+        <form method="POST" action="{{ route('password.update') }}" class="space-y-4">
+            @csrf
+            @method('PUT')
+
+            <div>
+                <label for="current_password" class="block text-sm font-medium text-gray-700 mb-1">Mot de passe actuel</label>
+                <input type="password" name="current_password" id="current_password" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                @if($errors->updatePassword->has('current_password'))
+                    <p class="text-xs text-red-600 mt-1">{{ $errors->updatePassword->first('current_password') }}</p>
+                @endif
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Nouveau mot de passe</label>
+                <input type="password" name="password" id="password" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                @if($errors->updatePassword->has('password'))
+                    <p class="text-xs text-red-600 mt-1">{{ $errors->updatePassword->first('password') }}</p>
+                @endif
+            </div>
+
+            <div>
+                <label for="password_confirmation" class="block text-sm font-medium text-gray-700 mb-1">Confirmer le nouveau mot de passe</label>
+                <input type="password" name="password_confirmation" id="password_confirmation" required
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+
+            <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                Mettre à jour le mot de passe
+            </button>
+        </form>
+    </div>
+
     {{-- LLM Providers --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🧠 LLM Providers</h2>
