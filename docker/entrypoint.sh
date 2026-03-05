@@ -122,6 +122,8 @@ su -s /bin/bash www-data -c "php /var/www/html/artisan schedule:work --no-intera
         SESSION=$(curl -sf -H "X-Api-Key: $WAHA_KEY" "$WAHA_URL/api/sessions/default" 2>/dev/null)
         SESSION_STATUS=$(echo "$SESSION" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
 
+        WEBHOOK_CONFIG='{"name":"default","config":{"webhooks":[{"url":"http://app:80/webhook/whatsapp/1","events":["message"]}]}}'
+
         case "$SESSION_STATUS" in
             WORKING)
                 echo "📱 WhatsApp connected!"
@@ -137,12 +139,12 @@ su -s /bin/bash www-data -c "php /var/www/html/artisan schedule:work --no-intera
             STOPPED|FAILED)
                 echo "📱 Session $SESSION_STATUS, restarting... ($attempt/12)"
                 curl -sf -X POST -H "X-Api-Key: $WAHA_KEY" -H "Content-Type: application/json" \
-                    -d '{}' "$WAHA_URL/api/sessions/default/start" 2>/dev/null || true
+                    -d "$WEBHOOK_CONFIG" "$WAHA_URL/api/sessions/start" 2>/dev/null || true
                 ;;
             *)
-                echo "📱 No session found, creating... ($attempt/12)"
+                echo "📱 No session found, creating with webhook... ($attempt/12)"
                 curl -sf -X POST -H "X-Api-Key: $WAHA_KEY" -H "Content-Type: application/json" \
-                    -d '{"name":"default"}' "$WAHA_URL/api/sessions/start" 2>/dev/null || true
+                    -d "$WEBHOOK_CONFIG" "$WAHA_URL/api/sessions/start" 2>/dev/null || true
                 ;;
         esac
         sleep 5

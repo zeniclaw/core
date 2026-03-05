@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 class HealthWatchdogCommand extends Command
 {
     protected $signature = 'zeniclaw:watchdog';
-    protected $description = 'Auto-healing watchdog: checks webhook, queue, scheduler, WAHA every minute';
+    protected $description = 'Auto-healing watchdog: checks webhook, queue, scheduler every minute';
 
     private string $logFile;
 
@@ -21,7 +21,6 @@ class HealthWatchdogCommand extends Command
         $allOk = $this->checkWebhook() && $allOk;
         $allOk = $this->checkQueueWorker() && $allOk;
         $allOk = $this->checkScheduler() && $allOk;
-        $allOk = $this->checkWaha() && $allOk;
 
         if ($allOk) {
             $this->log('All checks OK');
@@ -132,130 +131,6 @@ class HealthWatchdogCommand extends Command
 
         $this->log('[scheduler] OK');
         return true;
-    }
-
-    private function checkWaha(): bool
-    {
-        $wahaKey = env('WAHA_API_KEY', 'zeniclaw-waha-2026');
-        $wahaHost = env('WAHA_HOST', 'waha');
-        $wahaUrl = "http://{$wahaHost}:3000";
-
-        // Step 1: Always check session status (lightweight, every minute)
-        $response = shell_exec(
-            "curl -sf --max-time 5 -H 'X-Api-Key: $wahaKey' '$wahaUrl/api/sessions/default' 2>/dev/null"
-        );
-
-        if (!$response) {
-            $this->log('[waha] Unreachable — skipping');
-            return true;
-        }
-
-        $status = '';
-        if (preg_match('/"status"\s*:\s*"([^"]+)"/', $response, $m)) {
-            $status = $m[1];
-        }
-
-        if ($status !== 'WORKING') {
-            $this->log("[waha] Status: $status — restarting session...");
-            $this->restartWahaSession($wahaKey, $wahaUrl);
-            return false;
-        }
-
-        // Step 2: Deep check (sendText) only every 15 minutes
-        // sendText is the only reliable test but is heavy — don't spam it every minute
-        $lastDeepFile = storage_path('app/watchdog_waha_lastdeep.txt');
-        $lastDeep = (int) @file_get_contents($lastDeepFile);
-        $now = time();
-
-        if (($now - $lastDeep) < 900) { // 15 minutes
-            $this->log('[waha] OK (WORKING, deep check in ' . (900 - ($now - $lastDeep)) . 's)');
-            return true;
-        }
-
-        $this->log('[waha] Deep check — testing sendText...');
-
-        // Get bot's own ID for self-ping
-        $meId = '';
-        if (preg_match('/"id"\s*:\s*"([^"]+)"/', $response, $m)) {
-            $meId = $m[1];
-        }
-
-        if (!$meId) {
-            $this->log('[waha] No me.id — skipping deep check');
-            @file_put_contents($lastDeepFile, (string) $now);
-            return true;
-        }
-
-        $sendResult = shell_exec(
-            "curl -s --max-time 15 -w '\\nHTTP_CODE:%{http_code}' -X POST "
-            . "-H 'X-Api-Key: $wahaKey' -H 'Content-Type: application/json' "
-            . "-d '{\"session\":\"default\",\"chatId\":\"$meId\",\"text\":\".\"}' "
-            . "'$wahaUrl/api/sendText' 2>/dev/null"
-        );
-
-        $sendHttpCode = '000';
-        if ($sendResult && preg_match('/HTTP_CODE:(\d{3})/', $sendResult, $m)) {
-            $sendHttpCode = $m[1];
-        }
-
-        if ($sendHttpCode === '000' || $sendHttpCode === '500') {
-            // Read fail counter — only restart after 3 consecutive deep-check failures (45 min)
-            // Avoids corrupting WAHA session with aggressive restarts
-            $failFile = storage_path('app/watchdog_waha_fails.txt');
-            $fails = (int) @file_get_contents($failFile);
-            $fails++;
-            @file_put_contents($failFile, (string) $fails);
-
-            if ($fails >= 3) {
-                $this->log("[waha] sendText FAILED x$fails (HTTP $sendHttpCode) — restarting WAHA container...");
-                $this->restartWahaContainer();
-                @file_put_contents($failFile, '0');
-            } else {
-                $this->log("[waha] sendText FAILED x$fails (HTTP $sendHttpCode) — will retry in 15min");
-            }
-            // Don't update lastDeep — retry on next 15min cycle
-            return false;
-        }
-
-        // Reset fail counter on success
-        @file_put_contents(storage_path('app/watchdog_waha_fails.txt'), '0');
-
-        @file_put_contents($lastDeepFile, (string) $now);
-        $this->log("[waha] OK (WORKING + sendText=$sendHttpCode)");
-        return true;
-    }
-
-    private function restartWahaSession(string $wahaKey, string $wahaUrl): void
-    {
-        shell_exec(
-            "curl -sf --max-time 5 -X POST -H 'X-Api-Key: $wahaKey' -H 'Content-Type: application/json' "
-            . "-d '{}' '$wahaUrl/api/sessions/default/start' 2>/dev/null"
-        );
-        $this->log('[waha] Session restart command sent');
-    }
-
-    private function restartWahaContainer(): void
-    {
-        // Use Docker API via unix socket to restart the WAHA container
-        $result = shell_exec(
-            "curl -sf --max-time 30 --unix-socket /var/run/docker.sock "
-            . "-X POST 'http://localhost/containers/zeniclaw_waha/restart?t=5' 2>&1"
-        );
-        $this->log('[waha] Container restart sent via Docker API');
-
-        // Wait for WAHA to come back up and start session
-        sleep(10);
-
-        $wahaKey = env('WAHA_API_KEY', 'zeniclaw-waha-2026');
-        $wahaHost = env('WAHA_HOST', 'waha');
-        $wahaUrl = "http://{$wahaHost}:3000";
-
-        // Try to start session (WAHA may auto-start it, but just in case)
-        shell_exec(
-            "curl -sf --max-time 5 -X POST -H 'X-Api-Key: $wahaKey' -H 'Content-Type: application/json' "
-            . "-d '{\"name\":\"default\"}' '$wahaUrl/api/sessions/start' 2>/dev/null"
-        );
-        $this->log('[waha] Session start sent after container restart');
     }
 
     private function triggerRebuild(): void
