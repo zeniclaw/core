@@ -87,6 +87,12 @@ class AgentController extends Controller
             'color' => 'cyan',
             'description' => 'Transcribe & execute audio commands',
         ],
+        'code_review' => [
+            'label' => 'Code Review',
+            'icon' => '🔍',
+            'color' => 'blue',
+            'description' => 'Analyse de code, bugs, securite et optimisations',
+        ],
     ];
 
     public function index(Request $request)

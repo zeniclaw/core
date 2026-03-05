@@ -21,6 +21,7 @@ use App\Services\Agents\HangmanGameAgent;
 use App\Services\Agents\FlashcardAgent;
 use App\Services\Agents\SmartContextAgent;
 use App\Services\Agents\VoiceCommandAgent;
+use App\Services\Agents\CodeReviewAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -65,6 +66,7 @@ class AgentOrchestrator
             new FlashcardAgent(),
             new SmartContextAgent(),
             new VoiceCommandAgent(),
+            new CodeReviewAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
