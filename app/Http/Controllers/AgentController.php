@@ -63,6 +63,12 @@ class AgentController extends Controller
             'color' => 'green',
             'description' => 'Suivi budgets, depenses & alertes financieres',
         ],
+        'smart_meeting' => [
+            'label' => 'Smart Meeting',
+            'icon' => '📋',
+            'color' => 'indigo',
+            'description' => 'Capture et synthese auto de reunions',
+        ],
     ];
 
     public function index(Request $request)
