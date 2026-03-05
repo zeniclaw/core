@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\Reminder;
 use App\Models\Todo;
 use App\Services\AgentContext;
+use App\Services\Agents\SmartContextAgent;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
 use Illuminate\Support\Facades\Log;

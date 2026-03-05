@@ -18,6 +18,7 @@ use App\Services\Agents\MoodCheckAgent;
 use App\Services\Agents\FinanceAgent;
 use App\Services\Agents\SmartMeetingAgent;
 use App\Services\Agents\HangmanGameAgent;
+use App\Services\Agents\SmartContextAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -50,6 +51,7 @@ class AgentOrchestrator
             new FinanceAgent(),
             new SmartMeetingAgent(),
             new HangmanGameAgent(),
+            new SmartContextAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
