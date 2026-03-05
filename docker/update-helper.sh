@@ -19,22 +19,32 @@ fi
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
 echo "VERSION=$VERSION"
 
-# Detect docker compose command (v2 plugin or standalone)
-if docker compose version &>/dev/null; then
-    COMPOSE_CMD="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE_CMD="docker-compose"
-else
-    echo "ERROR: No docker compose found"
+# Resolve the host path of the repo (docker inspect the mount)
+HOST_REPO=$(docker inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination "/opt/zeniclaw-repo" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || echo "")
+if [ -z "$HOST_REPO" ]; then
+    echo "ERROR: Cannot resolve host repo path"
     exit 1
 fi
 
 LOG="$REPO/storage/app/update-rebuild.log"
-APP_LOG="/var/www/html/storage/app/update-rebuild.log"
+> "$LOG"
 
-# Docker rebuild in background (survives container restart)
-# Remove old container by ID to avoid name conflict, then build and recreate
-# Write to both repo dir (host) and app dir (container readable)
-nohup bash -c "cd $REPO && docker rm -f \$(docker ps -aq --filter name=zeniclaw_app) 2>/dev/null; $COMPOSE_CMD build app 2>&1 | tee $APP_LOG && $COMPOSE_CMD up -d --force-recreate app 2>&1 | tee -a $APP_LOG" > "$LOG" 2>&1 &
+# Spawn an independent Docker container to rebuild the app.
+# This container runs on the host's Docker daemon and survives the
+# app container being removed/recreated during the rebuild.
+docker run --rm -d \
+    --name zeniclaw_updater \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "${HOST_REPO}:${HOST_REPO}" \
+    -w "${HOST_REPO}" \
+    -v "${HOST_REPO}/storage/app/update-rebuild.log:/tmp/rebuild.log" \
+    docker:cli sh -c "\
+        echo 'Started rebuild...' > /tmp/rebuild.log && \
+        docker rm -f zeniclaw_app 2>/dev/null; \
+        docker compose build app >> /tmp/rebuild.log 2>&1 && \
+        echo 'Successfully built app' >> /tmp/rebuild.log && \
+        docker compose up -d --force-recreate app >> /tmp/rebuild.log 2>&1 && \
+        echo 'Started' >> /tmp/rebuild.log \
+        || echo 'ERROR: rebuild failed' >> /tmp/rebuild.log"
 
 echo "REBUILD_STARTED"
