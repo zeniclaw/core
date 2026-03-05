@@ -35,6 +35,7 @@ RUN apt-get update \
 # Copy configs
 COPY docker/nginx/default.conf /etc/nginx/sites-available/default
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zeniclaw.ini
+COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/update-helper.sh /usr/local/bin/zeniclaw-update
 RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \

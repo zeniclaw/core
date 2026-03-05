@@ -75,10 +75,6 @@ php artisan storage:link --no-interaction 2>/dev/null || true
 chown -R www-data:www-data storage bootstrap/cache
 chmod -R 775 storage bootstrap/cache
 
-# Start nginx + php-fpm via supervisor
-echo "✅ Starting nginx + php-fpm..."
-service nginx start
-
 # Re-queue orphaned SubAgents (don't clear queues — preserves pending improvement jobs)
 echo "🧹 Cleaning up orphaned SubAgents + stuck improvements..."
 php artisan subagents:cleanup --no-interaction
@@ -104,18 +100,6 @@ foreach ($improvements as $si) {
     }
 }
 ' 2>/dev/null || true
-
-# Start queue worker as www-data (Claude Code refuses --dangerously-skip-permissions as root)
-echo "⚙️ Starting queue worker (www-data)..."
-su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" &
-
-# Start low-priority queue worker (self-improvement analysis — lightweight, non-blocking)
-echo "🧠 Starting low-priority queue worker..."
-su -s /bin/bash www-data -c "php /var/www/html/artisan queue:work redis --queue=low --tries=1 --timeout=120 --sleep=5" &
-
-# Start Laravel scheduler (runs reminders:process every minute)
-echo "⏰ Starting scheduler..."
-su -s /bin/bash www-data -c "php /var/www/html/artisan schedule:work --no-interaction" &
 
 # Auto-start WAHA WhatsApp session in background
 (
@@ -171,4 +155,7 @@ echo "* * * * * www-data cd /var/www/html && php artisan zeniclaw:watchdog >> st
 chmod 0644 /etc/cron.d/zeniclaw-watchdog
 service cron start || true
 
-exec php-fpm
+# Start all services via supervisor (nginx, php-fpm, queue workers, scheduler)
+# Supervisor auto-restarts workers if they crash (OOM, timeout, etc.)
+echo "✅ Starting all services via supervisor..."
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
