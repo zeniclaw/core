@@ -54,6 +54,12 @@ class UpdateController extends Controller
     public function update(Request $request): JsonResponse
     {
         try {
+            // Clear previous rebuild log
+            $rebuildLog = storage_path('app/update-rebuild.log');
+            if (file_exists($rebuildLog)) {
+                @unlink($rebuildLog);
+            }
+
             $outputBuffer = new \Symfony\Component\Console\Output\BufferedOutput();
             $exitCode = Artisan::call('zeniclaw:update', [], $outputBuffer);
             $output = $outputBuffer->fetch();
@@ -80,5 +86,47 @@ class UpdateController extends Controller
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Poll the rebuild log to track Docker rebuild progress.
+     */
+    public function rebuildStatus(): JsonResponse
+    {
+        // The rebuild log is written by the update helper in the repo dir
+        $possiblePaths = [
+            '/opt/zeniclaw-repo/storage/app/update-rebuild.log',
+            storage_path('app/update-rebuild.log'),
+        ];
+
+        $content = '';
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path) && filesize($path) > 0) {
+                $content = file_get_contents($path);
+                break;
+            }
+        }
+
+        $finished = false;
+        $success = false;
+
+        if (!empty($content)) {
+            // Detect completion
+            $finished = str_contains($content, 'Started')
+                && (str_contains($content, 'Successfully built') || str_contains($content, 'Built'));
+            $success = $finished && !str_contains($content, 'error');
+
+            // Also check if build failed
+            if (str_contains($content, 'ERROR') || str_contains($content, 'failed to build')) {
+                $finished = true;
+                $success = false;
+            }
+        }
+
+        return response()->json([
+            'log' => $content,
+            'finished' => $finished,
+            'success' => $success,
+        ]);
     }
 }

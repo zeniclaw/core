@@ -29,7 +29,11 @@ else
     exit 1
 fi
 
+LOG="$REPO/storage/app/update-rebuild.log"
+APP_LOG="/var/www/html/storage/app/update-rebuild.log"
+
 # Docker rebuild in background (survives container restart)
-nohup bash -c "cd $REPO && $COMPOSE_CMD build app 2>&1 && $COMPOSE_CMD up -d app 2>&1" > "$REPO/storage/app/update-rebuild.log" 2>&1 &
+# Write to both repo dir (host) and app dir (container readable)
+nohup bash -c "cd $REPO && $COMPOSE_CMD build app 2>&1 | tee $APP_LOG && $COMPOSE_CMD up -d app 2>&1 | tee -a $APP_LOG" > "$LOG" 2>&1 &
 
 echo "REBUILD_STARTED"

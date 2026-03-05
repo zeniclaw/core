@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\DebugController;
 use App\Http\Controllers\Admin\HealthDashboardController;
 use App\Http\Controllers\Admin\UpdateController;
 use App\Http\Controllers\AgentController;
@@ -110,7 +111,11 @@ Route::middleware(['auth'])->group(function () {
     Route::middleware(['App\Http\Middleware\RequireSuperAdmin'])->prefix('admin')->name('admin.')->group(function () {
         Route::get('/update', [UpdateController::class, 'index'])->name('update');
         Route::post('/update', [UpdateController::class, 'update'])->name('update.run');
+        Route::get('/update/rebuild-status', [UpdateController::class, 'rebuildStatus'])->name('update.rebuild-status');
         Route::get('/health', [HealthDashboardController::class, 'index'])->name('health');
+        Route::get('/debug', [DebugController::class, 'index'])->name('debug');
+        Route::post('/debug/toggle-auto-suggest', [DebugController::class, 'toggleAutoSuggest'])->name('debug.toggle-auto-suggest');
+        Route::get('/debug/system-info', [DebugController::class, 'systemInfo'])->name('debug.system-info');
     });
 });
 
