@@ -31,11 +31,35 @@ abstract class BaseAgent implements AgentInterface
 
     protected function sendText(string $chatId, string $text): void
     {
-        $this->waha(15)->post("{$this->wahaBase}/api/sendText", [
-            'chatId' => $chatId,
-            'text' => $text,
-            'session' => $this->sessionName,
-        ]);
+        $maxRetries = 3;
+        $lastException = null;
+
+        for ($i = 0; $i < $maxRetries; $i++) {
+            try {
+                $response = $this->waha(15)->post("{$this->wahaBase}/api/sendText", [
+                    'chatId' => $chatId,
+                    'text' => $text,
+                    'session' => $this->sessionName,
+                ]);
+
+                if ($response->successful()) {
+                    return;
+                }
+
+                \Illuminate\Support\Facades\Log::warning("sendText attempt " . ($i + 1) . " failed: HTTP " . $response->status());
+            } catch (\Exception $e) {
+                $lastException = $e;
+                \Illuminate\Support\Facades\Log::warning("sendText attempt " . ($i + 1) . " exception: " . $e->getMessage());
+            }
+
+            if ($i < $maxRetries - 1) {
+                sleep(3 * ($i + 1));
+            }
+        }
+
+        if ($lastException) {
+            \Illuminate\Support\Facades\Log::error("sendText failed after {$maxRetries} attempts: " . $lastException->getMessage());
+        }
     }
 
     protected function log(AgentContext $context, string $message, array $extra = [], string $level = 'info'): void
