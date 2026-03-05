@@ -9,6 +9,11 @@ import express from "express";
 import pino from "pino";
 import QRCode from "qrcode";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LANDING_HTML = fs.readFileSync(path.join(__dirname, "landing.html"), "utf-8");
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "http://app:80/webhook/whatsapp/1";
 const API_KEY = process.env.API_KEY || "zeniclaw-waha-2026";
@@ -289,45 +294,51 @@ app.post("/api/sendText", async (req, res) => {
   }
 });
 
-// QR code page (for scanning)
+// Landing page with QR code
 app.get("/", async (req, res) => {
+  let statusText = "Gateway Running";
+  let qrContent = "";
+  let refreshScript = "";
+
   if (sessionStatus === "WORKING") {
-    res.send(`
-      <html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h1>ZeniClaw WhatsApp Gateway</h1>
-        <p style="color:green;font-size:24px">Connected</p>
-        <p>Phone: ${meInfo?.id || "unknown"}</p>
-        <p>Name: ${meInfo?.name || "unknown"}</p>
-      </body></html>
-    `);
-    return;
-  }
-
-  if (sessionStatus === "SCAN_QR_CODE" && qrCodeData) {
+    statusText = `Connected as ${meInfo?.name || meInfo?.id || "unknown"}`;
+    qrContent = `
+      <h2>WhatsApp Connected</h2>
+      <p>Your WhatsApp session is active and ready.</p>
+      <div style="display:inline-flex;align-items:center;gap:10px;padding:12px 24px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);border-radius:10px;margin-top:1rem;">
+        <span style="width:12px;height:12px;background:#10b981;border-radius:50%;display:inline-block;"></span>
+        <span style="color:#10b981;font-weight:600;">${meInfo?.name || "Connected"}</span>
+        <span style="color:#64748b;font-size:0.85rem;">${meInfo?.id || ""}</span>
+      </div>`;
+    refreshScript = "setTimeout(() => location.reload(), 30000);";
+  } else if (sessionStatus === "SCAN_QR_CODE" && qrCodeData) {
+    statusText = "Waiting for QR Scan";
     try {
-      const qrImage = await QRCode.toDataURL(qrCodeData);
-      res.send(`
-        <html><body style="font-family:sans-serif;text-align:center;padding:40px">
-          <h1>Scan QR Code</h1>
-          <img src="${qrImage}" style="width:300px;height:300px" />
-          <p>Open WhatsApp > Linked Devices > Link a Device</p>
-          <script>setTimeout(() => location.reload(), 5000)</script>
-        </body></html>
-      `);
+      const qrImage = await QRCode.toDataURL(qrCodeData, { width: 280, margin: 0 });
+      qrContent = `
+        <h2>Scan QR Code to Connect</h2>
+        <p>Open WhatsApp &gt; Linked Devices &gt; Link a Device</p>
+        <div class="qr-container"><img src="${qrImage}" alt="QR Code" /></div>
+        <div class="qr-status waiting">Waiting for scan...</div>`;
     } catch {
-      res.send("<html><body><h1>QR code error</h1></body></html>");
+      qrContent = `<h2>QR Code Error</h2><p>Failed to generate QR code. Retrying...</p>`;
     }
-    return;
+    refreshScript = "setTimeout(() => location.reload(), 5000);";
+  } else {
+    statusText = `Status: ${sessionStatus}`;
+    qrContent = `
+      <h2>Initializing WhatsApp Session</h2>
+      <p>The gateway is starting up. QR code will appear shortly.</p>
+      <div class="qr-status offline">${sessionStatus === "STARTING" ? "Connecting..." : "Waiting for session to start..."}</div>`;
+    refreshScript = "setTimeout(() => location.reload(), 3000);";
   }
 
-  res.send(`
-    <html><body style="font-family:sans-serif;text-align:center;padding:40px">
-      <h1>ZeniClaw WhatsApp Gateway</h1>
-      <p>Status: ${sessionStatus}</p>
-      <p>Waiting for session to start...</p>
-      <script>setTimeout(() => location.reload(), 3000)</script>
-    </body></html>
-  `);
+  const html = LANDING_HTML
+    .replace("{{STATUS_TEXT}}", statusText)
+    .replace("{{QR_CONTENT}}", qrContent)
+    .replace("{{REFRESH_SCRIPT}}", refreshScript);
+
+  res.send(html);
 });
 
 // Health check
