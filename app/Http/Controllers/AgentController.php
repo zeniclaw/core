@@ -123,6 +123,12 @@ class AgentController extends Controller
             'color' => 'pink',
             'description' => 'Découvrez et gérez vos playlists musicales',
         ],
+        'pomodoro' => [
+            'label' => 'Pomodoro Timer',
+            'icon' => '🍅',
+            'color' => 'red',
+            'description' => 'Focus sessions avec minuteur et stats',
+        ],
     ];
 
     public function index(Request $request)
