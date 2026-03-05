@@ -93,6 +93,12 @@ class AgentController extends Controller
             'color' => 'blue',
             'description' => 'Analyse de code, bugs, securite et optimisations',
         ],
+        'screenshot' => [
+            'label' => 'Screenshot & Annotate',
+            'icon' => '📸',
+            'color' => 'cyan',
+            'description' => 'Capture, extract & annotate images',
+        ],
     ];
 
     public function index(Request $request)

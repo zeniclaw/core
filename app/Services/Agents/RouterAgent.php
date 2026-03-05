@@ -108,6 +108,29 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Screenshot/OCR keywords → screenshot agent with Haiku
+        if ($context->body && $this->detectScreenshotKeywords($context->body)) {
+            return [
+                'agent' => 'screenshot',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Screenshot/OCR/annotate pattern detected — fast-path to screenshot agent',
+            ];
+        }
+
+        // Fast-path: Image media with screenshot-like intent
+        if ($context->hasMedia && $this->isImageMessage($context->mimetype ?? ($context->media['mimetype'] ?? null)) &&
+            $context->body && $this->detectScreenshotKeywords($context->body)) {
+            return [
+                'agent' => 'screenshot',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Image + screenshot intent detected — fast-path to screenshot agent',
+            ];
+        }
+
         // Fast-path: Code review keywords → code_review agent with Sonnet
         if ($context->body && $this->detectCodeReviewKeywords($context->body)) {
             return [
@@ -182,6 +205,7 @@ AGENTS DISPONIBLES:
 - "hangman" = jeu du pendu, hangman, /hangman, deviner un mot, jeu de mots interactif
 - "flashcard" = flashcards, apprentissage, revision, SRS, repetition espacee, deck, creer carte, etudier
 - "code_review" = revue de code, analyse de code, verifier du code, code review, bugs, securite code
+- "screenshot" = capture ecran, screenshot, OCR, extract text, annoter image, comparer images, annotation
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -199,6 +223,7 @@ REGLES DE SELECTION DU MODELE:
 - hangman → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - flashcard → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - code_review → toujours "claude-sonnet-4-5-20241022", complexity "medium"
+- screenshot → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -219,6 +244,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - HANGMAN = jeu du pendu, hangman, /hangman, "nouvelle partie pendu", deviner un mot, jeu interactif de mots.
 - FLASHCARD = flashcard, /flashcard, "creer carte", "reviser", "deck", apprentissage, SRS, repetition espacee, "etudier", "apprendre".
 - CODE_REVIEW = "code review", "review my code", "verifier ce code", "check this code", "@codereviewer", code avec demande d'analyse. Si le message contient un bloc de code (```) avec une demande de review/verification.
+- SCREENSHOT = "screenshot", "capture ecran", "extract text", "OCR", "annoter", "annotate", "comparer images", "lire le texte", "@screenshot". Tout ce qui concerne le traitement d'images: extraction de texte, annotation, comparaison.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -269,7 +295,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -462,6 +488,34 @@ PROMPT;
         }
 
         return false;
+    }
+
+    private function detectScreenshotKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\b@?screenshot\b/i',
+            '/\b(extract[\s-]?text|ocr)\b/i',
+            '/\b(extraire[\s-]?texte|lire\s+le\s+texte)\b/iu',
+            '/\bannotat(e|er|ion)\b/iu',
+            '/\b(compare[r]?\s+(image|photo|capture))/iu',
+            '/\b(capture\s+(ecran|screen|image|photo))\b/iu',
+            '/\b(surligner|marquer)\b/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function isImageMessage(?string $mimetype): bool
+    {
+        if (!$mimetype) {
+            return false;
+        }
+        $base = explode(';', $mimetype)[0];
+        return str_starts_with(trim($base), 'image/');
     }
 
     private function detectMusicKeywords(string $body): bool
