@@ -75,6 +75,12 @@ class AgentController extends Controller
             'color' => 'purple',
             'description' => 'Jeu du pendu interactif avec stats',
         ],
+        'voice_command' => [
+            'label' => 'Voice Commands',
+            'icon' => '🎤',
+            'color' => 'cyan',
+            'description' => 'Transcribe & execute audio commands',
+        ],
     ];
 
     public function index(Request $request)

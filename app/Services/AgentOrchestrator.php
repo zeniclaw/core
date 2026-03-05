@@ -19,6 +19,7 @@ use App\Services\Agents\FinanceAgent;
 use App\Services\Agents\SmartMeetingAgent;
 use App\Services\Agents\HangmanGameAgent;
 use App\Services\Agents\SmartContextAgent;
+use App\Services\Agents\VoiceCommandAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -61,6 +62,7 @@ class AgentOrchestrator
             new SmartMeetingAgent(),
             new HangmanGameAgent(),
             new SmartContextAgent(),
+            new VoiceCommandAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
@@ -116,15 +118,67 @@ class AgentOrchestrator
             );
 
             // 3. Dispatch to agent — agentic architecture
+            // VoiceCommandAgent transcribes audio, then we re-route the text.
             // DevAgent handles code tasks via SubAgent.
             // Everything else goes through ChatAgent's agentic loop (with tools).
             $dispatchAgent = $routing['agent'];
-            if (!in_array($dispatchAgent, ['dev'])) {
+
+            if ($dispatchAgent === 'voice_command') {
+                // Voice: transcribe first, then re-route the transcribed text
+                $voiceAgent = $this->agents['voice_command'];
+                $voiceResult = $voiceAgent->handle($routedContext);
+
+                if ($debug) {
+                    $this->sendDebug($context, "[DEBUG VOICE] Transcription: " . mb_substr($voiceResult->reply ?? '', 0, 100));
+                }
+
+                // If transcription succeeded and confidence is good, re-route the text
+                $isLowConfidence = $voiceResult->metadata['low_confidence'] ?? false;
+                if ($voiceResult->action === 'reply' && $voiceResult->reply && !$isLowConfidence) {
+                    $transcript = $voiceResult->reply;
+
+                    // Create a new context with the transcribed text replacing the body
+                    $textContext = new AgentContext(
+                        agent: $context->agent,
+                        session: $context->session,
+                        from: $context->from,
+                        senderName: $context->senderName,
+                        body: $transcript,
+                        hasMedia: false,
+                        mediaUrl: null,
+                        mimetype: null,
+                        media: null,
+                    );
+
+                    // Re-route the transcribed text
+                    $newRouting = $this->router->route($textContext);
+
+                    if ($debug) {
+                        $this->sendDebug($context, "[DEBUG VOICE RE-ROUTE] → {$newRouting['agent']} (from transcript)");
+                    }
+
+                    $routedContext = $textContext->withRouting(
+                        $newRouting['agent'],
+                        $newRouting['model'],
+                        $newRouting['complexity'],
+                        'voice_command → ' . $newRouting['reasoning'],
+                        $newRouting['autonomy'] ?? 'confirm'
+                    );
+
+                    $dispatchAgent = $newRouting['agent'];
+                    if (!in_array($dispatchAgent, ['dev'])) {
+                        $dispatchAgent = 'chat';
+                    }
+                } else {
+                    // Low confidence or failed — voice agent already replied to user
+                    return $voiceResult;
+                }
+            } elseif (!in_array($dispatchAgent, ['dev'])) {
                 $dispatchAgent = 'chat';
             }
 
             if ($debug) {
-                $this->sendDebug($context, "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== $routing['agent'] ? " (agentic, routed from {$routing['agent']})" : ''));
+                $this->sendDebug($context, "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : ''));
             }
 
             $result = $this->dispatch($routedContext, $dispatchAgent);
