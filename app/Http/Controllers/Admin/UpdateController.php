@@ -111,13 +111,15 @@ class UpdateController extends Controller
         $success = false;
 
         if (!empty($content)) {
-            // Detect completion
-            $finished = str_contains($content, 'Started')
-                && (str_contains($content, 'Successfully built') || str_contains($content, 'Built'));
-            $success = $finished && !str_contains($content, 'error');
+            // Check the last few lines for definitive status markers
+            $lastLines = implode("\n", array_slice(explode("\n", trim($content)), -5));
 
-            // Also check if build failed
-            if (str_contains($content, 'ERROR') || str_contains($content, 'failed to build')) {
+            // Detect successful completion: last line is "Started" (written by update-helper)
+            $finished = str_contains($content, 'Successfully built') && str_contains($lastLines, 'Started');
+            $success = $finished;
+
+            // Detect explicit failure markers (only from our script, not package names)
+            if (str_contains($content, 'ERROR: rebuild failed') || str_contains($content, 'failed to build')) {
                 $finished = true;
                 $success = false;
             }
