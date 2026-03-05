@@ -22,6 +22,15 @@ use App\Services\Agents\SmartContextAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * AgentOrchestrator v2 — Agentic architecture
+ *
+ * The ChatAgent now has access to all tools (reminders, todos, projects, music)
+ * via the AgenticLoop. Most messages go through ChatAgent which autonomously
+ * decides which tools to use. Only DevAgent (code tasks) bypasses the agentic
+ * loop since it needs SubAgent execution.
+ */
+
 class AgentOrchestrator
 {
     private RouterAgent $router;
@@ -106,12 +115,19 @@ class AgentOrchestrator
                 $routing['autonomy'] ?? 'confirm'
             );
 
-            // 3. Dispatch to agent with handoff support
-            if ($debug) {
-                $this->sendDebug($context, "[DEBUG DISPATCH] → {$routing['agent']} agent");
+            // 3. Dispatch to agent — agentic architecture
+            // DevAgent handles code tasks via SubAgent.
+            // Everything else goes through ChatAgent's agentic loop (with tools).
+            $dispatchAgent = $routing['agent'];
+            if (!in_array($dispatchAgent, ['dev'])) {
+                $dispatchAgent = 'chat';
             }
 
-            $result = $this->dispatch($routedContext, $routing['agent']);
+            if ($debug) {
+                $this->sendDebug($context, "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== $routing['agent'] ? " (agentic, routed from {$routing['agent']})" : ''));
+            }
+
+            $result = $this->dispatch($routedContext, $dispatchAgent);
 
             // 4. Save memory for reply actions
             if ($result->action === 'reply' && $result->reply) {

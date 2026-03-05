@@ -4,6 +4,8 @@ namespace App\Services\Agents;
 
 use App\Models\Project;
 use App\Services\AgentContext;
+use App\Services\AgenticLoop;
+use App\Services\AgentTools;
 use App\Services\WhisperService;
 use Illuminate\Support\Facades\Cache;
 
@@ -29,58 +31,76 @@ class ChatAgent extends BaseAgent
         $systemPrompt = $this->buildSystemPrompt($context);
         $this->lastVoiceTranscript = null;
         $claudeMessage = $this->buildMessageContent($context);
-        $bodyForMemory = $context->body ?? '';
 
-        // Handle media description for memory
-        if ($this->lastVoiceTranscript) {
-            $bodyForMemory = '[Vocal: "' . mb_substr($this->lastVoiceTranscript, 0, 200) . '"]';
-        } elseif (!$bodyForMemory && $context->hasMedia) {
-            $mimetype = $context->mimetype ?? '';
-            if (in_array($mimetype, self::SUPPORTED_IMAGE_TYPES)) {
-                $bodyForMemory = '[Image envoyée]';
-            } elseif ($mimetype === 'application/pdf') {
-                $bodyForMemory = '[PDF envoyé]';
-            } else {
-                $bodyForMemory = '[Media envoyé]';
-            }
-        }
+        $debug = file_exists(storage_path('app/orchestrator_debug'));
 
-        $reply = $this->claude->chat($claudeMessage, $model, $systemPrompt);
+        // Run the agentic loop — the LLM decides which tools to use
+        $loop = new AgenticLoop(maxIterations: 10, debug: $debug);
+        $result = $loop->run(
+            userMessage: $claudeMessage,
+            systemPrompt: $systemPrompt,
+            model: $model,
+            context: $context,
+            tools: AgentTools::definitions(),
+        );
 
-        // Fallback to Haiku if the requested model fails
-        if (!$reply && $model !== 'claude-haiku-4-5-20251001') {
-            $reply = $this->claude->chat($claudeMessage, 'claude-haiku-4-5-20251001', $systemPrompt);
-            $model = 'claude-haiku-4-5-20251001 (fallback)';
+        $reply = $result->reply;
+
+        // Fallback to simple chat if agentic loop fails
+        if (!$reply) {
+            $reply = $this->claude->chat(
+                is_array($claudeMessage) ? $claudeMessage : $claudeMessage,
+                'claude-haiku-4-5-20251001',
+                $systemPrompt
+            );
         }
 
         if (!$reply) {
-            $fallback = 'Désolé, je n\'ai pas pu générer de réponse. Réessaie !';
+            $fallback = 'Desole, je n\'ai pas pu generer de reponse. Reessaie !';
             $this->sendText($context->from, $fallback);
             return AgentResult::reply($fallback);
         }
 
         $this->sendText($context->from, $reply);
 
-        $this->log($context, 'Reply sent', [
-            'model' => $model,
+        $modelUsed = $result->model ?? $model;
+        $this->log($context, 'Reply sent (agentic)', [
+            'model' => $modelUsed,
             'complexity' => $context->complexity,
+            'iterations' => $result->iterations,
+            'tools_used' => $result->toolsUsed,
             'reply' => mb_substr($reply, 0, 200),
         ]);
 
-        return AgentResult::reply($reply, ['model' => $model, 'complexity' => $context->complexity]);
+        return AgentResult::reply($reply, [
+            'model' => $modelUsed,
+            'complexity' => $context->complexity,
+            'tools_used' => $result->toolsUsed,
+            'iterations' => $result->iterations,
+        ]);
     }
 
     private function buildSystemPrompt(AgentContext $context): string
     {
+        $now = now('Europe/Paris')->format('Y-m-d H:i (l)');
+
         $systemPrompt =
-            "Tu es ZeniClaw, un assistant WhatsApp cool et sympa. " .
-            "Tu parles comme un ami ou un collègue décontracté. " .
-            "Tu tutoies, tu es direct, drôle et bienveillant. " .
-            "Tu utilises un langage naturel et détendu (pas trop formel). " .
-            "Tu peux utiliser des emojis avec modération. " .
-            "Réponds dans la même langue que l'utilisateur. " .
-            $this->buildLengthDirective($context->complexity) .
-            "Le message vient de {$context->senderName}.";
+            "Tu es ZeniClaw, un assistant WhatsApp autonome et intelligent. "
+            . "Tu as acces a des outils (tools) que tu peux utiliser librement pour aider l'utilisateur. "
+            . "Tu n'as PAS besoin de demander permission — utilise les outils quand c'est pertinent. "
+            . "Par exemple, si l'utilisateur dit 'rappelle-moi d'appeler Jean demain a 10h', "
+            . "utilise directement l'outil create_reminder sans demander confirmation. "
+            . "Si l'utilisateur parle de sa todo list, utilise les outils todo directement. "
+            . "Tu es proactif : si tu peux resoudre le probleme avec un outil, fais-le. "
+            . "\n\n"
+            . "STYLE: Tu parles comme un ami ou un collegue decontracte. "
+            . "Tu tutoies, tu es direct, drole et bienveillant. "
+            . "Tu utilises un langage naturel et detendu (pas trop formel). "
+            . "Tu peux utiliser des emojis avec moderation. "
+            . "Reponds dans la meme langue que l'utilisateur. "
+            . $this->buildLengthDirective($context->complexity)
+            . "\n\nDate et heure actuelles (Paris): {$now}"
+            . "\nLe message vient de {$context->senderName}.";
 
         // Inject user context memory (preferences, profile, humor level)
         $contextMemory = $this->formatContextMemoryForPrompt($context->from);
@@ -101,6 +121,12 @@ class ChatAgent extends BaseAgent
             $systemPrompt .= "\n\n" . $projectContext;
         }
 
+        // User context (active todos, reminders)
+        $userContext = $this->buildUserContext($context);
+        if ($userContext) {
+            $systemPrompt .= "\n\n" . $userContext;
+        }
+
         // Build memory context with longterm summary for long conversations
         $memoryData = $this->memory->read($context->agent->id, $context->from);
         $totalEntries = count($memoryData['entries'] ?? []);
@@ -110,7 +136,7 @@ class ChatAgent extends BaseAgent
             $olderEntries = array_slice($memoryData['entries'], 0, $totalEntries - 20);
             $longtermSummary = $this->buildLongtermSummary($olderEntries);
             if ($longtermSummary) {
-                $systemPrompt .= "\n\n--- Résumé des conversations précédentes ---\n" . $longtermSummary . "\n--- Fin résumé ---";
+                $systemPrompt .= "\n\n--- Resume des conversations precedentes ---\n" . $longtermSummary . "\n--- Fin resume ---";
             }
         }
 
@@ -121,12 +147,65 @@ class ChatAgent extends BaseAgent
         return $systemPrompt;
     }
 
+    /**
+     * Build a summary of active user data (todos, reminders) so the LLM can reference them.
+     */
+    private function buildUserContext(AgentContext $context): string
+    {
+        $parts = [];
+
+        // Active todos summary
+        $todos = \App\Models\Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderBy('id')
+            ->get();
+
+        if ($todos->isNotEmpty()) {
+            $lines = ['TODOS ACTIFS:'];
+            foreach ($todos->values() as $i => $todo) {
+                $status = $todo->is_done ? 'FAIT' : 'A FAIRE';
+                $list = $todo->list_name ? " [{$todo->list_name}]" : '';
+                $lines[] = "  " . ($i + 1) . ". [{$status}] {$todo->title}{$list}";
+            }
+            $parts[] = implode("\n", $lines);
+        }
+
+        // Pending reminders summary
+        $reminders = \App\Models\Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->take(10)
+            ->get();
+
+        if ($reminders->isNotEmpty()) {
+            $lines = ['REMINDERS EN ATTENTE:'];
+            foreach ($reminders->values() as $i => $r) {
+                $at = $r->scheduled_at->setTimezone('Europe/Paris')->format('d/m H:i');
+                $recurrence = $r->recurrence_rule ? " (recurrent: {$r->recurrence_rule})" : '';
+                $lines[] = "  " . ($i + 1) . ". {$r->message} → {$at}{$recurrence}";
+            }
+            $parts[] = implode("\n", $lines);
+        }
+
+        // Active project
+        $activeProjectId = $context->session->active_project_id ?? null;
+        if ($activeProjectId) {
+            $project = Project::find($activeProjectId);
+            if ($project) {
+                $parts[] = "PROJET ACTIF: {$project->name} ({$project->gitlab_url})";
+            }
+        }
+
+        return implode("\n\n", $parts);
+    }
+
     private function buildLengthDirective(?string $complexity): string
     {
         return match ($complexity) {
-            'complex' => "Tu peux faire des réponses longues et détaillées avec des sections, listes et formatage markdown si nécessaire. ",
-            'medium' => "Tu peux faire des réponses structurées avec des listes à puces et du formatage markdown si utile. Reste clair et organisé. ",
-            default => "Réponds de manière concise (2-3 phrases max sauf si on te demande plus). ",
+            'complex' => "Tu peux faire des reponses longues et detaillees avec des sections, listes et formatage si necessaire. ",
+            'medium' => "Tu peux faire des reponses structurees avec des listes a puces si utile. Reste clair et organise. ",
+            default => "Reponds de maniere concise (2-3 phrases max sauf si on te demande plus). ",
         };
     }
 
@@ -149,9 +228,8 @@ class ChatAgent extends BaseAgent
             return '';
         }
 
-        // Keep only a reasonable number of summarized topics
         $topics = array_slice($topics, -30);
-        return "Sujets abordés précédemment (" . count($olderEntries) . " échanges) :\n- " . implode("\n- ", $topics);
+        return "Sujets abordes precedemment (" . count($olderEntries) . " echanges) :\n- " . implode("\n- ", $topics);
     }
 
     private function buildMessageContent(AgentContext $context): string|array
@@ -171,19 +249,17 @@ class ChatAgent extends BaseAgent
                 if ($voiceContent) {
                     return $voiceContent;
                 }
-                // Fallback if transcription failed
                 $message = ($context->body ? "{$context->body}\n\n" : '') .
-                    "[{$context->senderName} a envoyé un message vocal/audio. Tu ne peux pas l'écouter, " .
+                    "[{$context->senderName} a envoye un message vocal/audio. Tu ne peux pas l'ecouter, " .
                     "dis-le poliment et propose de continuer la conversation.]";
             } else {
-                // Unsupported media type
                 $mediaDesc = match (true) {
-                    str_starts_with($mimetype, 'video/') => 'une vidéo',
+                    str_starts_with($mimetype, 'video/') => 'une video',
                     $mimetype === 'image/webp' && str_contains($context->mediaUrl, 'sticker') => 'un sticker',
                     default => "un fichier de type {$mimetype}",
                 };
                 $message = ($context->body ? "{$context->body}\n\n" : '') .
-                    "[{$context->senderName} a envoyé {$mediaDesc}. Tu ne peux pas le voir/écouter, " .
+                    "[{$context->senderName} a envoye {$mediaDesc}. Tu ne peux pas le voir/ecouter, " .
                     "dis-le poliment et propose de continuer la conversation.]";
             }
         }
@@ -213,7 +289,6 @@ class ChatAgent extends BaseAgent
         try {
             $response = $this->waha(30)->get($context->mediaUrl);
             if (!$response->successful()) {
-                \Illuminate\Support\Facades\Log::warning('[chat] Failed to download voice message');
                 return null;
             }
 
@@ -259,7 +334,7 @@ class ChatAgent extends BaseAgent
             ];
         }
 
-        $text = $caption ?: 'Décris ce que tu vois.';
+        $text = $caption ?: 'Decris ce que tu vois.';
         $blocks[] = ['type' => 'text', 'text' => $text];
 
         return $blocks;
@@ -291,7 +366,7 @@ class ChatAgent extends BaseAgent
                     . "S'il demande de modifier du code ou un projet, dis-lui d'envoyer l'URL GitLab du repo.";
             }
 
-            $lines = ["PROJETS CONFIGURES POUR CET UTILISATEUR (donnees reelles de la base de donnees):"];
+            $lines = ["PROJETS CONFIGURES POUR CET UTILISATEUR:"];
             foreach ($allProjects as $project) {
                 $status = match ($project->status) {
                     'approved' => 'pret',
@@ -300,19 +375,7 @@ class ChatAgent extends BaseAgent
                     default => $project->status,
                 };
 
-                $lastTask = $project->subAgents()->orderByDesc('created_at')->first();
                 $line = "- {$project->name} (GitLab: {$project->gitlab_url}, statut: {$status})";
-                if ($lastTask) {
-                    $taskStatus = match ($lastTask->status) {
-                        'queued' => 'en attente',
-                        'running' => 'en cours',
-                        'completed' => 'termine',
-                        'failed' => 'echoue',
-                        'killed' => 'arrete',
-                        default => $lastTask->status,
-                    };
-                    $line .= " — derniere tache: \"{$lastTask->task_description}\" ({$taskStatus})";
-                }
                 $lines[] = $line;
             }
 
@@ -322,8 +385,6 @@ class ChatAgent extends BaseAgent
                     $lines[] = "\nPROJET ACTIF ACTUELLEMENT: {$activeProject->name} ({$activeProject->gitlab_url})";
                 }
             }
-
-            $lines[] = "Quand l'utilisateur pose une question sur ses projets, utilise UNIQUEMENT ces informations reelles.";
 
             return implode("\n", $lines);
         });

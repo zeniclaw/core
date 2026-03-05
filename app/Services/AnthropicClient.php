@@ -71,6 +71,74 @@ class AnthropicClient
     }
 
     /**
+     * Multi-turn conversation with tool use support (agentic loop).
+     * Returns the raw API response array (content blocks + stop_reason).
+     *
+     * @param array $messages Messages array
+     * @param string $model Claude model
+     * @param string $systemPrompt System prompt
+     * @param array $tools Tool definitions for the Anthropic API
+     * @param int $maxTokens Max tokens
+     * @return array|null Raw response with 'content' and 'stop_reason'
+     */
+    public function chatWithToolUse(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): ?array
+    {
+        $apiKey = AppSetting::get('anthropic_api_key');
+        if (!$apiKey) {
+            return null;
+        }
+
+        $isOAuth = str_starts_with($apiKey, 'sk-ant-oat01-');
+
+        $headers = [
+            'anthropic-version' => '2023-06-01',
+            'content-type' => 'application/json',
+        ];
+
+        if ($isOAuth) {
+            $headers['Authorization'] = "Bearer {$apiKey}";
+            $headers['anthropic-beta'] = 'oauth-2025-04-20';
+        } else {
+            $headers['x-api-key'] = $apiKey;
+        }
+
+        $body = [
+            'model' => $model,
+            'max_tokens' => $maxTokens,
+            'messages' => $messages,
+        ];
+
+        if ($systemPrompt) {
+            $body['system'] = $systemPrompt;
+        }
+
+        if (!empty($tools)) {
+            $body['tools'] = $tools;
+        }
+
+        $response = Http::timeout(120)
+            ->withHeaders($headers)
+            ->post("{$this->baseUrl}/messages", $body);
+
+        if ($response->successful()) {
+            return [
+                'content' => $response->json('content') ?? [],
+                'stop_reason' => $response->json('stop_reason') ?? 'end_turn',
+                'model' => $response->json('model'),
+                'usage' => $response->json('usage'),
+            ];
+        }
+
+        Log::error('AnthropicClient::chatWithToolUse failed', [
+            'status' => $response->status(),
+            'body' => substr($response->body(), 0, 500),
+            'model' => $model,
+        ]);
+
+        return null;
+    }
+
+    /**
      * Multi-turn conversation with full messages array.
      * Used by SubAgent for iterative code modification loops.
      *
