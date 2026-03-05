@@ -62,6 +62,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Meeting keywords → smart_meeting agent with Haiku
+        if ($context->body && $this->detectMeetingKeywords($context->body)) {
+            return [
+                'agent' => 'smart_meeting',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Meeting keyword detected — fast-path to smart_meeting agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -121,6 +132,7 @@ AGENTS DISPONIBLES:
 - "music" = musique, chanson, artiste, playlist, recommandation musicale, spotify, top charts, paroles
 - "finance" = depenses, budget, solde, argent, finances, achats, cout, paye, combien j'ai depense, rapport financier, alertes budget
 - "mood_check" = humeur, etat emotionnel, comment ca va (contexte emotionnel), mood, feeling, stress, fatigue, bien-etre
+- "smart_meeting" = reunion, synthese reunion, reunion start, reunion end, compte-rendu, meeting, capture de reunion
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -134,6 +146,7 @@ REGLES DE SELECTION DU MODELE:
 - music → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - finance → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - mood_check → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- smart_meeting → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -150,6 +163,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - MUSIC = musique, chanson, artiste, playlist, recommandation, spotify, top charts, paroles, "mets de la musique", "ecouter", genre musical
 - FINANCE = depenses, budget, solde, argent, finances, "j'ai depense", "combien", "depense X euros", "budget alimentation", "rapport financier", "alertes budget", achat, cout, paye. Tout ce qui concerne l'argent et les finances personnelles.
 - MOOD_CHECK = expression d'etat emotionnel: "comment ca va" (contexte emotionnel), "je me sens...", "mood", "je suis fatigue/stresse/triste/bien", "how am i doing", "mood check", "mood stats", etat de bien-etre. PRIORITE HAUTE si contexte emotionnel clair.
+- SMART_MEETING = reunion, "reunion start", "reunion end", "synthese reunion", meeting, capture de reunion, compte-rendu. Tout ce qui concerne la gestion de reunions.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -200,7 +214,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -303,6 +317,22 @@ PROMPT;
             '/\bfinance|financier|financiere\b/iu',
             '/\b(stats?|statistiques?)\s*(financ|depense|budget)/iu',
             '/\b(alertes?\s*budget|budget\s*alertes?)\b/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectMeetingKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\br[ée]union\s+start\b/iu',
+            '/\br[ée]union\s+end\b/iu',
+            '/\bsynth[eè]se\s+r[ée]union\b/iu',
+            '/\br[ée]union\s+\w+/iu',
         ];
 
         foreach ($patterns as $pattern) {
