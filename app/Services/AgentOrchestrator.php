@@ -17,6 +17,7 @@ use App\Services\Agents\MusicAgent;
 use App\Services\Agents\MoodCheckAgent;
 use App\Services\Agents\FinanceAgent;
 use App\Services\Agents\SmartMeetingAgent;
+use App\Services\Agents\HangmanGameAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -48,6 +49,7 @@ class AgentOrchestrator
             new MoodCheckAgent(),
             new FinanceAgent(),
             new SmartMeetingAgent(),
+            new HangmanGameAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

@@ -69,6 +69,12 @@ class AgentController extends Controller
             'color' => 'indigo',
             'description' => 'Capture et synthese auto de reunions',
         ],
+        'hangman' => [
+            'label' => 'Hangman Game',
+            'icon' => '🎮',
+            'color' => 'purple',
+            'description' => 'Jeu du pendu interactif avec stats',
+        ],
     ];
 
     public function index(Request $request)

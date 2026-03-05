@@ -73,6 +73,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Hangman keywords → hangman agent with Haiku
+        if ($context->body && $this->detectHangmanKeywords($context->body)) {
+            return [
+                'agent' => 'hangman',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Hangman/pendu game pattern detected — fast-path to hangman agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -133,6 +144,7 @@ AGENTS DISPONIBLES:
 - "finance" = depenses, budget, solde, argent, finances, achats, cout, paye, combien j'ai depense, rapport financier, alertes budget
 - "mood_check" = humeur, etat emotionnel, comment ca va (contexte emotionnel), mood, feeling, stress, fatigue, bien-etre
 - "smart_meeting" = reunion, synthese reunion, reunion start, reunion end, compte-rendu, meeting, capture de reunion
+- "hangman" = jeu du pendu, hangman, /hangman, deviner un mot, jeu de mots interactif
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -147,6 +159,7 @@ REGLES DE SELECTION DU MODELE:
 - finance → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - mood_check → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - smart_meeting → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- hangman → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -164,6 +177,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - FINANCE = depenses, budget, solde, argent, finances, "j'ai depense", "combien", "depense X euros", "budget alimentation", "rapport financier", "alertes budget", achat, cout, paye. Tout ce qui concerne l'argent et les finances personnelles.
 - MOOD_CHECK = expression d'etat emotionnel: "comment ca va" (contexte emotionnel), "je me sens...", "mood", "je suis fatigue/stresse/triste/bien", "how am i doing", "mood check", "mood stats", etat de bien-etre. PRIORITE HAUTE si contexte emotionnel clair.
 - SMART_MEETING = reunion, "reunion start", "reunion end", "synthese reunion", meeting, capture de reunion, compte-rendu. Tout ce qui concerne la gestion de reunions.
+- HANGMAN = jeu du pendu, hangman, /hangman, "nouvelle partie pendu", deviner un mot, jeu interactif de mots.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -214,7 +228,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -333,6 +347,22 @@ PROMPT;
             '/\br[ée]union\s+end\b/iu',
             '/\bsynth[eè]se\s+r[ée]union\b/iu',
             '/\br[ée]union\s+\w+/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectHangmanKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\/hangman\b/i',
+            '/\bhangman\b/i',
+            '/\b(jeu\s+(du\s+)?pendu|pendu)\b/iu',
+            '/\bjouer\s+au\s+pendu\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
