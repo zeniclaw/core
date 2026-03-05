@@ -18,6 +18,7 @@ use App\Services\Agents\MoodCheckAgent;
 use App\Services\Agents\FinanceAgent;
 use App\Services\Agents\SmartMeetingAgent;
 use App\Services\Agents\HangmanGameAgent;
+use App\Services\Agents\FlashcardAgent;
 use App\Services\Agents\SmartContextAgent;
 use App\Services\Agents\VoiceCommandAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
@@ -61,6 +62,7 @@ class AgentOrchestrator
             new FinanceAgent(),
             new SmartMeetingAgent(),
             new HangmanGameAgent(),
+            new FlashcardAgent(),
             new SmartContextAgent(),
             new VoiceCommandAgent(),
         ];

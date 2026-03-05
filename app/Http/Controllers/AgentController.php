@@ -75,6 +75,12 @@ class AgentController extends Controller
             'color' => 'purple',
             'description' => 'Jeu du pendu interactif avec stats',
         ],
+        'flashcard' => [
+            'label' => 'Flashcards',
+            'icon' => '📚',
+            'color' => 'indigo',
+            'description' => 'Apprentissage adaptatif avec repetition espacee',
+        ],
         'voice_command' => [
             'label' => 'Voice Commands',
             'icon' => '🎤',
