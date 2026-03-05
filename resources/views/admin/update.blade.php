@@ -84,32 +84,51 @@
                         this.phase = 'done';
                     }
                 } catch(e) {
-                    this.updateLog += 'Network error: ' + e.message;
-                    this.error = true;
-                    this.phase = 'done';
+                    // Network error = container is restarting (expected during update)
+                    this.updateLog += 'Container is restarting for rebuild...\n';
+                    this.phase = 'rebuilding';
+                    this.startRebuildPolling();
                 }
             },
 
             startRebuildPolling() {
-                this.rebuildLog = 'Waiting for Docker rebuild to start...\n';
+                this.rebuildLog = 'Waiting for container to come back online...\n';
                 let attempts = 0;
+                let wasDown = false;
+                let backOnline = false;
                 this.rebuildPolling = setInterval(async () => {
                     attempts++;
                     try {
                         const r = await fetch('{{ route('admin.update.rebuild-status') }}');
-                        const d = await r.json();
-                        if (d.log) {
-                            this.rebuildLog = d.log;
-                        }
-                        if (d.finished) {
-                            clearInterval(this.rebuildPolling);
-                            this.rebuildPolling = null;
-                            this.phase = 'done';
-                            this.error = !d.success;
+                        if (r.ok) {
+                            const d = await r.json();
+                            if (wasDown) {
+                                backOnline = true;
+                            }
+                            if (d.log) {
+                                this.rebuildLog = d.log;
+                            }
+                            if (d.finished) {
+                                clearInterval(this.rebuildPolling);
+                                this.rebuildPolling = null;
+                                this.phase = 'done';
+                                this.error = !d.success;
+                            } else if (backOnline && !d.log) {
+                                // Container is back but no rebuild log = update completed via restart
+                                clearInterval(this.rebuildPolling);
+                                this.rebuildPolling = null;
+                                this.rebuildLog += '\nContainer restarted successfully.\n';
+                                this.phase = 'done';
+                                this.error = false;
+                            }
+                        } else {
+                            wasDown = true;
+                            this.rebuildLog = 'Container is rebuilding and restarting...\n';
                         }
                     } catch(e) {
-                        // Container might be restarting — this is expected
-                        this.rebuildLog += '\n[Container restarting — waiting...]\n';
+                        // Container is down — this is expected during rebuild
+                        wasDown = true;
+                        this.rebuildLog = 'Container is rebuilding and restarting...\n';
                     }
                     // Safety: stop after 10 minutes
                     if (attempts > 300) {
@@ -118,7 +137,7 @@
                         this.rebuildLog += '\n[Timeout — check manually: docker logs zeniclaw_app]\n';
                         this.phase = 'done';
                     }
-                }, 2000);
+                }, 3000);
             },
 
             get combinedLog() {
