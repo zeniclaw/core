@@ -36,20 +36,20 @@
 {{-- Structured Data (JSON-LD) --}}
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
+  "@@context": "https://schema.org",
+  "@@type": "SoftwareApplication",
   "name": "ZeniClaw",
   "description": "Plateforme IA open source et self-hosted avec 19 agents specialises accessibles via WhatsApp.",
   "url": "{{ url('/') }}",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Linux",
   "offers": {
-    "@type": "Offer",
+    "@@type": "Offer",
     "price": "0",
     "priceCurrency": "EUR"
   },
   "author": {
-    "@type": "Organization",
+    "@@type": "Organization",
     "name": "ZeniBiz",
     "url": "https://www.zenibiz.com"
   },
