@@ -6,19 +6,29 @@ use App\Models\Reminder;
 use App\Models\Todo;
 use App\Services\AgentContext;
 use App\Services\AnthropicClient;
+use App\Services\ContextMemory\ContextStore;
 use Illuminate\Support\Facades\Log;
 
 class RouterAgent
 {
     private AnthropicClient $claude;
+    private SmartContextAgent $smartContext;
 
     public function __construct()
     {
         $this->claude = new AnthropicClient();
+        $this->smartContext = new SmartContextAgent();
     }
 
     public function route(AgentContext $context): array
     {
+        // Silently run SmartContextAgent to extract and store user facts
+        try {
+            $this->smartContext->handle($context);
+        } catch (\Throwable $e) {
+            Log::warning('SmartContextAgent failed silently: ' . $e->getMessage());
+        }
+
         // Fast-path: GitLab URL → dev agent with Haiku
         if ($context->body && $this->detectGitlabUrl($context->body)) {
             return [
@@ -44,10 +54,23 @@ class RouterAgent
         $body = $context->body ?? '[media sans texte]';
         $userContext = $this->buildUserContext($context);
 
+        // Enrich with context memory
+        $contextStore = new ContextStore();
+        $userFacts = $contextStore->retrieve($context->from);
+        $memoryContext = '';
+        if (!empty($userFacts)) {
+            $lines = [];
+            foreach ($userFacts as $fact) {
+                $lines[] = "- [{$fact['category']}] {$fact['value']}";
+            }
+            $memoryContext = "\n\nMEMOIRE CONTEXTUELLE:\n" . implode("\n", $lines);
+        }
+
         $message = "Message: \"{$body}\"";
         if ($userContext) {
             $message .= "\n\nCONTEXTE UTILISATEUR:\n{$userContext}";
         }
+        $message .= $memoryContext;
 
         $response = $this->claude->chat(
             $message,

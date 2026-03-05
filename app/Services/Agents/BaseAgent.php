@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\AgentLog;
 use App\Services\AgentContext;
 use App\Services\AnthropicClient;
+use App\Services\ContextMemory\ContextStore;
 use App\Services\ConversationMemoryService;
 use Illuminate\Support\Facades\Http;
 
@@ -50,5 +51,28 @@ abstract class BaseAgent implements AgentInterface
     protected function resolveModel(AgentContext $context): string
     {
         return $context->routedModel ?? 'claude-haiku-4-5-20251001';
+    }
+
+    protected function getContextMemory(string $userId): array
+    {
+        $store = new ContextStore();
+        return $store->retrieve($userId);
+    }
+
+    protected function formatContextMemoryForPrompt(string $userId): string
+    {
+        $facts = $this->getContextMemory($userId);
+        if (empty($facts)) {
+            return '';
+        }
+
+        $lines = ['PROFIL UTILISATEUR (memoire contextuelle):'];
+        foreach ($facts as $fact) {
+            $category = $fact['category'] ?? 'general';
+            $value = $fact['value'] ?? '';
+            $lines[] = "- [{$category}] {$value}";
+        }
+
+        return implode("\n", $lines);
     }
 }
