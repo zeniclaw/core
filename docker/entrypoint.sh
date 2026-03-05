@@ -149,4 +149,10 @@ su -s /bin/bash www-data -c "php /var/www/html/artisan schedule:work --no-intera
     done
 ) &
 
+# HealthWatchdog cron (independent of Laravel scheduler — double safety)
+mkdir -p /etc/cron.d
+echo "* * * * * www-data cd /var/www/html && php artisan zeniclaw:watchdog >> storage/app/watchdog.log 2>&1" > /etc/cron.d/zeniclaw-watchdog
+chmod 0644 /etc/cron.d/zeniclaw-watchdog
+service cron start || true
+
 exec php-fpm

@@ -78,7 +78,7 @@ services:
     volumes:
       - waha_data:/app/.sessions
     environment:
-      - WAHA_LOG_LEVEL=error
+      - WAHA_LOG_LEVEL=warn
       - WAHA_API_KEY=zeniclaw-waha-2026
       - WHATSAPP_RESTART_ALL_SESSIONS=True
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
