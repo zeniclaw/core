@@ -175,6 +175,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Pomodoro keywords → pomodoro agent with Haiku
+        if ($context->body && $this->detectPomodoroKeywords($context->body)) {
+            return [
+                'agent' => 'pomodoro',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Pomodoro/timer/focus session pattern detected — fast-path to pomodoro agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -241,6 +252,7 @@ AGENTS DISPONIBLES:
 - "screenshot" = capture ecran, screenshot, OCR, extract text, annoter image, comparer images, annotation
 - "event_reminder" = evenement a planifier, rappel d'evenement, calendrier, remind me about, add event, list events, rendez-vous
 - "habit" = suivi d'habitudes, streaks, tracker d'habitudes, challenge quotidien, ajouter/cocher habitude, stats habitudes
+- "pomodoro" = minuteur pomodoro, session de focus/travail, timer productif, start/stop/pause timer, stats pomodoro
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -262,6 +274,7 @@ REGLES DE SELECTION DU MODELE:
 - content_summarizer → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - event_reminder → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - habit → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- pomodoro → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -286,6 +299,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - CONTENT_SUMMARIZER = resume de liens, articles web, videos YouTube. Si le message contient une URL (http/https) avec intention de resume ou simplement un lien partage.
 - EVENT_REMINDER = evenement planifie, "remind me about", "add event", "list events", "remove event", rendez-vous, calendrier, "event on", planifier un evenement. ATTENTION: ne pas confondre avec REMINDER (rappel simple/timer) — EVENT_REMINDER est pour les evenements avec date/heure/lieu specifiques.
 - HABIT = habitude, streak, tracker, challenge, "ajouter habitude", "cocher habitude", "mes habitudes", "stats habitudes", "j'ai fait" (dans le contexte d'habitudes), suivi quotidien. Tout ce qui concerne le suivi d'habitudes et de routines.
+- POMODORO = pomodoro, "start focus", "session de travail", timer productif, "lance un pomodoro", "start 25", "pause timer", "stats pomodoro", focus session. Tout ce qui concerne le minuteur de productivite et les sessions de travail concentre.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -336,7 +350,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer', 'event_reminder', 'habit'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer', 'event_reminder', 'habit', 'pomodoro'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -613,6 +627,29 @@ PROMPT;
             '/\bchallenge\s+(quotidien|daily|hebdo)/iu',
             '/\bhabit\s+(tracker|log|check)\b/i',
             '/\b(daily|weekly)\s+habit\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectPomodoroKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\bpomodoro\b/i',
+            '/\bstart\s+focus\b/iu',
+            '/\bsession\s+de\s+(travail|focus|concentration)\b/iu',
+            '/\btimer\s+(productif|focus|travail)\b/iu',
+            '/\blance[r]?\s+(un\s+)?pomodoro\b/iu',
+            '/\bstart\s+\d+\s*(min|minutes?)?\b/i',
+            '/\bfocus\s+\d+\s*(min|minutes?)?\b/i',
+            '/\bstats?\s+pomodoro\b/iu',
+            '/\bpause\s+timer\b/iu',
+            '/\bstop\s+timer\b/iu',
+            '/\bfocus\s+session\b/i',
         ];
 
         foreach ($patterns as $pattern) {
