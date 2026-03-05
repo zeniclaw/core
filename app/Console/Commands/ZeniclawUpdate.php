@@ -3,25 +3,41 @@
 namespace App\Console\Commands;
 
 use App\Models\AgentLog;
-use App\Models\AppSetting;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
 class ZeniclawUpdate extends Command
 {
-    protected $signature = 'zeniclaw:update';
+    protected $signature = 'zeniclaw:update {--token= : GitLab access token (overrides DB setting)}';
     protected $description = 'Pull latest code from GitLab, rebuild and restart the container';
 
     public function handle(): int
     {
-        // Step 1: Git pull + docker rebuild via root helper script
-        $token = AppSetting::get('gitlab_access_token') ?? '';
+        // Get token: CLI option > DB setting > empty
+        $token = $this->option('token') ?? '';
+        if (empty($token)) {
+            try {
+                $token = \App\Models\AppSetting::get('gitlab_access_token') ?? '';
+            } catch (\Exception $e) {
+                $this->warn('⚠ Cannot read DB (running outside Docker?), trying without token...');
+            }
+        }
 
+        // Detect if running inside container (has sudo helper) or on host
+        $insideContainer = file_exists('/usr/local/bin/zeniclaw-update');
+        $repoPath = $insideContainer ? '/opt/zeniclaw-repo' : base_path();
+
+        if ($insideContainer) {
+            return $this->updateViaHelper($token, $repoPath);
+        }
+
+        return $this->updateDirect($token, $repoPath);
+    }
+
+    private function updateViaHelper(string $token, string $repoPath): int
+    {
         $this->info('▶ Pulling latest code from GitLab...');
-        $process = new Process(
-            ['sudo', '/usr/local/bin/zeniclaw-update', $token],
-            '/opt/zeniclaw-repo'
-        );
+        $process = new Process(['sudo', '/usr/local/bin/zeniclaw-update', $token], $repoPath);
         $process->setTimeout(120);
         $process->run(fn($type, $buf) => $this->getOutput()->write($buf));
 
@@ -32,28 +48,87 @@ class ZeniclawUpdate extends Command
         }
 
         $output = $process->getOutput();
-
-        // Extract version from helper output
         preg_match('/VERSION=(.+)/', $output, $m);
         $newVersion = trim($m[1] ?? 'unknown');
+
+        return $this->postUpdate($newVersion);
+    }
+
+    private function updateDirect(string $token, string $repoPath): int
+    {
+        // Running on host — do git pull directly, then docker-compose rebuild
+        $this->info('▶ Pulling latest code (host mode)...');
+
+        $pullCmd = !empty($token)
+            ? ['git', '-c', "url.https://oauth2:{$token}@gitlab.com/.insteadOf=https://gitlab.com/", 'pull', 'origin', 'main']
+            : ['git', 'pull', 'origin', 'main'];
+
+        $process = new Process($pullCmd, $repoPath);
+        $process->setTimeout(120);
+        $process->run(fn($type, $buf) => $this->getOutput()->write($buf));
+
+        if (!$process->isSuccessful()) {
+            $this->error('✗ git pull failed');
+            $this->error($process->getErrorOutput());
+            return self::FAILURE;
+        }
+        $this->info('✓ Code updated');
+
+        // Read version
+        $dockerfile = file_get_contents($repoPath . '/Dockerfile');
+        preg_match('/echo "([^"]+)" > storage\/app\/version\.txt/', $dockerfile, $m);
+        $newVersion = $m[1] ?? 'unknown';
         $this->info("▶ New version: v{$newVersion}");
 
-        // Step 2: Run migrations
+        // Docker rebuild
+        $this->info('▶ Rebuilding Docker containers...');
+        $rebuild = Process::fromShellCommandline(
+            'sudo docker-compose up -d --build app 2>&1',
+            $repoPath
+        );
+        $rebuild->setTimeout(600);
+        $rebuild->run(fn($type, $buf) => $this->getOutput()->write($buf));
+
+        if (!$rebuild->isSuccessful()) {
+            $this->warn('⚠ Docker rebuild may have failed — check logs');
+        }
+
+        $this->info("✅ Update v{$newVersion} complete.");
+        return self::SUCCESS;
+    }
+
+    private function postUpdate(string $newVersion): int
+    {
+        $this->info("▶ New version: v{$newVersion}");
+
+        // Migrations
         $this->info('▶ Running migrations...');
-        \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true, '--no-interaction' => true]);
-        $this->info('✓ Migrations done');
+        try {
+            \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true, '--no-interaction' => true]);
+            $this->info('✓ Migrations done');
+        } catch (\Exception $e) {
+            $this->warn('⚠ Migrations skipped: ' . $e->getMessage());
+        }
 
-        // Step 3: Update version file
-        file_put_contents(storage_path('app/version.txt'), $newVersion);
+        // Update version file
+        try {
+            file_put_contents(storage_path('app/version.txt'), $newVersion);
+        } catch (\Exception $e) {
+            // ignore
+        }
 
-        // Step 4: Clear caches
+        // Clear caches
         $this->info('▶ Clearing caches...');
-        \Illuminate\Support\Facades\Artisan::call('config:cache');
-        \Illuminate\Support\Facades\Artisan::call('route:cache');
-        \Illuminate\Support\Facades\Artisan::call('view:cache');
-        $this->info('✓ Caches cleared');
+        try {
+            \Illuminate\Support\Facades\Artisan::call('config:cache');
+            \Illuminate\Support\Facades\Artisan::call('route:cache');
+            \Illuminate\Support\Facades\Artisan::call('view:cache');
+            $this->info('✓ Caches cleared');
+        } catch (\Exception $e) {
+            $this->warn('⚠ Cache clear skipped');
+        }
 
-        // Step 5: Log the update
+        // Log
         try {
             $firstAgent = \App\Models\Agent::first();
             if ($firstAgent) {
@@ -69,7 +144,6 @@ class ZeniclawUpdate extends Command
         }
 
         $this->info("✅ Update v{$newVersion} — rebuild started, container will restart.");
-
         return self::SUCCESS;
     }
 }
