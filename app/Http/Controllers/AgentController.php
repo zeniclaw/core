@@ -57,6 +57,12 @@ class AgentController extends Controller
             'color' => 'pink',
             'description' => 'Suivi emotionnel & recommandations bien-etre',
         ],
+        'finance' => [
+            'label' => 'Finance',
+            'icon' => '💰',
+            'color' => 'green',
+            'description' => 'Suivi budgets, depenses & alertes financieres',
+        ],
     ];
 
     public function index(Request $request)

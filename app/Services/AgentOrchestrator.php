@@ -15,6 +15,7 @@ use App\Services\Agents\RouterAgent;
 use App\Services\Agents\TodoAgent;
 use App\Services\Agents\MusicAgent;
 use App\Services\Agents\MoodCheckAgent;
+use App\Services\Agents\FinanceAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -44,6 +45,7 @@ class AgentOrchestrator
             new TodoAgent(),
             new MusicAgent(),
             new MoodCheckAgent(),
+            new FinanceAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

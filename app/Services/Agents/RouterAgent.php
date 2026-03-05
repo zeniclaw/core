@@ -51,6 +51,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Finance keywords → finance agent with Haiku
+        if ($context->body && $this->detectFinanceKeywords($context->body)) {
+            return [
+                'agent' => 'finance',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Finance/expense/budget pattern detected — fast-path to finance agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -108,6 +119,7 @@ AGENTS DISPONIBLES:
 - "analysis" = analyse approfondie, revue de document, strategie, audit, comparaison detaillee
 - "todo" = gestion de liste de taches, checklist, cocher/decocher, to-do list
 - "music" = musique, chanson, artiste, playlist, recommandation musicale, spotify, top charts, paroles
+- "finance" = depenses, budget, solde, argent, finances, achats, cout, paye, combien j'ai depense, rapport financier, alertes budget
 - "mood_check" = humeur, etat emotionnel, comment ca va (contexte emotionnel), mood, feeling, stress, fatigue, bien-etre
 
 REGLES DE SELECTION DU MODELE:
@@ -120,6 +132,7 @@ REGLES DE SELECTION DU MODELE:
 - analysis medium → "claude-sonnet-4-5-20241022", analysis complex → "claude-opus-4-20250514"
 - todo → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - music → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- finance → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - mood_check → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
@@ -135,6 +148,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - ANALYSIS = demande d'analyse profonde, document a reviewer, strategie, audit
 - TODO = gestion de checklist, todo list, ajouter/cocher/decocher une tache, "ma liste", "ma todo"
 - MUSIC = musique, chanson, artiste, playlist, recommandation, spotify, top charts, paroles, "mets de la musique", "ecouter", genre musical
+- FINANCE = depenses, budget, solde, argent, finances, "j'ai depense", "combien", "depense X euros", "budget alimentation", "rapport financier", "alertes budget", achat, cout, paye. Tout ce qui concerne l'argent et les finances personnelles.
 - MOOD_CHECK = expression d'etat emotionnel: "comment ca va" (contexte emotionnel), "je me sens...", "mood", "je suis fatigue/stresse/triste/bien", "how am i doing", "mood check", "mood stats", etat de bien-etre. PRIORITE HAUTE si contexte emotionnel clair.
 - CHAT = tout le reste
 
@@ -186,7 +200,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -269,6 +283,26 @@ PROMPT;
             '/\bcomment\s+(tu\s+te\s+sens|je\s+me\s+sens)\b/iu',
             '/\bstate\s+of\s+mind\b/i',
             '/\bfeeling\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectFinanceKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\b(depense|depenses|expense)\b/iu',
+            '/\bajout\s+depense\b/iu',
+            '/\bbudget\s+\S+/iu',
+            '/\b(solde|balance)\b/iu',
+            '/\b(spent|paye|achete|cout|coute)\s+\d/iu',
+            '/\bfinance|financier|financiere\b/iu',
+            '/\b(stats?|statistiques?)\s*(financ|depense|budget)/iu',
+            '/\b(alertes?\s*budget|budget\s*alertes?)\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
