@@ -131,6 +131,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Event reminder keywords → event_reminder agent with Haiku
+        if ($context->body && $this->detectEventReminderKeywords($context->body)) {
+            return [
+                'agent' => 'event_reminder',
+                'model' => 'claude-haiku-4-5-20251001',
+                'complexity' => 'simple',
+                'autonomy' => 'auto',
+                'reasoning' => 'Event/reminder/calendar pattern detected — fast-path to event_reminder agent',
+            ];
+        }
+
         // Fast-path: URL content → content_summarizer agent with Haiku
         if ($context->body && $this->detectContentUrl($context->body)) {
             return [
@@ -217,6 +228,7 @@ AGENTS DISPONIBLES:
 - "flashcard" = flashcards, apprentissage, revision, SRS, repetition espacee, deck, creer carte, etudier
 - "code_review" = revue de code, analyse de code, verifier du code, code review, bugs, securite code
 - "screenshot" = capture ecran, screenshot, OCR, extract text, annoter image, comparer images, annotation
+- "event_reminder" = evenement a planifier, rappel d'evenement, calendrier, remind me about, add event, list events, rendez-vous
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -236,6 +248,7 @@ REGLES DE SELECTION DU MODELE:
 - code_review → toujours "claude-sonnet-4-5-20241022", complexity "medium"
 - screenshot → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - content_summarizer → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- event_reminder → toujours "claude-haiku-4-5-20251001", complexity "simple"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -258,6 +271,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - CODE_REVIEW = "code review", "review my code", "verifier ce code", "check this code", "@codereviewer", code avec demande d'analyse. Si le message contient un bloc de code (```) avec une demande de review/verification.
 - SCREENSHOT = "screenshot", "capture ecran", "extract text", "OCR", "annoter", "annotate", "comparer images", "lire le texte", "@screenshot". Tout ce qui concerne le traitement d'images: extraction de texte, annotation, comparaison.
 - CONTENT_SUMMARIZER = resume de liens, articles web, videos YouTube. Si le message contient une URL (http/https) avec intention de resume ou simplement un lien partage.
+- EVENT_REMINDER = evenement planifie, "remind me about", "add event", "list events", "remove event", rendez-vous, calendrier, "event on", planifier un evenement. ATTENTION: ne pas confondre avec REMINDER (rappel simple/timer) — EVENT_REMINDER est pour les evenements avec date/heure/lieu specifiques.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -308,7 +322,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review', 'screenshot', 'content_summarizer', 'event_reminder'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -549,6 +563,27 @@ PROMPT;
         }
 
         return true;
+    }
+
+    private function detectEventReminderKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\bremind\s+me\s+about\b/i',
+            '/\badd\s+event\b/i',
+            '/\blist\s+events?\b/i',
+            '/\bremove\s+event\b/i',
+            '/\bupdate\s+event\b/i',
+            '/\bevent\s+on\b/i',
+            '/\b(ajouter?|creer?|planifier)\s+(un\s+)?(evenement|event|rdv|rendez[\s-]?vous)\b/iu',
+            '/\b(mes\s+)?(evenements?|events?|calendrier)\b/iu',
+            '/\b(supprimer|annuler)\s+(un\s+)?(evenement|event)\b/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
     }
 
     private function detectMusicKeywords(string $body): bool
