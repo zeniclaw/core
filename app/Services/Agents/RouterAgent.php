@@ -108,6 +108,17 @@ class RouterAgent
             ];
         }
 
+        // Fast-path: Code review keywords → code_review agent with Sonnet
+        if ($context->body && $this->detectCodeReviewKeywords($context->body)) {
+            return [
+                'agent' => 'code_review',
+                'model' => 'claude-sonnet-4-5-20241022',
+                'complexity' => 'medium',
+                'autonomy' => 'auto',
+                'reasoning' => 'Code review pattern detected — fast-path to code_review agent',
+            ];
+        }
+
         // Fast-path: Music keywords → music agent with Haiku
         if ($context->body && $this->detectMusicKeywords($context->body)) {
             return [
@@ -170,6 +181,7 @@ AGENTS DISPONIBLES:
 - "smart_meeting" = reunion, synthese reunion, reunion start, reunion end, compte-rendu, meeting, capture de reunion
 - "hangman" = jeu du pendu, hangman, /hangman, deviner un mot, jeu de mots interactif
 - "flashcard" = flashcards, apprentissage, revision, SRS, repetition espacee, deck, creer carte, etudier
+- "code_review" = revue de code, analyse de code, verifier du code, code review, bugs, securite code
 
 REGLES DE SELECTION DU MODELE:
 - chat simple (salut, merci, ok) → "claude-haiku-4-5-20251001", complexity "simple"
@@ -186,6 +198,7 @@ REGLES DE SELECTION DU MODELE:
 - smart_meeting → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - hangman → toujours "claude-haiku-4-5-20251001", complexity "simple"
 - flashcard → toujours "claude-haiku-4-5-20251001", complexity "simple"
+- code_review → toujours "claude-sonnet-4-5-20241022", complexity "medium"
 
 DISTINCTION CRITIQUE entre PROJECT et DEV:
 - PROJECT = l'utilisateur veut SELECTIONNER/CHANGER de projet actif, SANS decrire une tache precise de code.
@@ -205,6 +218,7 @@ DISTINCTION CRITIQUE entre PROJECT et DEV:
 - SMART_MEETING = reunion, "reunion start", "reunion end", "synthese reunion", meeting, capture de reunion, compte-rendu. Tout ce qui concerne la gestion de reunions.
 - HANGMAN = jeu du pendu, hangman, /hangman, "nouvelle partie pendu", deviner un mot, jeu interactif de mots.
 - FLASHCARD = flashcard, /flashcard, "creer carte", "reviser", "deck", apprentissage, SRS, repetition espacee, "etudier", "apprendre".
+- CODE_REVIEW = "code review", "review my code", "verifier ce code", "check this code", "@codereviewer", code avec demande d'analyse. Si le message contient un bloc de code (```) avec une demande de review/verification.
 - CHAT = tout le reste
 
 AUTONOMIE (champ obligatoire pour TOUS les agents):
@@ -255,7 +269,7 @@ PROMPT;
             return $default;
         }
 
-        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command'];
+        $validAgents = ['chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music', 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard', 'voice_command', 'code_review'];
         if (!in_array($parsed['agent'], $validAgents)) {
             $parsed['agent'] = 'chat';
         }
@@ -423,6 +437,28 @@ PROMPT;
 
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $body)) return true;
+        }
+
+        return false;
+    }
+
+    private function detectCodeReviewKeywords(string $body): bool
+    {
+        $patterns = [
+            '/\bcode\s*review\b/i',
+            '/\breview\s+(my|this|the)\s*code\b/i',
+            '/\b(verifi(er|e)|check)\s*(ce|mon|le|this|my)\s*code\b/iu',
+            '/\b@codereviewer\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body)) return true;
+        }
+
+        // Code block + review intent
+        if (preg_match('/```\w*\s*\n.+```/s', $body) &&
+            preg_match('/\b(review|verifi|analyse|check|bug|securit|optimi)/iu', $body)) {
+            return true;
         }
 
         return false;
