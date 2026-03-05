@@ -1,3 +1,253 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── ZeniClaw Dark Theme ──────────────────────────────────────────────────────
+   Override Tailwind utility classes globally to match the homepage dark design.
+   This avoids editing 30+ Blade templates individually.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --zc-bg-primary: #0a0e17;
+  --zc-bg-secondary: #111827;
+  --zc-bg-card: #1a1f2e;
+  --zc-bg-card-hover: #232940;
+  --zc-text-primary: #f1f5f9;
+  --zc-text-secondary: #94a3b8;
+  --zc-text-muted: #64748b;
+  --zc-border: #1e293b;
+  --zc-accent-blue: #3b82f6;
+  --zc-accent-purple: #8b5cf6;
+  --zc-accent-pink: #ec4899;
+  --zc-accent-green: #10b981;
+  --zc-accent-amber: #f59e0b;
+  --zc-gradient: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+}
+
+/* ── Body & base ── */
+body.dark-theme {
+  background: var(--zc-bg-primary) !important;
+  color: var(--zc-text-primary) !important;
+}
+
+/* ── Background overrides ── */
+.dark-theme .bg-white {
+  background-color: var(--zc-bg-card) !important;
+}
+.dark-theme .bg-gray-50 {
+  background-color: var(--zc-bg-secondary) !important;
+}
+.dark-theme .bg-gray-100 {
+  background-color: var(--zc-bg-primary) !important;
+}
+.dark-theme .bg-gray-200 {
+  background-color: var(--zc-border) !important;
+}
+
+/* ── Hover background overrides ── */
+.dark-theme .hover\:bg-gray-50:hover {
+  background-color: var(--zc-bg-card-hover) !important;
+}
+.dark-theme .hover\:bg-gray-100:hover {
+  background-color: var(--zc-bg-card-hover) !important;
+}
+.dark-theme .hover\:bg-red-50:hover {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+}
+
+/* ── Text overrides ── */
+.dark-theme .text-gray-900 {
+  color: var(--zc-text-primary) !important;
+}
+.dark-theme .text-gray-800 {
+  color: var(--zc-text-primary) !important;
+}
+.dark-theme .text-gray-700 {
+  color: var(--zc-text-secondary) !important;
+}
+.dark-theme .text-gray-600 {
+  color: var(--zc-text-secondary) !important;
+}
+.dark-theme .text-gray-500 {
+  color: var(--zc-text-muted) !important;
+}
+.dark-theme .text-gray-400 {
+  color: var(--zc-text-muted) !important;
+}
+
+/* ── Border overrides ── */
+.dark-theme .border-gray-100 {
+  border-color: var(--zc-border) !important;
+}
+.dark-theme .border-gray-200 {
+  border-color: var(--zc-border) !important;
+}
+.dark-theme .border-gray-300 {
+  border-color: #2d3748 !important;
+}
+.dark-theme .divide-gray-50 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--zc-border) !important;
+}
+.dark-theme .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--zc-border) !important;
+}
+.dark-theme .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--zc-border) !important;
+}
+
+/* ── Shadow overrides ── */
+.dark-theme .shadow-sm {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+}
+.dark-theme .shadow-md {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4) !important;
+}
+.dark-theme .shadow-lg {
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* ── Colored backgrounds (chips, badges) ── */
+.dark-theme .bg-indigo-100 {
+  background-color: rgba(99, 102, 241, 0.15) !important;
+}
+.dark-theme .bg-green-100 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+}
+.dark-theme .bg-yellow-100 {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+.dark-theme .bg-orange-100 {
+  background-color: rgba(249, 115, 22, 0.15) !important;
+}
+.dark-theme .bg-red-100 {
+  background-color: rgba(239, 68, 68, 0.15) !important;
+}
+.dark-theme .bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+}
+.dark-theme .bg-purple-100 {
+  background-color: rgba(139, 92, 246, 0.15) !important;
+}
+
+/* badge text colors — keep readable */
+.dark-theme .text-indigo-700 { color: #818cf8 !important; }
+.dark-theme .text-indigo-600 { color: #818cf8 !important; }
+.dark-theme .text-green-700 { color: #6ee7b7 !important; }
+.dark-theme .text-green-600 { color: #6ee7b7 !important; }
+.dark-theme .text-yellow-700 { color: #fcd34d !important; }
+.dark-theme .text-orange-500 { color: #fb923c !important; }
+.dark-theme .text-red-600 { color: #fca5a5 !important; }
+.dark-theme .text-red-700 { color: #fca5a5 !important; }
+
+/* ── Flash messages ── */
+.dark-theme .bg-green-50 {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+}
+.dark-theme .border-green-200 {
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+.dark-theme .text-green-800 {
+  color: #6ee7b7 !important;
+}
+.dark-theme .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+}
+.dark-theme .border-red-200 {
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+.dark-theme .text-red-800 {
+  color: #fca5a5 !important;
+}
+
+/* ── Form inputs ── */
+.dark-theme input[type="text"],
+.dark-theme input[type="email"],
+.dark-theme input[type="password"],
+.dark-theme input[type="number"],
+.dark-theme input[type="url"],
+.dark-theme input[type="search"],
+.dark-theme input[type="tel"],
+.dark-theme textarea,
+.dark-theme select {
+  background-color: var(--zc-bg-primary) !important;
+  border-color: var(--zc-border) !important;
+  color: var(--zc-text-primary) !important;
+}
+
+.dark-theme input::placeholder,
+.dark-theme textarea::placeholder {
+  color: var(--zc-text-muted) !important;
+}
+
+.dark-theme input:focus,
+.dark-theme textarea:focus,
+.dark-theme select:focus {
+  border-color: var(--zc-accent-blue) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* ── Tables ── */
+.dark-theme table {
+  color: var(--zc-text-primary);
+}
+.dark-theme th {
+  color: var(--zc-text-secondary) !important;
+  background-color: var(--zc-bg-secondary) !important;
+  border-color: var(--zc-border) !important;
+}
+.dark-theme td {
+  border-color: var(--zc-border) !important;
+}
+
+/* ── Code / pre blocks ── */
+.dark-theme pre,
+.dark-theme code {
+  background-color: var(--zc-bg-primary) !important;
+  color: var(--zc-accent-green) !important;
+  border-color: var(--zc-border) !important;
+}
+
+/* ── Scrollbar ── */
+.dark-theme ::-webkit-scrollbar { width: 8px; }
+.dark-theme ::-webkit-scrollbar-track { background: var(--zc-bg-primary); }
+.dark-theme ::-webkit-scrollbar-thumb { background: var(--zc-bg-card); border-radius: 4px; }
+
+/* ── Pagination ── */
+.dark-theme nav[aria-label="Pagination"] span,
+.dark-theme nav[aria-label="Pagination"] a {
+  background-color: var(--zc-bg-card) !important;
+  border-color: var(--zc-border) !important;
+  color: var(--zc-text-secondary) !important;
+}
+.dark-theme nav[aria-label="Pagination"] span[aria-current] {
+  background-color: var(--zc-accent-blue) !important;
+  color: #fff !important;
+}
+
+/* ── Checkbox / Radio ── */
+.dark-theme input[type="checkbox"],
+.dark-theme input[type="radio"] {
+  background-color: var(--zc-bg-primary) !important;
+  border-color: #4b5563 !important;
+}
+
+/* ── Modal overlay ── */
+.dark-theme .bg-black\/50,
+.dark-theme [class*="bg-black/50"] {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+}
+
+/* ── Alpine.js dropdown menus ── */
+.dark-theme [x-show] .bg-white,
+.dark-theme div[x-transition] {
+  background-color: var(--zc-bg-card) !important;
+}
+
+/* ── Indigo button (primary CTA) — use gradient ── */
+.dark-theme .bg-indigo-600 {
+  background: var(--zc-gradient) !important;
+}
+.dark-theme .hover\:bg-indigo-700:hover {
+  background: var(--zc-gradient) !important;
+  opacity: 0.9;
+}
