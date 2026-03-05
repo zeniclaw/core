@@ -2,7 +2,10 @@
 
 namespace App\Services\Agents;
 
+use App\Models\MusicWishlist;
+use App\Models\MusicListenHistory;
 use App\Services\AgentContext;
+use App\Services\Formatters\MusicFormatter;
 use App\Services\SpotifyService;
 use Illuminate\Support\Facades\Log;
 
@@ -47,6 +50,9 @@ class MusicAgent extends BaseAgent
             'playlist' => $this->handlePlaylist($context, $query),
             'top' => $this->handleTopCharts($context, $query),
             'lyrics' => $this->handleLyrics($context, $query),
+            'wishlist_add' => $this->handleWishlistAdd($context, $query),
+            'wishlist_list' => $this->handleWishlistList($context),
+            'wishlist_remove' => $this->handleWishlistRemove($context, $query),
             default => $this->handleNaturalLanguage($context, $body),
         };
 
@@ -86,6 +92,9 @@ ACTIONS POSSIBLES:
 - "playlist" = chercher ou creer une playlist. Query = nom/theme de la playlist
 - "top" = top charts, classements, titres populaires. Query = pays ou "global" (defaut: "FR")
 - "lyrics" = chercher les paroles d'une chanson. Query = nom de la chanson (+ artiste si mentionne)
+- "wishlist_add" = ajouter une chanson a la wishlist/favoris. Query = nom de la chanson (+ artiste si mentionne)
+- "wishlist_list" = voir sa wishlist/favoris. Query = "" (vide)
+- "wishlist_remove" = supprimer un element de la wishlist. Query = numero de l'element (string)
 
 EXEMPLES:
 - "cherche du Daft Punk" → {"action": "search", "query": "Daft Punk"}
@@ -100,6 +109,12 @@ EXEMPLES:
 - "trouve la chanson Shape of You" → {"action": "search", "query": "Shape of You Ed Sheeran"}
 - "musique pour se concentrer" → {"action": "recommend", "query": "concentration"}
 - "playlist de fete" → {"action": "playlist", "query": "fete party"}
+- "ajoute a ma wishlist Shape of You" → {"action": "wishlist_add", "query": "Shape of You Ed Sheeran"}
+- "ajoute en favori Bohemian Rhapsody" → {"action": "wishlist_add", "query": "Bohemian Rhapsody Queen"}
+- "ma wishlist" → {"action": "wishlist_list", "query": ""}
+- "mes favoris musique" → {"action": "wishlist_list", "query": ""}
+- "ma musique" → {"action": "wishlist_list", "query": ""}
+- "supprime favori 2" → {"action": "wishlist_remove", "query": "2"}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -110,33 +125,16 @@ PROMPT;
         $data = $this->spotify->searchTrack($query, 'track', 5);
 
         if (!$data || empty($data['tracks']['items'])) {
-            $reply = "🎵 Aucun resultat trouve pour \"{$query}\". Essaie avec un autre terme !";
+            $reply = "Aucun resultat trouve pour \"{$query}\". Essaie avec un autre terme !";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'music_search', 'query' => $query]);
         }
 
         $tracks = $data['tracks']['items'];
-        $reply = "🎵 *Resultats pour \"{$query}\"* :\n\n";
+        $reply = MusicFormatter::formatTrackList($tracks, "Resultats pour \"{$query}\"");
+        $reply .= "\n\nDis \"ajoute a ma wishlist [nom]\" pour sauvegarder un titre !";
 
-        foreach ($tracks as $i => $track) {
-            $num = $i + 1;
-            $name = $track['name'];
-            $artists = implode(', ', array_map(fn($a) => $a['name'], $track['artists']));
-            $album = $track['album']['name'] ?? '';
-            $url = $track['external_urls']['spotify'] ?? '';
-            $duration = $this->formatDuration($track['duration_ms'] ?? 0);
-
-            $reply .= "{$num}. 🎤 *{$name}*\n";
-            $reply .= "   🎸 {$artists}\n";
-            if ($album) {
-                $reply .= "   💿 {$album}\n";
-            }
-            $reply .= "   ⏱ {$duration}";
-            if ($url) {
-                $reply .= " | 🔗 {$url}";
-            }
-            $reply .= "\n\n";
-        }
+        $this->trackHistory($context, $tracks[0]['name'] ?? $query, $tracks[0]['artists'][0]['name'] ?? '', 'search', $tracks[0]['external_urls']['spotify'] ?? null);
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Music search', ['query' => $query, 'results' => count($tracks)]);
@@ -297,6 +295,151 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'music_lyrics', 'query' => $query]);
     }
 
+    private function handleWishlistAdd(AgentContext $context, string $query): AgentResult
+    {
+        if (!$query) {
+            $reply = "Quel titre veux-tu ajouter a ta wishlist ? Ex: \"ajoute a ma wishlist Shape of You\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'music_wishlist_add_empty']);
+        }
+
+        // Search for the track on Spotify to get full info
+        $data = $this->spotify->searchTrack($query, 'track', 1);
+        $track = $data['tracks']['items'][0] ?? null;
+
+        if ($track) {
+            $songName = $track['name'];
+            $artist = implode(', ', array_map(fn($a) => $a['name'], $track['artists']));
+            $album = $track['album']['name'] ?? null;
+            $spotifyUrl = $track['external_urls']['spotify'] ?? null;
+            $durationMs = $track['duration_ms'] ?? null;
+            $spotifyId = $track['id'] ?? null;
+        } else {
+            $songName = $query;
+            $artist = 'Inconnu';
+            $album = null;
+            $spotifyUrl = null;
+            $durationMs = null;
+            $spotifyId = null;
+        }
+
+        // Check for duplicates
+        $exists = MusicWishlist::where('agent_id', $context->agent->id)
+            ->where('user_phone', $context->from)
+            ->where('song_name', $songName)
+            ->where('artist', $artist)
+            ->exists();
+
+        if ($exists) {
+            $reply = "*{$songName}* de {$artist} est deja dans ta wishlist !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'music_wishlist_duplicate']);
+        }
+
+        MusicWishlist::create([
+            'agent_id' => $context->agent->id,
+            'user_phone' => $context->from,
+            'song_name' => $songName,
+            'artist' => $artist,
+            'album' => $album,
+            'spotify_url' => $spotifyUrl,
+            'duration_ms' => $durationMs,
+            'spotify_id' => $spotifyId,
+        ]);
+
+        $reply = "Ajoute a ta wishlist !\n\n";
+        $reply .= MusicFormatter::formatTrack([
+            'name' => $songName,
+            'artist' => $artist,
+            'album' => $album,
+            'duration_ms' => $durationMs ?? 0,
+            'spotify_url' => $spotifyUrl,
+        ]);
+        $reply .= "\n\nDis \"ma wishlist\" pour voir tes favoris !";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Wishlist add', ['song' => $songName, 'artist' => $artist]);
+
+        return AgentResult::reply($reply, ['action' => 'music_wishlist_add', 'song' => $songName]);
+    }
+
+    private function handleWishlistList(AgentContext $context): AgentResult
+    {
+        $items = MusicWishlist::where('agent_id', $context->agent->id)
+            ->where('user_phone', $context->from)
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($items->isEmpty()) {
+            $reply = "Ta wishlist est vide !\nDis \"ajoute a ma wishlist [nom]\" pour sauvegarder un titre.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'music_wishlist_empty']);
+        }
+
+        $reply = "*Ta Wishlist Musicale* ({$items->count()} titres)\n\n";
+
+        foreach ($items as $i => $item) {
+            $reply .= MusicFormatter::formatWishlistItem($item, $i + 1);
+            $reply .= "\n\n";
+        }
+
+        $reply .= "Dis \"supprime favori [numero]\" pour retirer un titre.";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Wishlist viewed', ['count' => $items->count()]);
+
+        return AgentResult::reply($reply, ['action' => 'music_wishlist_list']);
+    }
+
+    private function handleWishlistRemove(AgentContext $context, string $query): AgentResult
+    {
+        $index = (int) $query;
+        if ($index < 1) {
+            $reply = "Donne le numero de l'element a supprimer. Dis \"ma wishlist\" pour voir la liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'music_wishlist_remove_invalid']);
+        }
+
+        $items = MusicWishlist::where('agent_id', $context->agent->id)
+            ->where('user_phone', $context->from)
+            ->orderByDesc('created_at')
+            ->get();
+
+        $item = $items->values()[$index - 1] ?? null;
+
+        if (!$item) {
+            $reply = "Element #{$index} introuvable dans ta wishlist.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'music_wishlist_remove_not_found']);
+        }
+
+        $songName = $item->song_name;
+        $artist = $item->artist;
+        $item->delete();
+
+        $reply = "*{$songName}* de {$artist} retire de ta wishlist.";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Wishlist remove', ['song' => $songName]);
+
+        return AgentResult::reply($reply, ['action' => 'music_wishlist_remove']);
+    }
+
+    private function trackHistory(AgentContext $context, string $songName, string $artist, string $action, ?string $spotifyUrl = null): void
+    {
+        try {
+            MusicListenHistory::create([
+                'agent_id' => $context->agent->id,
+                'user_phone' => $context->from,
+                'song_name' => $songName,
+                'artist' => $artist,
+                'action' => $action,
+                'spotify_url' => $spotifyUrl,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to track music history: ' . $e->getMessage());
+        }
+    }
+
     /**
      * Handle natural language music requests that don't fit a specific command.
      */
@@ -309,14 +452,15 @@ PROMPT;
 
     private function buildHelpMessage(): string
     {
-        return "🎵 *Assistant Musical* 🎵\n\n"
+        return "*Assistant Musical*\n\n"
             . "Voici ce que je peux faire :\n\n"
-            . "🔍 *Rechercher* — \"cherche Shape of You\"\n"
-            . "🎧 *Recommander* — \"recommande du chill\" ou \"musique pour se concentrer\"\n"
-            . "📋 *Playlists* — \"playlist pour courir\"\n"
-            . "🏆 *Top Charts* — \"top charts France\"\n"
-            . "📝 *Paroles* — \"paroles de Bohemian Rhapsody\"\n\n"
-            . "Dis-moi ce que tu veux ecouter ! 🎶";
+            . "*Rechercher* — \"cherche Shape of You\"\n"
+            . "*Recommander* — \"recommande du chill\" ou \"musique pour se concentrer\"\n"
+            . "*Playlists* — \"playlist pour courir\"\n"
+            . "*Top Charts* — \"top charts France\"\n"
+            . "*Paroles* — \"paroles de Bohemian Rhapsody\"\n"
+            . "*Wishlist* — \"ajoute a ma wishlist [nom]\" ou \"ma wishlist\"\n\n"
+            . "Dis-moi ce que tu veux ecouter !";
     }
 
     private function formatDuration(int $ms): string

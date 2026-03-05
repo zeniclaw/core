@@ -117,6 +117,12 @@ class AgentController extends Controller
             'color' => 'green',
             'description' => 'Suivi des habitudes quotidiennes, streaks et statistiques',
         ],
+        'music' => [
+            'label' => 'Music Agent',
+            'icon' => '🎵',
+            'color' => 'pink',
+            'description' => 'Découvrez et gérez vos playlists musicales',
+        ],
     ];
 
     public function index(Request $request)

@@ -626,10 +626,12 @@ PROMPT;
     {
         $keywords = [
             'musique', 'chanson', 'artiste', 'playlist',
-            'spotify', 'top charts', 'paroles', 'recommend',
+            'spotify', 'youtube music', 'top charts', 'paroles', 'recommend',
             'ecouter', 'écouter', 'mets de la musique',
             'cherche.*chanson', 'cherche.*artiste', 'cherche.*musique',
             'recommande.*musique', 'recommande.*chanson',
+            'wishlist.*musique', 'ma wishlist', 'mes favoris musique',
+            'ajoute.*wishlist', 'ma musique',
         ];
 
         $pattern = '/\b(' . implode('|', $keywords) . ')/iu';
