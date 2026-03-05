@@ -20,7 +20,7 @@ use App\Http\Controllers\SubAgentController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ────────────────────────────────────────────────────────────────────
-Route::get('/', fn() => redirect()->route('dashboard'));
+Route::get('/', fn() => view('welcome'));
 Route::get('/health', [HealthController::class, 'check'])->name('health');
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
 
