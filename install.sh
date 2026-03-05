@@ -649,15 +649,18 @@ DONE
     echo -e "  ${BOLD}Access your instance:${NC}"
     echo -e "  ┌──────────────────────────────────────────────────"
     echo -e "  │"
-    echo -e "  │  ${CYAN}URL:${NC}       ${BOLD}${CONF_APP_URL}${NC}"
+    echo -e "  │  ${CYAN}Dashboard:${NC}    ${BOLD}${CONF_APP_URL}${NC}"
+    echo -e "  │  ${CYAN}WhatsApp QR:${NC}  ${BOLD}http://localhost:3000${NC}"
     echo -e "  │"
-    echo -e "  │  ${CYAN}Email:${NC}     admin@zeniclaw.io"
-    echo -e "  │  ${CYAN}Password:${NC}  password"
+    echo -e "  │  ${CYAN}Email:${NC}        admin@zeniclaw.io"
+    echo -e "  │  ${CYAN}Password:${NC}     password"
     echo -e "  │"
     echo -e "  └──────────────────────────────────────────────────"
 
     echo ""
-    echo -e "  ${YELLOW}${BOLD}⚠️  IMPORTANT: Change the default password after your first login!${NC}"
+    echo -e "  ${YELLOW}${BOLD}Next steps:${NC}"
+    echo -e "  ${YELLOW}  1. Open http://localhost:3000 and scan the WhatsApp QR code${NC}"
+    echo -e "  ${YELLOW}  2. Log in to the dashboard and change the default password${NC}"
     echo ""
 
     # Show service status
@@ -665,7 +668,7 @@ DONE
     echo -e "  ┌──────────────────────────────────────────────────"
 
     local services=("zeniclaw_app" "zeniclaw_db" "zeniclaw_redis" "zeniclaw_waha")
-    local labels=("App     " "Database" "Redis   " "WAHA    ")
+    local labels=("App      " "Database " "Redis    " "WhatsApp ")
 
     for i in "${!services[@]}"; do
         local status
@@ -691,21 +694,55 @@ DONE
     echo ""
 }
 
+# --- Clone or Update Repository ----------------------------------------------
+
+REPO_URL="https://gitlab.com/zenidev/zeniclaw.git"
+INSTALL_DIR="${ZENICLAW_DIR:-/opt/zeniclaw}"
+BRANCH="${ZENICLAW_BRANCH:-main}"
+
+clone_or_update_repo() {
+    step "0/6 — Downloading ZeniClaw"
+
+    if [[ -d "$INSTALL_DIR/.git" ]]; then
+        info "Repository already exists at $INSTALL_DIR, pulling latest..."
+        git -C "$INSTALL_DIR" fetch origin
+        git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
+        success "Repository updated"
+    else
+        info "Cloning $REPO_URL into $INSTALL_DIR..."
+        sudo mkdir -p "$(dirname "$INSTALL_DIR")"
+        sudo git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+        sudo chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"
+        success "Repository cloned"
+    fi
+
+    cd "$INSTALL_DIR"
+}
+
 # --- Main Execution ----------------------------------------------------------
 
 main() {
-    # Ensure we're in the project directory
+    # Detect if running from inside the repo or standalone
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    cd "$SCRIPT_DIR"
 
-    # Check docker-compose.yml exists
+    show_banner
+
+    if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
+        # Running from inside the repo — use current directory
+        cd "$SCRIPT_DIR"
+        info "Running from project directory: $SCRIPT_DIR"
+    else
+        # Running standalone (e.g. curl | bash) — clone the repo first
+        preflight_checks
+        clone_or_update_repo
+    fi
+
+    # At this point we're in the project directory
     if [[ ! -f "docker-compose.yml" ]]; then
-        error "docker-compose.yml not found in $SCRIPT_DIR"
-        error "Please run this script from the ZeniClaw project root."
+        error "docker-compose.yml not found. Something went wrong."
         exit 1
     fi
 
-    show_banner
     preflight_checks
     collect_configuration
     generate_env
