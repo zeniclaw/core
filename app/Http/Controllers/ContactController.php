@@ -147,6 +147,7 @@ class ContactController extends Controller
         $request->validate([
             'phone' => ['required', 'string', 'regex:/^\+?[0-9]{7,15}$/'],
             'name' => ['nullable', 'string', 'max:100'],
+            'greeting' => ['nullable', 'string', 'max:1000'],
         ]);
 
         $phone = preg_replace('/[^0-9]/', '', $request->input('phone'));
@@ -177,8 +178,25 @@ class ContactController extends Controller
             'whitelisted' => true,
         ]);
 
-        $name = $request->input('name', $phone);
-        return back()->with('success', "Contact {$name} added successfully.");
+        // Send greeting message via WhatsApp
+        $contactName = $request->input('name', $phone);
+        $greeting = $request->input('greeting')
+            ?: "Hi {$contactName}! I'm *{$agent->name}*, your AI assistant powered by ZeniClaw. Feel free to send me a message anytime — I can help with questions, reminders, projects, and much more!";
+
+        try {
+            Http::timeout(15)
+                ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                ->post('http://waha:3000/api/sendText', [
+                    'chatId' => $peerId,
+                    'text' => $greeting,
+                    'session' => 'default',
+                ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to send greeting to new contact: ' . $e->getMessage());
+            return back()->with('success', "Contact {$contactName} added but greeting could not be sent (WhatsApp may not be connected).");
+        }
+
+        return back()->with('success', "Contact {$contactName} added and greeting sent!");
     }
 
     public function destroy(AgentSession $session): RedirectResponse

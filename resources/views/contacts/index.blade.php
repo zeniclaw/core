@@ -141,6 +141,12 @@
                         <input type="text" name="name" placeholder="John Doe"
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Greeting message <span class="text-gray-400">(optional)</span></label>
+                        <textarea name="greeting" rows="3" placeholder="Leave empty for default greeting"
+                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"></textarea>
+                        <p class="text-xs text-gray-400 mt-1">A WhatsApp message will be sent to introduce the bot</p>
+                    </div>
                 </div>
                 <div class="flex justify-end gap-3 mt-6">
                     <button type="button" @click="showAddModal = false"

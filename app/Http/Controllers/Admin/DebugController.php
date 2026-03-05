@@ -16,7 +16,7 @@ class DebugController extends Controller
 {
     public function index()
     {
-        $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') !== 'false';
+        $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') === 'true';
 
         // System info
         $system = $this->gatherSystemInfo();
@@ -32,7 +32,7 @@ class DebugController extends Controller
 
     public function toggleAutoSuggest(Request $request): JsonResponse
     {
-        $current = AppSetting::get('auto_suggest_enabled') !== 'false';
+        $current = AppSetting::get('auto_suggest_enabled') === 'true';
         $newValue = !$current;
         AppSetting::set('auto_suggest_enabled', $newValue ? 'true' : 'false');
 
@@ -146,7 +146,7 @@ class DebugController extends Controller
 
     private function gatherJobsInfo(): array
     {
-        $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') !== 'false';
+        $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') === 'true';
 
         return [
             ['name' => 'reminders:process', 'schedule' => 'Every minute', 'enabled' => true],
