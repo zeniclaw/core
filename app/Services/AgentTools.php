@@ -29,7 +29,7 @@ class AgentTools
                     'properties' => [
                         'message' => ['type' => 'string', 'description' => 'Short description of what to remind (e.g. "Appeler Jean")'],
                         'scheduled_at' => ['type' => 'string', 'description' => 'When to trigger, format YYYY-MM-DD HH:MM (Europe/Paris timezone)'],
-                        'recurrence' => ['type' => 'string', 'description' => 'Recurrence rule or null. Formats: "daily:HH:MM", "weekly:DAYNAME:HH:MM", "monthly:DAY:HH:MM", "weekdays:HH:MM"', 'nullable' => true],
+                        'recurrence' => ['type' => 'string', 'description' => 'Recurrence rule or null. Formats: "daily:HH:MM", "weekly:DAYNAME:HH:MM", "monthly:DAY:HH:MM", "weekdays:HH:MM"'],
                     ],
                     'required' => ['message', 'scheduled_at'],
                 ],
@@ -39,7 +39,7 @@ class AgentTools
                 'description' => 'List all active/pending reminders for the user. Use when the user asks about their reminders or schedule.',
                 'input_schema' => [
                     'type' => 'object',
-                    'properties' => [],
+                    'properties' => (object) [],
                 ],
             ],
             [
@@ -74,10 +74,10 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'items' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'List of task titles to add'],
-                        'list_name' => ['type' => 'string', 'description' => 'Name of the list (null for default list)', 'nullable' => true],
+                        'list_name' => ['type' => 'string', 'description' => 'Name of the list (null for default list)'],
                         'priority' => ['type' => 'string', 'enum' => ['high', 'normal', 'low'], 'description' => 'Priority level'],
-                        'due_at' => ['type' => 'string', 'description' => 'Deadline in YYYY-MM-DD HH:MM format (Europe/Paris)', 'nullable' => true],
-                        'category' => ['type' => 'string', 'description' => 'Category name', 'nullable' => true],
+                        'due_at' => ['type' => 'string', 'description' => 'Deadline in YYYY-MM-DD HH:MM format (Europe/Paris)'],
+                        'category' => ['type' => 'string', 'description' => 'Category name'],
                     ],
                     'required' => ['items'],
                 ],
@@ -88,7 +88,7 @@ class AgentTools
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'list_name' => ['type' => 'string', 'description' => 'Filter by list name (null for all)', 'nullable' => true],
+                        'list_name' => ['type' => 'string', 'description' => 'Filter by list name (null for all)'],
                     ],
                 ],
             ],
@@ -99,7 +99,7 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to check (1-based)'],
-                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list', 'nullable' => true],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
                     ],
                     'required' => ['items'],
                 ],
@@ -111,7 +111,7 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to uncheck (1-based)'],
-                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list', 'nullable' => true],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
                     ],
                     'required' => ['items'],
                 ],
@@ -123,7 +123,7 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to delete (1-based)'],
-                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list', 'nullable' => true],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
                     ],
                     'required' => ['items'],
                 ],
@@ -157,7 +157,7 @@ class AgentTools
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'project_name' => ['type' => 'string', 'description' => 'Project name (null for active project)', 'nullable' => true],
+                        'project_name' => ['type' => 'string', 'description' => 'Project name (null for active project)'],
                     ],
                 ],
             ],
@@ -203,7 +203,7 @@ class AgentTools
                 'description' => 'Get the current date and time in Europe/Paris timezone. Use this to answer questions about the current time or date.',
                 'input_schema' => [
                     'type' => 'object',
-                    'properties' => [],
+                    'properties' => (object) [],
                 ],
             ],
         ];
