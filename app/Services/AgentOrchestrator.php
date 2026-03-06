@@ -241,11 +241,14 @@ class AgentOrchestrator
                     $this->sendDebug($context, "[DEBUG PENDING] pending_agent_context expired → cleared");
                 }
             } else {
-                $isNew = $this->isNewIntent($context->body);
+                // Skip isNewIntent check when the agent expects raw input (credentials, URLs, etc.)
+                $expectRawInput = $pendingCtx['expect_raw_input'] ?? false;
+                $isNew = $expectRawInput ? false : $this->isNewIntent($context->body);
 
                 if ($debug) {
                     $this->sendDebug($context,
                         "[DEBUG PENDING] pending_agent_context: agent={$pendingCtx['agent']}, type={$pendingCtx['type']}\n"
+                        . "expectRawInput=" . ($expectRawInput ? 'TRUE' : 'FALSE') . "\n"
                         . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE')
                     );
                 }

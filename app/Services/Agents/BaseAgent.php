@@ -107,13 +107,14 @@ abstract class BaseAgent implements AgentInterface
      * Store pending context on the session so follow-up messages are routed back to this agent.
      * Structure: {agent: "dev", type: "list_selection", data: {...}, expires_at: "..."}
      */
-    protected function setPendingContext(AgentContext $context, string $type, array $data = [], int $ttlMinutes = 5): void
+    protected function setPendingContext(AgentContext $context, string $type, array $data = [], int $ttlMinutes = 5, bool $expectRawInput = false): void
     {
         $context->session->update([
             'pending_agent_context' => [
                 'agent' => $this->name(),
                 'type' => $type,
                 'data' => $data,
+                'expect_raw_input' => $expectRawInput,
                 'expires_at' => now()->addMinutes($ttlMinutes)->toIso8601String(),
             ],
         ]);

@@ -127,7 +127,7 @@ class DevAgent extends BaseAgent
         return match ($type) {
             'list_selection' => $this->handleListSelection($context, $data),
             'ambiguous_project' => $this->handleAmbiguousProjectSelection($context, $data),
-            'api_credentials' => $this->handleApiCredentials($context, $data),
+            'api_followup' => $this->handleApiFollowup($context, $data),
             default => null,
         };
     }
@@ -246,14 +246,15 @@ class DevAgent extends BaseAgent
         return AgentResult::reply($reply);
     }
 
-    // ── API Query (Generic Project API Interaction) ───────────────────
+    // ── API Query (100% Claude-driven Project API Interaction) ────────
 
-    private function handleApiCredentials(AgentContext $context, array $data): ?AgentResult
+    private function handleApiFollowup(AgentContext $context, array $data): ?AgentResult
     {
         $body = trim($context->body);
         $projectId = $data['project_id'] ?? null;
-        $missing = $data['missing'] ?? '';
+        $conversation = $data['conversation'] ?? [];
         $originalQuery = $data['original_query'] ?? '';
+        $saveAs = $data['save_as'] ?? null;
 
         $project = $projectId ? Project::find($projectId) : null;
         if (!$project) {
@@ -261,20 +262,19 @@ class DevAgent extends BaseAgent
             return null;
         }
 
-        // Store the provided credential
-        $project->setSetting($missing, $body);
-        $this->clearPendingContext($context);
-
-        $reply = "Merci ! {$missing} enregistre pour *{$project->name}*.";
-        $this->sendText($context->from, $reply);
-
-        // Retry the original query now that we have credentials
-        if ($originalQuery) {
-            $retryReply = $this->executeApiQuery($project, $originalQuery, $context);
-            $this->sendText($context->from, $retryReply);
-            return AgentResult::reply($reply . "\n\n" . $retryReply);
+        // Store the user's response if we know what setting it corresponds to
+        if ($saveAs) {
+            $project->setSetting($saveAs, $body);
         }
 
+        $this->clearPendingContext($context);
+
+        // Add user response to conversation
+        $conversation[] = ['role' => 'user', 'content' => $body];
+
+        // Let Claude decide what to do next with updated settings
+        $reply = $this->runApiAgent($project, $originalQuery, $conversation, $context);
+        $this->sendText($context->from, $reply);
         return AgentResult::reply($reply);
     }
 
@@ -285,131 +285,191 @@ class DevAgent extends BaseAgent
             return "Aucun projet actif. Selectionne d'abord un projet.";
         }
 
-        $baseUrl = $project->getSetting('base_url');
-        $apiKey = $project->getSetting('api_key');
-
-        // If missing base_url, ask for it
-        if (!$baseUrl) {
-            $this->setPendingContext($context, 'api_credentials', [
-                'project_id' => $project->id,
-                'missing' => 'base_url',
-                'original_query' => $query,
-            ], 10);
-            return "[{$project->name}] J'ai besoin de l'URL de base de l'API pour ce projet.\n"
-                . "Exemple: https://mon-app.com ou https://api.mon-app.com\n\n"
-                . "Envoie-moi l'URL :";
-        }
-
-        return $this->executeApiQuery($project, $query, $context);
+        return $this->runApiAgent($project, $query, [], $context);
     }
 
-    private function executeApiQuery(Project $project, string $query, AgentContext $context): string
+    /**
+     * Fully Claude-driven API agent. Claude reads the project code, the stored settings,
+     * and decides autonomously what to do: ask questions, make API calls, store info.
+     */
+    private function runApiAgent(Project $project, string $query, array $conversation, AgentContext $context): string
     {
-        $baseUrl = rtrim($project->getSetting('base_url'), '/');
-        $apiKey = $project->getSetting('api_key');
+        // Gather everything Claude needs
+        $projectCode = $this->discoverProjectApi($project);
+        $storedSettings = $project->settings ?? [];
+        $settingsJson = !empty($storedSettings) ? json_encode($storedSettings, JSON_UNESCAPED_UNICODE) : '(aucun)';
 
-        // Step 1: Read project routes/API structure from GitLab to understand available endpoints
-        $apiStructure = $this->discoverProjectApi($project);
-
-        // Step 2: Ask Claude to determine the right API call
-        $settingsInfo = "Base URL: {$baseUrl}";
-        if ($apiKey) {
-            $settingsInfo .= "\nAPI Key: disponible (sera envoyee en header Authorization: Bearer)";
+        $conversationText = '';
+        foreach ($conversation as $msg) {
+            $role = $msg['role'] === 'user' ? 'UTILISATEUR' : 'ASSISTANT';
+            $conversationText .= "{$role}: {$msg['content']}\n";
         }
 
-        $prompt = "Tu es un assistant qui aide a interroger l'API d'un projet.\n\n"
-            . "PROJET: {$project->name}\n"
-            . "CONFIG:\n{$settingsInfo}\n\n"
-            . "STRUCTURE API DU PROJET (extraite du code source):\n{$apiStructure}\n\n"
-            . "DEMANDE DE L'UTILISATEUR: {$query}\n\n"
-            . "Determine l'appel API a faire. Reponds en JSON:\n"
-            . '{"method": "GET|POST|...", "endpoint": "/api/...", "params": {}, "needs_auth": true|false, "explanation": "..."}' . "\n\n"
-            . "Si tu ne trouves pas l'endpoint adapte, reponds:\n"
-            . '{"error": "explication du probleme"}' . "\n\n"
-            . "Si l'API necessite une cle/token et qu'on n'en a pas, reponds:\n"
-            . '{"needs_credential": "api_key", "message": "explication"}' . "\n\n"
-            . "Reponds UNIQUEMENT en JSON.";
+        $systemPrompt = <<<PROMPT
+Tu es un agent intelligent qui aide a interagir avec l'API live d'un projet.
 
-        $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $prompt);
+PROJET: {$project->name}
+GITLAB: {$project->gitlab_url}
+
+CONFIGURATION STOCKEE (settings du projet):
+{$settingsJson}
+
+CODE SOURCE DU PROJET (routes/endpoints trouves):
+{$projectCode}
+
+CONVERSATION PRECEDENTE:
+{$conversationText}
+
+DEMANDE ORIGINALE: {$query}
+
+Tu dois repondre en JSON avec UNE action parmi:
+
+1. QUESTION — Tu as besoin d'info (URL, cle API, token, identifiant...). Claude formule la question.
+{
+  "action": "ask",
+  "message": "Ta question a l'utilisateur",
+  "save_as": "nom_du_setting_a_stocker_quand_il_repond"
+}
+
+2. API CALL — Tu as toutes les infos pour faire l'appel.
+{
+  "action": "call",
+  "method": "GET|POST|PUT|DELETE",
+  "url": "https://url-complete/endpoint",
+  "headers": {"Authorization": "Bearer xxx", ...},
+  "params": {},
+  "explanation": "ce que je fais"
+}
+
+3. REPONSE DIRECTE — Tu peux repondre sans appel API (ex: expliquer le code, lister les routes).
+{
+  "action": "reply",
+  "message": "ta reponse"
+}
+
+REGLES:
+- Analyse le code source pour comprendre les routes, l'auth, les endpoints
+- Utilise la CONFIGURATION STOCKEE si elle contient des infos utiles (url, tokens, cles...)
+- Si tu poses une question, "save_as" sera la cle sous laquelle la reponse sera stockee pour la prochaine fois
+- Pour l'auth, deduis le mecanisme du code (Bearer, Basic, cookie, API key header, etc.)
+- Construis l'URL complete avec le bon domaine + endpoint
+- Sois malin: si le code montre un .env avec APP_URL ou des constantes, utilise-les
+- Si la reponse de l'utilisateur dans la conversation repond a ta question precedente, utilise cette info
+
+Reponds UNIQUEMENT en JSON valide.
+PROMPT;
+
+        $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $systemPrompt);
         $parsed = $this->parseJson($response);
 
-        if (!$parsed) {
-            return "[{$project->name}] Je n'ai pas pu determiner l'appel API. Reformule ta demande.";
+        if (!$parsed || empty($parsed['action'])) {
+            return "[{$project->name}] Je n'ai pas reussi a analyser ce projet. Reformule ta demande.";
         }
 
-        // Handle missing credential
-        if (!empty($parsed['needs_credential'])) {
-            $credName = $parsed['needs_credential'];
-            $this->setPendingContext($context, 'api_credentials', [
-                'project_id' => $project->id,
-                'missing' => $credName,
-                'original_query' => $query,
-            ], 10);
-            return "[{$project->name}] " . ($parsed['message'] ?? "J'ai besoin de: {$credName}") . "\n\nEnvoie-moi la valeur :";
-        }
+        return match ($parsed['action']) {
+            'ask' => $this->handleApiAsk($project, $parsed, $query, $conversation, $context),
+            'call' => $this->handleApiCall($project, $parsed, $query, $context),
+            'reply' => "[{$project->name}] " . ($parsed['message'] ?? ''),
+            default => "[{$project->name}] Action non reconnue.",
+        };
+    }
 
-        // Handle error
-        if (!empty($parsed['error'])) {
-            return "[{$project->name}] {$parsed['error']}";
-        }
+    private function handleApiAsk(Project $project, array $parsed, string $query, array $conversation, AgentContext $context): string
+    {
+        $saveAs = $parsed['save_as'] ?? 'unknown';
+        $message = $parsed['message'] ?? 'J\'ai besoin d\'une info supplementaire.';
 
-        // Step 3: Execute the API call
+        // Store pending context so the response comes back here
+        $conversation[] = ['role' => 'assistant', 'content' => $message];
+        $this->setPendingContext($context, 'api_followup', [
+            'project_id' => $project->id,
+            'original_query' => $query,
+            'conversation' => $conversation,
+            'save_as' => $saveAs,
+        ], 10, true);
+
+        return "[{$project->name}] {$message}";
+    }
+
+    private function handleApiCall(Project $project, array $parsed, string $query, AgentContext $context): string
+    {
         $method = strtoupper($parsed['method'] ?? 'GET');
-        $endpoint = $parsed['endpoint'] ?? '/';
+        $url = $parsed['url'] ?? '';
+        $headers = $parsed['headers'] ?? [];
         $params = $parsed['params'] ?? [];
-        $needsAuth = $parsed['needs_auth'] ?? false;
-        $url = $baseUrl . $endpoint;
+
+        if (!$url) {
+            return "[{$project->name}] Pas d'URL determinee pour cet appel.";
+        }
 
         try {
-            $http = \Illuminate\Support\Facades\Http::timeout(15);
-
-            if ($needsAuth && $apiKey) {
-                $http = $http->withHeaders(['Authorization' => "Bearer {$apiKey}"]);
-            }
+            $http = \Illuminate\Support\Facades\Http::timeout(15)->withHeaders($headers);
 
             $httpResponse = match ($method) {
                 'POST' => $http->post($url, $params),
                 'PUT' => $http->put($url, $params),
                 'DELETE' => $http->delete($url, $params),
-                default => $http->get($url, $params),
+                default => empty($params) ? $http->get($url) : $http->get($url, $params),
             };
 
+            $status = $httpResponse->status();
+            $body = $httpResponse->body();
+
             if (!$httpResponse->successful()) {
-                // If 401/403 and no API key, ask for one
-                if (in_array($httpResponse->status(), [401, 403]) && !$apiKey) {
-                    $this->setPendingContext($context, 'api_credentials', [
+                // Let Claude figure out what went wrong and what to ask
+                $errorPrompt = "L'appel API a echoue.\n"
+                    . "URL: {$method} {$url}\n"
+                    . "Status: {$status}\n"
+                    . "Response: " . mb_substr($body, 0, 500) . "\n\n"
+                    . "Explique le probleme a l'utilisateur de maniere claire.\n"
+                    . "Si c'est un probleme d'auth (401/403), propose-lui de fournir les credentials necessaires.\n"
+                    . "Commence par [{$project->name}].";
+
+                $errorReply = $this->claude->chat($body, 'claude-haiku-4-5-20251001', $errorPrompt);
+
+                // If auth error, set pending context to ask for credentials
+                if (in_array($status, [401, 403])) {
+                    $this->setPendingContext($context, 'api_followup', [
                         'project_id' => $project->id,
-                        'missing' => 'api_key',
                         'original_query' => $query,
-                    ], 10);
-                    return "[{$project->name}] L'API repond {$httpResponse->status()} (non autorise).\n"
-                        . "Envoie-moi la cle API / token d'acces :";
+                        'conversation' => [
+                            ['role' => 'assistant', 'content' => $errorReply],
+                        ],
+                        'save_as' => 'api_token',
+                    ], 10, true);
                 }
 
-                return "[{$project->name}] Erreur API: HTTP {$httpResponse->status()}\n"
-                    . mb_substr($httpResponse->body(), 0, 300);
+                return $errorReply ?: "[{$project->name}] Erreur API: HTTP {$status}";
             }
 
-            $data = $httpResponse->json();
+            $data = $httpResponse->json() ?? $body;
 
-            // Step 4: Ask Claude to format the response nicely
-            $formatPrompt = "Tu es un assistant. L'utilisateur a demande: \"{$query}\"\n"
-                . "Voici la reponse de l'API (JSON):\n" . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n\n"
-                . "Formate cette reponse de maniere claire et lisible pour WhatsApp (pas de markdown complexe, utilise des listes numerotees et *gras* pour les titres).\n"
+            // Store successful URL pattern in settings for future use
+            $parsedUrl = parse_url($url);
+            $baseUrl = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '') . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
+            if ($baseUrl && !$project->getSetting('base_url')) {
+                $project->setSetting('base_url', $baseUrl);
+            }
+
+            // Format response with Claude
+            $formatPrompt = "L'utilisateur a demande: \"{$query}\"\n"
+                . "Voici la reponse de l'API ({$method} {$url}):\n"
+                . (is_array($data) ? json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : mb_substr($body, 0, 3000)) . "\n\n"
+                . "Formate cette reponse de maniere claire et lisible (listes numerotees, *gras* pour les titres).\n"
                 . "Si la reponse est longue, resume les elements principaux (max 20 items).\n"
-                . "Commence par le nom du projet entre crochets.";
+                . "Commence par [{$project->name}].";
 
             $formatted = $this->claude->chat(
-                json_encode($data, JSON_UNESCAPED_UNICODE),
+                is_array($data) ? json_encode($data, JSON_UNESCAPED_UNICODE) : $body,
                 'claude-haiku-4-5-20251001',
                 $formatPrompt
             );
 
-            return $formatted ?: "[{$project->name}] Reponse:\n" . mb_substr(json_encode($data, JSON_PRETTY_PRINT), 0, 2000);
+            return $formatted ?: "[{$project->name}] Reponse:\n" . mb_substr(is_array($data) ? json_encode($data, JSON_PRETTY_PRINT) : $body, 0, 2000);
 
         } catch (\Exception $e) {
             Log::warning("API query failed for {$project->name}: " . $e->getMessage());
-            return "[{$project->name}] Erreur lors de l'appel API: " . $e->getMessage();
+            return "[{$project->name}] Erreur: " . $e->getMessage();
         }
     }
 
@@ -418,8 +478,13 @@ class DevAgent extends BaseAgent
         $projectId = GitLabService::encodeProjectPath($project->gitlab_url);
         $gitlab = $this->getGitlab();
 
-        // Try to read common API route files
-        $routeFiles = ['routes/api.php', 'routes/web.php', 'src/routes.js', 'src/router/index.js', 'app/urls.py'];
+        // Try to read common API route/config files
+        $routeFiles = [
+            'routes/api.php', 'routes/web.php',
+            'src/routes.js', 'src/routes.ts', 'src/router/index.js', 'src/router/index.ts',
+            'app/urls.py', 'config/routes.rb',
+            '.env.example', 'docker-compose.yml',
+        ];
         $apiInfo = [];
 
         foreach ($routeFiles as $file) {
@@ -431,13 +496,12 @@ class DevAgent extends BaseAgent
         }
 
         if (empty($apiInfo)) {
-            // Fallback: check root tree for clues
             $tree = $gitlab->listTree($projectId);
             if ($tree) {
                 $names = array_map(fn($t) => $t['name'], array_slice($tree, 0, 30));
-                return "Structure du projet (racine): " . implode(', ', $names) . "\n(Pas de fichier de routes standard trouve)";
+                return "Structure racine: " . implode(', ', $names);
             }
-            return "(Structure API non determinee)";
+            return "(Aucune info trouvee)";
         }
 
         return implode("\n\n", $apiInfo);
