@@ -46,6 +46,8 @@ docker run --rm -d \
         docker builder prune -f >> /tmp/rebuild.log 2>&1; \
         docker compose up -d --build --force-recreate app >> /tmp/rebuild.log 2>&1 && \
         echo 'Successfully built app' >> /tmp/rebuild.log && \
+        echo 'Starting all services (including new ones)...' >> /tmp/rebuild.log && \
+        docker compose up -d >> /tmp/rebuild.log 2>&1 && \
         echo 'Started' >> /tmp/rebuild.log \
         || { echo 'ERROR: rebuild failed' >> /tmp/rebuild.log; \
              echo 'Ensuring app container is running...' >> /tmp/rebuild.log; \

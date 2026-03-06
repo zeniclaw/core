@@ -63,6 +63,11 @@ info "Restarting app container..."
 $COMPOSE up -d --force-recreate app 2>&1
 success "Container restarted"
 
+# Start any new services added in this update (e.g. ollama)
+info "Starting all services (including new ones)..."
+$COMPOSE up -d 2>&1
+success "All services up"
+
 # 4. Run migrations
 info "Running migrations..."
 sleep 3  # wait for container to be ready
