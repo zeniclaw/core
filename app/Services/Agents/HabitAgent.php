@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Habit;
 use App\Models\HabitLog;
 use App\Services\AgentContext;
@@ -59,7 +60,7 @@ class HabitAgent extends BaseAgent
             ->get();
 
         $listText = $this->formatHabitList($habits, $context->from);
-        $now = now('Europe/Paris')->format('Y-m-d H:i (l)');
+        $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
 
         $response = $this->claude->chat(
             "Date et heure actuelles (heure de Paris): {$now}\nMessage: \"{$context->body}\"\n\nHabitudes actives:\n{$listText}",
@@ -208,7 +209,7 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_log_not_found']);
         }
 
-        $today = now('Europe/Paris')->toDateString();
+        $today = now(AppSetting::timezone())->toDateString();
 
         $existing = HabitLog::where('habit_id', $habit->id)
             ->where('completed_date', $today)
@@ -265,7 +266,7 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_list']);
         }
 
-        $today = now('Europe/Paris')->toDateString();
+        $today = now(AppSetting::timezone())->toDateString();
         $lines = ["Tes habitudes :"];
 
         foreach ($habits->values() as $i => $habit) {
@@ -300,7 +301,7 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_stats']);
         }
 
-        $today = now('Europe/Paris');
+        $today = now(AppSetting::timezone());
         $lines = ["Statistiques de tes habitudes :"];
 
         $totalCompleted = 0;
@@ -413,9 +414,9 @@ PROMPT;
             return $cached;
         }
 
-        $today = now('Europe/Paris')->toDateString();
+        $today = now(AppSetting::timezone())->toDateString();
         $streak = 0;
-        $date = Carbon::parse($today, 'Europe/Paris');
+        $date = Carbon::parse($today, AppSetting::timezone());
 
         // Check if today is done; if not, start from yesterday
         $todayDone = HabitLog::where('habit_id', $habitId)
@@ -475,7 +476,7 @@ PROMPT;
             return "(aucune habitude enregistree)";
         }
 
-        $today = now('Europe/Paris')->toDateString();
+        $today = now(AppSetting::timezone())->toDateString();
         $lines = [];
 
         foreach ($habits->values() as $i => $habit) {

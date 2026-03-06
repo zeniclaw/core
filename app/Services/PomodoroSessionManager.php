@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AppSetting;
 use App\Models\PomodoroSession;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -100,7 +101,7 @@ class PomodoroSessionManager
 
     public function getPomodoroStats(string $userPhone, int $agentId): array
     {
-        $now = now('Europe/Paris');
+        $now = now(AppSetting::timezone());
         $startOfWeek = $now->copy()->startOfWeek();
 
         $sessionsThisWeek = PomodoroSession::where('user_phone', $userPhone)
@@ -138,9 +139,9 @@ class PomodoroSessionManager
 
     private function calculateDayStreak(string $userPhone, int $agentId): int
     {
-        $today = now('Europe/Paris')->toDateString();
+        $today = now(AppSetting::timezone())->toDateString();
         $streak = 0;
-        $date = Carbon::parse($today, 'Europe/Paris');
+        $date = Carbon::parse($today, AppSetting::timezone());
 
         $todayDone = PomodoroSession::where('user_phone', $userPhone)
             ->where('agent_id', $agentId)

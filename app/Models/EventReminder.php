@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use App\Models\AppSetting;
 
 class EventReminder extends Model
 {
@@ -57,13 +58,13 @@ class EventReminder extends Model
     {
         $date = $this->event_date->format('Y-m-d');
         $time = $this->event_time ?? '00:00:00';
-        return Carbon::parse("{$date} {$time}", 'Europe/Paris');
+        return Carbon::parse("{$date} {$time}", AppSetting::timezone());
     }
 
     public function calculateNextReminder(): ?Carbon
     {
         $eventDatetime = $this->getEventDatetime();
-        $now = Carbon::now('Europe/Paris');
+        $now = Carbon::now(AppSetting::timezone());
 
         if ($eventDatetime->isPast()) {
             return null;
@@ -94,7 +95,7 @@ class EventReminder extends Model
     public function timeUntilEvent(): string
     {
         $eventDatetime = $this->getEventDatetime();
-        $now = Carbon::now('Europe/Paris');
+        $now = Carbon::now(AppSetting::timezone());
 
         if ($eventDatetime->isPast()) {
             return 'passe';

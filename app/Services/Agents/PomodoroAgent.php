@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Services\AgentContext;
 use App\Services\PomodoroSessionManager;
 use Illuminate\Support\Facades\Log;
@@ -57,10 +58,10 @@ class PomodoroAgent extends BaseAgent
     {
         $active = $this->pomodoroManager->getActiveSession($context->from, $context->agent->id);
         $activeText = $active
-            ? "Session active: {$active->duration}min, demarree a " . $active->started_at->setTimezone('Europe/Paris')->format('H:i') . ($active->paused_at ? ' (EN PAUSE)' : '')
+            ? "Session active: {$active->duration}min, demarree a " . $active->started_at->setTimezone(AppSetting::timezone())->format('H:i') . ($active->paused_at ? ' (EN PAUSE)' : '')
             : "(aucune session active)";
 
-        $now = now('Europe/Paris')->format('Y-m-d H:i (l)');
+        $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
 
         $response = $this->claude->chat(
             "Date et heure actuelles (heure de Paris): {$now}\nMessage: \"{$context->body}\"\n\nEtat actuel:\n{$activeText}",
@@ -162,8 +163,8 @@ PROMPT;
         $session = $this->pomodoroManager->startSession($context->from, $context->agent->id, $duration);
 
         $reply = "Pomodoro lance ! {$duration} minutes de focus.\n"
-            . "Debut : " . $session->started_at->setTimezone('Europe/Paris')->format('H:i') . "\n"
-            . "Fin prevue : " . $session->started_at->copy()->addMinutes($duration)->setTimezone('Europe/Paris')->format('H:i') . "\n\n"
+            . "Debut : " . $session->started_at->setTimezone(AppSetting::timezone())->format('H:i') . "\n"
+            . "Fin prevue : " . $session->started_at->copy()->addMinutes($duration)->setTimezone(AppSetting::timezone())->format('H:i') . "\n\n"
             . "Dis \"pause\" pour mettre en pause, \"stop\" pour arreter, ou \"end [note 1-5]\" quand tu as fini.";
 
         $this->sendText($context->from, $reply);
@@ -292,7 +293,7 @@ PROMPT;
             . "Duree : {$session->duration}min\n"
             . "Ecoulees : {$elapsed}min\n"
             . "Restantes : {$remaining}min\n"
-            . "Debut : " . $session->started_at->setTimezone('Europe/Paris')->format('H:i');
+            . "Debut : " . $session->started_at->setTimezone(AppSetting::timezone())->format('H:i');
 
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'pomodoro_status', 'session_id' => $session->id]);

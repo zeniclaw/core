@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AppSetting;
 use App\Models\Project;
 use App\Models\Reminder;
 use App\Models\Todo;
@@ -19,6 +20,8 @@ class AgentTools
      */
     public static function definitions(): array
     {
+        $tz = AppSetting::timezone();
+
         return [
             // ── Reminder tools ──
             [
@@ -28,7 +31,7 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'message' => ['type' => 'string', 'description' => 'Short description of what to remind (e.g. "Appeler Jean")'],
-                        'scheduled_at' => ['type' => 'string', 'description' => 'When to trigger, format YYYY-MM-DD HH:MM (Europe/Paris timezone)'],
+                        'scheduled_at' => ['type' => 'string', 'description' => "When to trigger, format YYYY-MM-DD HH:MM ({$tz} timezone)"],
                         'recurrence' => ['type' => 'string', 'description' => 'Recurrence rule or null. Formats: "daily:HH:MM", "weekly:DAYNAME:HH:MM", "monthly:DAY:HH:MM", "weekdays:HH:MM"'],
                     ],
                     'required' => ['message', 'scheduled_at'],
@@ -76,7 +79,7 @@ class AgentTools
                         'items' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'List of task titles to add'],
                         'list_name' => ['type' => 'string', 'description' => 'Name of the list (null for default list)'],
                         'priority' => ['type' => 'string', 'enum' => ['high', 'normal', 'low'], 'description' => 'Priority level'],
-                        'due_at' => ['type' => 'string', 'description' => 'Deadline in YYYY-MM-DD HH:MM format (Europe/Paris)'],
+                        'due_at' => ['type' => 'string', 'description' => "Deadline in YYYY-MM-DD HH:MM format ({$tz})"],
                         'category' => ['type' => 'string', 'description' => 'Category name'],
                     ],
                     'required' => ['items'],
@@ -200,7 +203,7 @@ class AgentTools
             // ── Utility tools ──
             [
                 'name' => 'get_current_datetime',
-                'description' => 'Get the current date and time in Europe/Paris timezone. Use this to answer questions about the current time or date.',
+                'description' => "Get the current date and time in {$tz} timezone. Use this to answer questions about the current time or date.",
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => (object) [],
@@ -245,7 +248,7 @@ class AgentTools
     private static function executeCreateReminder(array $input, AgentContext $context): string
     {
         $message = $input['message'];
-        $scheduledAt = Carbon::parse($input['scheduled_at'], 'Europe/Paris')->utc();
+        $scheduledAt = Carbon::parse($input['scheduled_at'], AppSetting::timezone())->utc();
         $recurrence = $input['recurrence'] ?? null;
 
         $reminder = Reminder::create([
@@ -259,7 +262,7 @@ class AgentTools
             'status' => 'pending',
         ]);
 
-        $parisTime = $scheduledAt->copy()->setTimezone('Europe/Paris');
+        $parisTime = $scheduledAt->copy()->setTimezone(AppSetting::timezone());
 
         return json_encode([
             'success' => true,
@@ -284,7 +287,7 @@ class AgentTools
 
         $list = [];
         foreach ($reminders->values() as $i => $r) {
-            $parisTime = $r->scheduled_at->copy()->setTimezone('Europe/Paris');
+            $parisTime = $r->scheduled_at->copy()->setTimezone(AppSetting::timezone());
             $list[] = [
                 'number' => $i + 1,
                 'message' => $r->message,
@@ -340,7 +343,7 @@ class AgentTools
         }
 
         $reminder->update(['scheduled_at' => $newScheduledAt->utc()]);
-        $parisTime = $newScheduledAt->copy()->setTimezone('Europe/Paris');
+        $parisTime = $newScheduledAt->copy()->setTimezone(AppSetting::timezone());
 
         return json_encode([
             'success' => true,
@@ -352,7 +355,7 @@ class AgentTools
     private static function parseNewTime(string $expr, Carbon $currentScheduledAt): ?Carbon
     {
         $expr = trim($expr);
-        $now = now('Europe/Paris');
+        $now = now(AppSetting::timezone());
 
         if (preg_match('/^\+(\d+)\s*(min|h|j)$/i', $expr, $m)) {
             $amount = (int) $m[1];
@@ -369,13 +372,13 @@ class AgentTools
         }
 
         if (strtolower($expr) === 'demain') {
-            $currentParis = $currentScheduledAt->copy()->setTimezone('Europe/Paris');
+            $currentParis = $currentScheduledAt->copy()->setTimezone(AppSetting::timezone());
             return $now->copy()->addDay()->setTime($currentParis->hour, $currentParis->minute, 0);
         }
 
         if (preg_match('/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/', $expr)) {
             try {
-                return Carbon::parse($expr, 'Europe/Paris');
+                return Carbon::parse($expr, AppSetting::timezone());
             } catch (\Exception $e) {
                 return null;
             }
@@ -424,7 +427,7 @@ class AgentTools
 
             if ($dueAt) {
                 try {
-                    $data['due_at'] = Carbon::parse($dueAt, 'Europe/Paris')->utc();
+                    $data['due_at'] = Carbon::parse($dueAt, AppSetting::timezone())->utc();
                 } catch (\Exception $e) {
                     // ignore
                 }
@@ -455,7 +458,7 @@ class AgentTools
                 'list_name' => $todo->list_name,
                 'priority' => $todo->priority,
                 'category' => $todo->category,
-                'due_at' => $todo->due_at ? $todo->due_at->copy()->timezone('Europe/Paris')->format('d/m/Y') : null,
+                'due_at' => $todo->due_at ? $todo->due_at->copy()->timezone(AppSetting::timezone())->format('d/m/Y') : null,
             ];
         }
 
@@ -706,7 +709,7 @@ class AgentTools
 
     private static function executeGetCurrentDatetime(): string
     {
-        $now = now('Europe/Paris');
+        $now = now(AppSetting::timezone());
         $days = ['Monday' => 'lundi', 'Tuesday' => 'mardi', 'Wednesday' => 'mercredi',
             'Thursday' => 'jeudi', 'Friday' => 'vendredi', 'Saturday' => 'samedi', 'Sunday' => 'dimanche'];
         $dayName = $days[$now->format('l')] ?? $now->format('l');
@@ -714,7 +717,7 @@ class AgentTools
         return json_encode([
             'datetime' => $now->format('Y-m-d H:i:s'),
             'human' => "{$dayName} {$now->format('d/m/Y')} a {$now->format('H:i')}",
-            'timezone' => 'Europe/Paris',
+            'timezone' => AppSetting::timezone(),
         ]);
     }
 }

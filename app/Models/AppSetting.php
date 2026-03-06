@@ -32,4 +32,9 @@ class AppSetting extends Model
     {
         return static::where('key', $key)->exists();
     }
+
+    public static function timezone(): string
+    {
+        return static::get('app_timezone') ?? 'Europe/Brussels';
+    }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Project;
 use App\Services\AgentContext;
 use App\Services\AgenticLoop;
@@ -105,7 +106,7 @@ class ChatAgent extends BaseAgent
 
     private function buildSystemPrompt(AgentContext $context): string
     {
-        $now = now('Europe/Paris')->format('Y-m-d H:i (l)');
+        $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
 
         $systemPrompt =
             "Tu es ZeniClaw, un assistant WhatsApp autonome et intelligent. "
@@ -122,7 +123,7 @@ class ChatAgent extends BaseAgent
             . "Tu peux utiliser des emojis avec moderation. "
             . "Reponds dans la meme langue que l'utilisateur. "
             . $this->buildLengthDirective($context->complexity)
-            . "\n\nDate et heure actuelles (Paris): {$now}"
+            . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
             . "\nLe message vient de {$context->senderName}.";
 
         // Inject user context memory (preferences, profile, humor level)
@@ -204,7 +205,7 @@ class ChatAgent extends BaseAgent
         if ($reminders->isNotEmpty()) {
             $lines = ['REMINDERS EN ATTENTE:'];
             foreach ($reminders->values() as $i => $r) {
-                $at = $r->scheduled_at->setTimezone('Europe/Paris')->format('d/m H:i');
+                $at = $r->scheduled_at->setTimezone(AppSetting::timezone())->format('d/m H:i');
                 $recurrence = $r->recurrence_rule ? " (recurrent: {$r->recurrence_rule})" : '';
                 $lines[] = "  " . ($i + 1) . ". {$r->message} → {$at}{$recurrence}";
             }
