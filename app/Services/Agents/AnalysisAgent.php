@@ -15,6 +15,37 @@ class AnalysisAgent extends BaseAgent
         return 'analysis';
     }
 
+    public function description(): string
+    {
+        return 'Agent d\'analyse approfondie. Realise des analyses structurees de documents (images, PDFs), des comparaisons, des analyses SWOT/PESTEL/Porter, et repond aux demandes d\'analyse complexes avec argumentation.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'analyse', 'analyser', 'analysis', 'analyze', 'analyse approfondie',
+            'compare', 'comparer', 'comparaison', 'comparison', 'vs', 'versus',
+            'entre X et Y', 'difference entre', 'quel est le meilleur',
+            'SWOT', 'forces faiblesses', 'strengths weaknesses',
+            'PESTEL', 'macro-environnement',
+            'Porter', '5 forces', 'cinq forces', 'five forces',
+            'avantages inconvenients', 'pros cons', 'pour et contre',
+            'etude de marche', 'market study', 'benchmark', 'benchmarking',
+            'diagnostic', 'evaluation', 'evaluer', 'evaluate',
+            'rapport', 'report', 'bilan', 'synthese analytique',
+            'analyse document', 'analyser document', 'analyze document',
+            'resume detaille', 'analyse detaillee', 'in-depth analysis',
+            'points cles', 'key points', 'recommandations',
+            'risques', 'risks', 'opportunites', 'opportunities',
+            'critique', 'review', 'avis detaille',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'analysis';

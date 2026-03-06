@@ -14,6 +14,32 @@ class ProjectAgent extends BaseAgent
         return 'project';
     }
 
+    public function description(): string
+    {
+        return 'Agent de gestion de projets. Permet de changer de projet actif, creer un nouveau projet, voir les statistiques d\'un projet, archiver un projet et lister tous les projets.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'switch', 'switch projet', 'changer de projet', 'changer projet',
+            'bosser sur', 'bosse sur', 'travailler sur', 'passer sur',
+            'activer projet', 'activate project', 'select project',
+            'creer projet', 'nouveau projet', 'create project', 'new project',
+            'cree un projet', 'ajouter projet', 'add project',
+            'stats projet', 'statistiques projet', 'project stats',
+            'archiver projet', 'archive projet', 'archive project',
+            'mes projets', 'liste projets', 'list projects', 'my projects',
+            'tous mes projets', 'all projects',
+            'quel projet', 'projet actif', 'active project',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'project';

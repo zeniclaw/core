@@ -29,6 +29,30 @@ class HangmanGameAgent extends BaseAgent
         return 'hangman';
     }
 
+    public function description(): string
+    {
+        return 'Agent jeu du Pendu (Hangman). Permet de jouer au pendu avec des mots aleatoires ou personnalises, suivre ses statistiques de victoires/defaites, streaks et taux de reussite.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'pendu', 'hangman', 'jeu du pendu', 'hangman game',
+            'jouer au pendu', 'play hangman', 'partie de pendu',
+            'nouvelle partie pendu', 'new game hangman',
+            'pendu start', 'hangman start', '/hangman',
+            'deviner un mot', 'guess a word',
+            'stats pendu', 'hangman stats', 'statistiques pendu',
+            'mot mystere', 'mot cache', 'mystery word',
+            'jeu de mots', 'word game',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

@@ -15,6 +15,38 @@ class TodoAgent extends BaseAgent
         return 'todo';
     }
 
+    public function description(): string
+    {
+        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'todo', 'todos', 'todo list', 'todolist', 'to-do', 'to do',
+            'tache', 'taches', 'task', 'tasks',
+            'ajoute', 'ajouter', 'add', 'ajoute a',
+            'ma liste', 'mes listes', 'my list', 'my lists',
+            'liste de taches', 'liste de courses', 'shopping list',
+            'coche', 'cocher', 'check', 'fait', 'done', 'termine',
+            'decoche', 'decocher', 'uncheck', 'pas fait', 'undone',
+            'supprime tache', 'delete task', 'enlever', 'retirer',
+            'creer liste', 'nouvelle liste', 'create list', 'new list',
+            'supprimer liste', 'delete list',
+            'stats todo', 'statistiques todo', 'todo stats',
+            'urgent', 'prioritaire', 'priorite', 'priority', 'important',
+            'deadline', 'echeance', 'pour demain', 'pour vendredi', 'avant le',
+            'categorie', 'category',
+            'courses', 'acheter', 'buy',
+            'a faire', 'il faut', 'je dois', 'faut que',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'todo';

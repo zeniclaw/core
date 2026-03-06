@@ -16,6 +16,36 @@ class HabitAgent extends BaseAgent
         return 'habit';
     }
 
+    public function description(): string
+    {
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives), voir les statistiques et taux de completion sur 30 jours.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'habitude', 'habitudes', 'habit', 'habits',
+            'habit tracker', 'suivi habitude', 'tracker habitude',
+            'nouvelle habitude', 'ajouter habitude', 'add habit', 'new habit',
+            'creer habitude', 'create habit',
+            'cocher habitude', 'check habit', 'log habit',
+            'j\'ai fait', 'j\'ai medite', 'j\'ai couru', 'j\'ai lu',
+            'mes habitudes', 'my habits', 'liste habitudes', 'list habits',
+            'stats habitudes', 'habit stats', 'statistiques habitudes',
+            'streak', 'streaks', 'serie', 'mon streak', 'my streak',
+            'supprimer habitude', 'delete habit', 'enlever habitude',
+            'reset habitude', 'reinitialiser habitude',
+            'meditation', 'sport', 'lecture', 'exercice', 'marche',
+            'routine', 'routines', 'routine quotidienne', 'daily routine',
+            'discipline', 'regularity', 'regularite',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'habit';

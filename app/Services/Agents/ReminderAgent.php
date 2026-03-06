@@ -14,6 +14,34 @@ class ReminderAgent extends BaseAgent
         return 'reminder';
     }
 
+    public function description(): string
+    {
+        return 'Agent de gestion des rappels et alarmes. Permet de creer, lister, supprimer et reporter des rappels ponctuels ou recurrents. Gere aussi l\'agenda des rappels.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'rappel', 'rappels', 'rappelle-moi', 'rappelle moi', 'remind', 'reminder', 'reminders',
+            'remind me', 'rappeler', 'rappele-moi', 'rappele moi',
+            'alarme', 'alarm', 'alerte', 'alert',
+            'dans 10 minutes', 'dans 1 heure', 'dans 30 min',
+            'demain a', 'demain matin', 'a 10h', 'a 14h',
+            'chaque jour', 'chaque lundi', 'tous les jours', 'every day', 'every week',
+            'en semaine a', 'chaque semaine',
+            'mes rappels', 'mon agenda', 'my reminders', 'list reminders',
+            'supprimer rappel', 'supprime rappel', 'delete reminder', 'annuler rappel',
+            'reporter rappel', 'reporte rappel', 'postpone', 'snooze', 'repousser',
+            'recurrent', 'recurrence', 'periodique',
+            'n\'oublie pas', 'noublie pas', 'pense a', 'faut que je',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'reminder';

@@ -21,6 +21,33 @@ class PomodoroAgent extends BaseAgent
         return 'pomodoro';
     }
 
+    public function description(): string
+    {
+        return 'Agent timer Pomodoro pour la productivite. Permet de lancer des sessions de focus minutees (15-120min), mettre en pause/reprendre, noter sa qualite de concentration (1-5), et voir ses statistiques de sessions et streaks.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'pomodoro', 'pomo', 'timer', 'minuteur',
+            'focus', 'concentration', 'concentrer', 'se concentrer',
+            'session de travail', 'work session', 'focus session',
+            'start pomodoro', 'lance pomodoro', 'lancer pomodoro',
+            'start 25', 'start 45', 'start 30',
+            'pause pomodoro', 'stop pomodoro', 'end pomodoro',
+            'stats pomodoro', 'pomodoro stats', 'mes sessions',
+            'productivite', 'productivity', 'productif',
+            'deep work', 'travail profond',
+            'session en cours', 'timer en cours', 'combien de temps',
+            '25 minutes', '45 minutes', 'minutes de focus',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'pomodoro';

@@ -13,6 +13,21 @@ class VoiceCommandAgent extends BaseAgent
         return 'voice_command';
     }
 
+    public function description(): string
+    {
+        return 'Agent interne de traitement des messages vocaux. Telecharge et transcrit les messages audio via Whisper, puis retransmet le texte a l\'orchestrateur pour routage vers l\'agent appropriate. Gere la confiance de transcription.';
+    }
+
+    public function keywords(): array
+    {
+        return ['vocal', 'voice', 'audio'];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         $mimetype = $context->mimetype ?? ($context->media['mimetype'] ?? null);

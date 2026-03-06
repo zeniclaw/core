@@ -20,6 +20,21 @@ class SmartContextAgent extends BaseAgent
         return 'smart_context';
     }
 
+    public function description(): string
+    {
+        return 'Agent interne d\'extraction de contexte utilisateur. Analyse les messages pour extraire des faits personnels durables (profession, preferences, projets) et les stocker en memoire contextuelle. Fonctionne en arriere-plan, pas d\'interaction directe.';
+    }
+
+    public function keywords(): array
+    {
+        return [];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return true;

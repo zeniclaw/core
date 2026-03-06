@@ -16,6 +16,33 @@ class ContentSummarizerAgent extends BaseAgent
         return 'content_summarizer';
     }
 
+    public function description(): string
+    {
+        return 'Agent de resume de contenu web. Resume automatiquement les articles, pages web et videos YouTube (avec transcription). Supporte les resumes courts, standards et detailles.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'resume', 'résumé', 'resumer', 'résumer', 'summarize', 'summary',
+            'resume article', 'resume lien', 'resume url', 'resume page',
+            'resume video', 'resume youtube',
+            'tldr', 'tl;dr', 'TL;DR',
+            'synthese', 'synthèse', 'synthetiser',
+            'resume court', 'resume detaille', 'resume bref',
+            'short summary', 'detailed summary', 'quick summary',
+            'de quoi parle', 'what is this about',
+            'lire pour moi', 'read for me',
+            'contenu', 'content', 'article', 'lien', 'link', 'url',
+            'youtube', 'video', 'vidéo',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

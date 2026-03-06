@@ -14,6 +14,31 @@ class SmartMeetingAgent extends BaseAgent
         return 'smart_meeting';
     }
 
+    public function description(): string
+    {
+        return 'Agent de reunion intelligent. Capture automatiquement les messages pendant une reunion, genere une synthese structuree avec decisions, actions a faire, risques et prochaines etapes. Cree automatiquement des todos et rappels a partir des action items.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'reunion', 'réunion', 'meeting', 'meet',
+            'reunion start', 'reunion end', 'start meeting', 'end meeting',
+            'demarrer reunion', 'terminer reunion', 'fin reunion',
+            'synthese reunion', 'synthèse réunion', 'meeting summary',
+            'compte rendu', 'compte-rendu', 'CR reunion', 'minutes',
+            'notes de reunion', 'meeting notes',
+            'action items', 'actions a faire',
+            'decisions reunion', 'meeting decisions',
+            'prochaines etapes', 'next steps',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'smart_meeting';

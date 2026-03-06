@@ -20,6 +20,29 @@ class ChatAgent extends BaseAgent
         return 'chat';
     }
 
+    public function description(): string
+    {
+        return 'Agent de conversation general. Repond a toutes les questions, gere les discussions libres, les images, les PDFs et les messages vocaux. Agent fallback qui prend le relais quand aucun autre agent specialise ne correspond.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'bonjour', 'salut', 'hello', 'hey', 'coucou', 'bonsoir',
+            'comment ca va', 'ca va', 'quoi de neuf', 'question',
+            'aide', 'help', 'info', 'information',
+            'merci', 'thanks', 'ok', 'daccord',
+            'raconte', 'explique', 'dis-moi', 'parle-moi',
+            'blague', 'joke', 'rigole', 'humour',
+            'qui es-tu', 'tu fais quoi', 'what can you do',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return true; // Fallback agent, always can handle

@@ -19,6 +19,67 @@ class DevAgent extends BaseAgent
         return 'dev';
     }
 
+    public function description(): string
+    {
+        return 'Agent developpeur avec commandes GitLab intelligentes. Gere les taches de developpement, code review, deploiement, et permet d\'interagir avec les projets GitLab : lister les projets, branches, MRs, pipelines, commits, issues, arborescence, rollback, deploiement, diagnostic de sante du projet.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            // Smart commands - Projects
+            'liste projets', 'mes projets', 'mes repos', 'projets dev', 'projets gitlab',
+            'my projects', 'list projects', 'show projects',
+            // Branches
+            'branches', 'liste branches', 'mes branches', 'show branches', 'list branches',
+            'branche', 'branch',
+            // Merge Requests
+            'MRs', 'merge requests', 'merge request', 'pull requests', 'PR', 'PRs',
+            'mes MRs', 'mes merge requests', 'liste MRs', 'show MRs', 'list MRs',
+            'merge', 'fusionner',
+            // Pipeline / CI
+            'pipeline', 'pipelines', 'CI', 'CI/CD', 'build', 'builds',
+            'status pipeline', 'etat pipeline', 'dernier build',
+            'continuous integration', 'integration continue',
+            // Commits
+            'commits', 'commit', 'derniers commits', 'historique commits',
+            'log git', 'git log', 'show commits', 'list commits',
+            // Issues / Tickets
+            'issues', 'issue', 'tickets', 'ticket', 'bug', 'bugs',
+            'mes issues', 'mes tickets', 'liste issues', 'list issues',
+            'ouvrir issue', 'creer issue', 'create issue', 'open issue',
+            // Files / Tree
+            'arborescence', 'fichiers', 'tree', 'file tree', 'structure',
+            'voir fichiers', 'show files', 'list files', 'ls', 'dossiers',
+            'contenu fichier', 'lire fichier', 'read file', 'cat',
+            // Rollback / Deploy
+            'rollback', 'revert', 'annuler deploy', 'undo deploy',
+            'deploy', 'deployer', 'deploiement', 'deployment', 'mise en prod',
+            'mettre en prod', 'push en prod', 'release',
+            // Health / Diagnostic
+            'health projet', 'diagnostic', 'sante projet', 'project health',
+            'etat du projet', 'status projet', 'project status',
+            // Dev general
+            'dev', 'developpement', 'development', 'coder', 'code',
+            'programmer', 'programming', 'developper', 'develop',
+            'modifier le code', 'changer le code', 'edit code',
+            'corriger', 'fix', 'fixer', 'bugfix', 'hotfix',
+            'refactorer', 'refactoring', 'refacto',
+            'implementer', 'implement', 'ajouter feature', 'add feature',
+            'gitlab', 'git', 'repo', 'repository', 'depot',
+            'tache dev', 'task dev', 'dev task',
+            'tag', 'tags', 'version', 'versions',
+            'diff', 'compare', 'comparer branches',
+            'cherry-pick', 'cherry pick', 'rebase',
+            'stash', 'checkout',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '2.1.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'dev';
@@ -46,93 +107,191 @@ class DevAgent extends BaseAgent
         return $this->handleDevRequest($context);
     }
 
-    // ── Smart Commands Detection ────────────────────────────────────
+    public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
+    {
+        $type = $pendingContext['type'] ?? '';
+        $data = $pendingContext['data'] ?? [];
+
+        return match ($type) {
+            'list_selection' => $this->handleListSelection($context, $data),
+            'ambiguous_project' => $this->handleAmbiguousProjectSelection($context, $data),
+            default => null,
+        };
+    }
+
+    private function handleListSelection(AgentContext $context, array $data): ?AgentResult
+    {
+        $body = trim($context->body);
+        $items = $data['items'] ?? [];
+        $action = $data['action'] ?? 'project_info';
+
+        if (empty($items)) {
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        // Try to match by number
+        if (is_numeric($body)) {
+            $index = (int) $body - 1;
+            if ($index >= 0 && $index < count($items)) {
+                $this->clearPendingContext($context);
+                $selected = $items[$index];
+                return $this->executeListAction($context, $selected, $action);
+            }
+            $reply = "Numero invalide. Choisis entre 1 et " . count($items) . ".";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Try to match by name (fuzzy)
+        $bodyLower = mb_strtolower($body);
+        foreach ($items as $item) {
+            $nameLower = mb_strtolower($item['name'] ?? '');
+            if ($nameLower && (str_contains($nameLower, $bodyLower) || str_contains($bodyLower, $nameLower))) {
+                $this->clearPendingContext($context);
+                return $this->executeListAction($context, $item, $action);
+            }
+        }
+
+        // Not understood — clear and fall through
+        $this->clearPendingContext($context);
+        return null;
+    }
+
+    private function handleAmbiguousProjectSelection(AgentContext $context, array $data): ?AgentResult
+    {
+        $body = trim($context->body);
+        $candidates = $data['candidates'] ?? [];
+        $originalCommand = $data['original_command'] ?? null;
+
+        if (empty($candidates)) {
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        $selected = null;
+        if (is_numeric($body)) {
+            $index = (int) $body - 1;
+            if ($index >= 0 && $index < count($candidates)) {
+                $selected = $candidates[$index];
+            }
+        } else {
+            $bodyLower = mb_strtolower($body);
+            foreach ($candidates as $c) {
+                $nameLower = mb_strtolower($c['path_with_namespace'] ?? $c['name'] ?? '');
+                if (str_contains($nameLower, $bodyLower) || str_contains($bodyLower, $nameLower)) {
+                    $selected = $c;
+                    break;
+                }
+            }
+        }
+
+        if (!$selected) {
+            $reply = "Je n'ai pas compris. Choisis un numero entre 1 et " . count($candidates) . ".";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $this->clearPendingContext($context);
+        $project = $this->createProjectFromGitlab($selected, $context);
+
+        // If there was an original command, re-execute it with the resolved project
+        if ($originalCommand) {
+            $fakeCommand = ['command' => $originalCommand['command'], 'args' => array_merge($originalCommand['args'] ?? [], ['name' => $project->name])];
+            return $this->handleSmartCommand($fakeCommand, $context);
+        }
+
+        $reply = "Projet *{$project->name}* selectionne ! Que veux-tu faire dessus ?";
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
+    private function executeListAction(AgentContext $context, array $item, string $action): AgentResult
+    {
+        // Auto-import the project from GitLab if needed
+        $project = $this->createProjectFromGitlab($item, $context);
+
+        // Execute the requested action
+        $reply = match ($action) {
+            'project_info' => $this->cmdProjectInfo($project->name, $context),
+            'list_branches' => $this->cmdListBranches($project->name, $context),
+            'list_mrs' => $this->cmdListMRs($project->name, $context),
+            'pipeline_status' => $this->cmdPipelineStatus($project->name, $context),
+            'recent_commits' => $this->cmdRecentCommits($project->name, $context),
+            'list_issues' => $this->cmdListIssues($project->name, $context),
+            'project_health' => $this->cmdProjectHealth($project->name, $context),
+            default => "Projet *{$project->name}* selectionne ! Que veux-tu faire dessus ?",
+        };
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
+    // ── Smart Commands Detection (LLM-based) ─────────────────────────
 
     private function detectSmartCommand(string $body): ?array
     {
-        $lower = mb_strtolower(trim($body));
+        $response = $this->claude->chat(
+            "Message: \"{$body}\"",
+            'claude-haiku-4-5-20251001',
+            <<<'PROMPT'
+Tu analyses un message envoye a un agent de developpement. Determine si c'est une SMART COMMAND (consultation/info GitLab) ou une DEV TASK (tache de code a executer).
 
-        // List GitLab projects
-        if (preg_match('/^(list|liste|ls|voir|show|affiche)\s*(mes\s*)?(projets?|repos?|repositories|gitlab)/iu', $lower)) {
-            return ['command' => 'list_gitlab_projects', 'args' => []];
+SMART COMMANDS DISPONIBLES:
+- list_gitlab_projects = lister les projets, repos, "mes projets", "quels projets tu as"
+- project_info = info/status/details d'un projet specifique
+- list_branches = voir les branches d'un projet
+- list_mrs = voir les merge requests ouvertes
+- pipeline_status = status CI/CD, pipelines
+- recent_commits = derniers commits, historique, log
+- list_issues = issues/tickets/bugs ouverts
+- create_issue = creer un ticket/issue/bug (args: title)
+- search_code = chercher dans le code (args: query)
+- file_tree = arborescence, structure, fichiers d'un projet
+- read_file = lire/afficher un fichier du repo (args: path)
+- compare_branches = comparer/diff entre branches (args: from, to)
+- project_health = bilan de sante, diagnostic projet
+- task_history = historique des taches executees
+- rollback = annuler/revert la derniere modification
+- deploy_status = status de deploiement
+
+Si c'est une smart command, reponds en JSON:
+{"command": "nom_commande", "args": {"name": "nom_projet_si_mentionne", ...}}
+
+Si c'est une tache de dev (modifier code, fix bug, ajouter feature) ou si tu n'es pas sur:
+{"command": null}
+
+EXEMPLES:
+- "liste moi les projets dev que tu as" → {"command": "list_gitlab_projects", "args": {}}
+- "mes repos" → {"command": "list_gitlab_projects", "args": {}}
+- "quels projets tu geres" → {"command": "list_gitlab_projects", "args": {}}
+- "status du projet zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
+- "les MRs ouvertes sur mon-app" → {"command": "list_mrs", "args": {"name": "mon-app"}}
+- "la CI passe ?" → {"command": "pipeline_status", "args": {}}
+- "fix le bug du login" → {"command": null}
+- "ajoute un bouton" → {"command": null}
+
+Reponds UNIQUEMENT en JSON valide.
+PROMPT
+        );
+
+        if (!$response) return null;
+
+        $clean = trim($response);
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+            $clean = $m[1];
         }
 
-        // Project status / info
-        if (preg_match('/^(status|statut|info|infos|details?)\s+(du\s+)?(projet|repo)\s+(.+)/iu', $lower, $m)) {
-            return ['command' => 'project_info', 'args' => ['name' => trim($m[4])]];
-        }
+        $parsed = json_decode($clean, true);
+        if (!$parsed || empty($parsed['command'])) return null;
 
-        // List branches
-        if (preg_match('/^(branches?|list\s*branches?|les\s*branches?)\s*(de|du|of|pour)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'list_branches', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // List MRs
-        if (preg_match('/^(mrs?|merge\s*requests?|list\s*mrs?)\s*(de|du|of|pour|ouvertes?)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'list_mrs', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // Pipeline status
-        if (preg_match('/^(pipeline[s]?|ci|ci\/cd)\s*(de|du|of|pour|status)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'pipeline_status', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // Recent commits
-        if (preg_match('/^(commits?|derniers?\s*commits?|log|historique)\s*(de|du|of|pour)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'recent_commits', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // Issues
-        if (preg_match('/^(issues?|tickets?|bugs?)\s*(de|du|of|pour|ouvertes?)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'list_issues', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // Create issue
-        if (preg_match('/^(creer?|create|nouvelle?|new|ajoute[r]?)\s+(issue|ticket|bug)\s+(.+)/iu', $lower, $m)) {
-            return ['command' => 'create_issue', 'args' => ['title' => trim($m[3])]];
-        }
-
-        // Search code
-        if (preg_match('/^(cherche|search|find|trouve)\s+(dans\s+le\s+code\s+)?(.+)/iu', $lower, $m)) {
-            return ['command' => 'search_code', 'args' => ['query' => trim($m[3])]];
-        }
-
-        // File tree
-        if (preg_match('/^(arborescence|tree|fichiers?|structure|ls\s+repo)\s*(de|du|of|pour)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'file_tree', 'args' => ['name' => trim($m[3] ?? '')]];
-        }
-
-        // Read file
-        if (preg_match('/^(lis|read|cat|montre|affiche)\s+(le\s+)?(fichier|file)\s+(.+)/iu', $lower, $m)) {
-            return ['command' => 'read_file', 'args' => ['path' => trim($m[4])]];
-        }
-
-        // Compare branches
-        if (preg_match('/^(compare|diff|comparer?)\s+(.+)\s+(et|vs|with|contre)\s+(.+)/iu', $lower, $m)) {
-            return ['command' => 'compare_branches', 'args' => ['from' => trim($m[2]), 'to' => trim($m[4])]];
-        }
-
-        // Project health
-        if (preg_match('/^(health|sante|bilan|diagnostic)\s*(du\s*)?(projet|repo)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'project_health', 'args' => ['name' => trim($m[4] ?? '')]];
-        }
-
-        // Task history
-        if (preg_match('/^(historique|history|taches?|tasks?)\s*(du\s*)?(projet|repo)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'task_history', 'args' => ['name' => trim($m[4] ?? '')]];
-        }
-
-        // Rollback
-        if (preg_match('/^(rollback|revert|annuler?)\s+(la\s+)?(derniere\s+)?(tache|task|modif)/iu', $lower)) {
-            return ['command' => 'rollback', 'args' => []];
-        }
-
-        // Deploy status
-        if (preg_match('/^(deploy|deploiement|deployment)\s*(status|statut)?\s*(de|du|of|pour)?\s*(.+)?/iu', $lower, $m)) {
-            return ['command' => 'deploy_status', 'args' => ['name' => trim($m[4] ?? '')]];
-        }
-
-        return null;
+        return [
+            'command' => $parsed['command'],
+            'args' => $parsed['args'] ?? [],
+        ];
     }
 
     private function handleSmartCommand(array $command, AgentContext $context): AgentResult
@@ -179,14 +338,29 @@ class DevAgent extends BaseAgent
             return "Aucun projet trouve sur GitLab.";
         }
 
+        $displayed = array_slice($projects, 0, 20);
         $lines = ["*Tes projets GitLab :*\n"];
-        foreach (array_slice($projects, 0, 20) as $i => $p) {
+        foreach ($displayed as $i => $p) {
             $name = $p['path_with_namespace'] ?? $p['name'];
             $updated = isset($p['last_activity_at']) ? substr($p['last_activity_at'], 0, 10) : '?';
             $lines[] = ($i + 1) . ". *{$name}* (modifie: {$updated})";
         }
 
-        $lines[] = "\nPour travailler sur un projet, dis-moi son nom !";
+        $lines[] = "\nEnvoie le *numero* ou le *nom* du projet pour y acceder !";
+
+        // Store list as pending context for follow-up selection
+        $items = array_map(fn($p) => [
+            'name' => $p['name'] ?? '',
+            'path_with_namespace' => $p['path_with_namespace'] ?? '',
+            'web_url' => $p['web_url'] ?? '',
+            'http_url_to_repo' => $p['http_url_to_repo'] ?? '',
+        ], $displayed);
+
+        $this->setPendingContext($context, 'list_selection', [
+            'items' => $items,
+            'action' => 'project_info',
+        ]);
+
         return implode("\n", $lines);
     }
 
@@ -653,7 +827,7 @@ class DevAgent extends BaseAgent
                 return $this->createProjectFromGitlab($gitlabResults[0], $context);
             }
 
-            // Multiple results → ask user to clarify
+            // Multiple results → ask user to clarify (context stored by caller if needed)
             $lines = "J'ai trouve plusieurs projets GitLab pour \"{$name}\" :\n";
             foreach (array_slice($gitlabResults, 0, 5) as $i => $gp) {
                 $lines .= ($i + 1) . ". {$gp['path_with_namespace']}\n";

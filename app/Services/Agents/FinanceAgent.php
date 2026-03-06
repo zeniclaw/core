@@ -15,6 +15,37 @@ class FinanceAgent extends BaseAgent
         return 'finance';
     }
 
+    public function description(): string
+    {
+        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition de budgets mensuels, alertes de depassement, rapports et statistiques, detection d\'anomalies de depenses.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'depense', 'depenses', 'expense', 'expenses', 'spent', 'depenser',
+            'cout', 'coute', 'couter', 'achete', 'acheter', 'achat', 'achats',
+            'paye', 'payer', 'payement', 'payment',
+            'budget', 'budgets', 'budget mensuel', 'monthly budget',
+            'solde', 'balance', 'reste', 'remaining', 'restant',
+            'bilan', 'bilan financier', 'rapport financier', 'financial report',
+            'stats finance', 'statistiques finance', 'finance stats',
+            'alerte budget', 'alerte depense', 'budget alert',
+            'combien j\'ai depense', 'how much did i spend',
+            'argent', 'money', 'euros', 'euro',
+            'finance', 'financier', 'financiere', 'finances',
+            'economie', 'economies', 'saving', 'savings', 'epargne',
+            'categorie depense', 'expense category',
+            'alimentation', 'transport', 'loisirs', 'restaurant', 'shopping',
+            'abonnement', 'abonnements', 'subscription',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

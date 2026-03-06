@@ -13,6 +13,34 @@ class MoodCheckAgent extends BaseAgent
         return 'mood_check';
     }
 
+    public function description(): string
+    {
+        return 'Agent de suivi d\'humeur et bien-etre. Enregistre le niveau d\'humeur (1-5 ou emoji), detecte les tendances, identifie les heures de baisse d\'energie, et fournit des recommandations personnalisees et empathiques.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'mood', 'mood check', 'humeur', 'mon humeur', 'my mood',
+            'comment je me sens', 'how am i doing', 'how do i feel',
+            'comment ca va', 'comment tu te sens', 'ca va pas',
+            'je me sens', 'je suis', 'i feel', 'i am feeling',
+            'bien', 'mal', 'triste', 'sad', 'happy', 'heureux',
+            'stresse', 'stressed', 'fatigue', 'tired', 'epuise',
+            'energique', 'motive', 'deprime', 'depressed', 'anxieux', 'anxious',
+            'super', 'genial', 'excellent', 'horrible', 'terrible',
+            'bof', 'moyen', 'pas bien', 'au plus bas', 'down',
+            'mood stats', 'stats humeur', 'statistiques humeur',
+            'tendance humeur', 'mood trend',
+            'bien-etre', 'wellness', 'mental health', 'sante mentale',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

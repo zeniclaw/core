@@ -23,6 +23,33 @@ class FlashcardAgent extends BaseAgent
         return 'flashcard';
     }
 
+    public function description(): string
+    {
+        return 'Agent de flashcards avec repetition espacee (SRS/SM-2). Permet de creer des cartes question/reponse, organiser en decks thematiques, reviser avec notation, et suivre sa progression d\'apprentissage.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'flashcard', 'flashcards', 'flash card', 'flash cards',
+            'deck', 'decks', 'mes decks', 'my decks',
+            'reviser', 'revision', 'revisions', 'review',
+            'apprendre', 'apprentissage', 'learning', 'learn',
+            'SRS', 'repetition espacee', 'spaced repetition',
+            'carte', 'cartes', 'card', 'cards',
+            'creer flashcard', 'create flashcard', 'nouvelle carte',
+            'etudier', 'study', 'session revision',
+            'memoriser', 'memorize', 'retenir',
+            '/flashcard', 'flashcard stats', 'stats flashcard',
+            'quiz', 'quizz', 'question reponse',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

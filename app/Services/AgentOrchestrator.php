@@ -52,6 +52,9 @@ class AgentOrchestrator
         $this->memory = new ConversationMemoryService();
 
         $this->registerAgents();
+
+        // Pass agents to router so it can read their keywords/descriptions
+        $this->router->registerAgents($this->agents);
     }
 
     private function registerAgents(): void
@@ -226,6 +229,40 @@ class AgentOrchestrator
     private function handlePendingStates(AgentContext $context, bool $debug = false): ?AgentResult
     {
         if (!$context->body) return null;
+
+        // Generic pending agent context (list selection, multi-step flows, etc.)
+        $pendingCtx = $context->session->pending_agent_context;
+        if ($pendingCtx && !empty($pendingCtx['agent'])) {
+            // Check expiry
+            $expiresAt = $pendingCtx['expires_at'] ?? null;
+            if ($expiresAt && now()->greaterThan($expiresAt)) {
+                $context->session->update(['pending_agent_context' => null]);
+                if ($debug) {
+                    $this->sendDebug($context, "[DEBUG PENDING] pending_agent_context expired → cleared");
+                }
+            } else {
+                $isNew = $this->isNewIntent($context->body);
+
+                if ($debug) {
+                    $this->sendDebug($context,
+                        "[DEBUG PENDING] pending_agent_context: agent={$pendingCtx['agent']}, type={$pendingCtx['type']}\n"
+                        . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE')
+                    );
+                }
+
+                if ($isNew) {
+                    $context->session->update(['pending_agent_context' => null]);
+                } else {
+                    $agent = $this->agents[$pendingCtx['agent']] ?? null;
+                    if ($agent && method_exists($agent, 'handlePendingContext')) {
+                        $result = $agent->handlePendingContext($context, $pendingCtx);
+                        if ($result) return $result;
+                    }
+                    // If agent didn't handle it, clear and fall through
+                    $context->session->update(['pending_agent_context' => null]);
+                }
+            }
+        }
 
         // Pending project switch confirmation
         if ($context->session->pending_switch_project_id) {

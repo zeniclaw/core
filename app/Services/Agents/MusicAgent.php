@@ -24,6 +24,40 @@ class MusicAgent extends BaseAgent
         return 'music';
     }
 
+    public function description(): string
+    {
+        return 'Agent musical connecte a Spotify. Recherche de chansons, recommandations par humeur/genre, playlists thematiques, top charts, paroles, et gestion d\'une wishlist musicale personnelle.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'musique', 'music', 'chanson', 'song', 'morceau', 'track',
+            'cherche musique', 'search music', 'trouve chanson', 'find song',
+            'artiste', 'artist', 'chanteur', 'chanteuse', 'groupe', 'band',
+            'album', 'single', 'titre',
+            'recommande', 'recommend', 'suggestion', 'recommandation',
+            'playlist', 'playlists', 'mix',
+            'top charts', 'top musique', 'charts', 'classement', 'hit', 'hits',
+            'populaire', 'popular', 'tendance', 'trending',
+            'paroles', 'lyrics', 'parole de',
+            'spotify', 'ecouter', 'listen', 'jouer', 'play',
+            'chill', 'relax', 'energique', 'triste', 'joyeux', 'party', 'fete',
+            'pour courir', 'pour bosser', 'pour dormir', 'pour se concentrer',
+            'musique triste', 'musique joyeuse', 'musique calme',
+            'wishlist', 'favoris', 'favori', 'ma wishlist', 'mes favoris',
+            'ajoute a ma wishlist', 'ajoute en favori',
+            'supprime favori', 'retire favori',
+            'rap', 'rock', 'jazz', 'electro', 'pop', 'classique', 'rnb', 'reggae', 'metal',
+            'daft punk', 'eminem', 'queen',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         return $context->routedAgent === 'music';

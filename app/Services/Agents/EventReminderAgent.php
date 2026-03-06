@@ -18,6 +18,34 @@ class EventReminderAgent extends BaseAgent
         return 'event_reminder';
     }
 
+    public function description(): string
+    {
+        return 'Agent de gestion d\'evenements et calendrier. Permet de creer, lister, modifier et supprimer des evenements avec date, heure, lieu, participants et rappels automatiques configurables (30min, 1h, 1 jour avant).';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'event', 'events', 'evenement', 'evenements', 'événement', 'événements',
+            'calendrier', 'calendar', 'agenda',
+            'add event', 'ajouter evenement', 'creer evenement', 'create event',
+            'list events', 'lister evenements', 'mes evenements', 'my events',
+            'voir evenements', 'show events', 'upcoming events',
+            'remove event', 'supprimer evenement', 'annuler evenement', 'cancel event',
+            'update event', 'modifier evenement',
+            'remind me about', 'rappelle-moi pour',
+            'event on', 'evenement le',
+            'rdv', 'rendez-vous', 'rendez vous', 'appointment',
+            'conference', 'séminaire', 'seminaire', 'workshop',
+            'planning', 'planifier', 'plan',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

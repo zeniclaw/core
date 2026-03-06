@@ -21,6 +21,31 @@ class ScreenshotAgent extends BaseAgent
         return 'screenshot';
     }
 
+    public function description(): string
+    {
+        return 'Agent de traitement d\'images et OCR. Extraction de texte (OCR) depuis des images, annotation d\'images (fleches, rectangles, cercles), comparaison d\'images, et informations sur les images (dimensions, format, taille).';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'screenshot', 'capture', 'capture ecran', 'screen capture',
+            'OCR', 'ocr', 'extract text', 'extract-text', 'extraire texte',
+            'lire texte', 'lire image', 'read text', 'read image',
+            'transcrire image', 'transcribe image',
+            'annoter', 'annotate', 'annotation', 'marquer', 'surligner', 'highlight',
+            'comparer images', 'compare images', 'difference images', 'diff images',
+            'info image', 'image info', 'dimensions image', 'taille image',
+            'fleche', 'arrow', 'rectangle', 'cercle', 'circle',
+            'texte dans image', 'text in image',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body && !$context->hasMedia) {

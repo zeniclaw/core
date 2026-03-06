@@ -20,6 +20,34 @@ class CodeReviewAgent extends BaseAgent
         return 'code_review';
     }
 
+    public function description(): string
+    {
+        return 'Agent de revue de code automatique. Analyse du code source (PHP, JS, Python, SQL, TypeScript) pour detecter bugs, failles de securite, problemes de performance, violations des bonnes pratiques, et proposer des refactorings.';
+    }
+
+    public function keywords(): array
+    {
+        return [
+            'code review', 'code-review', 'codereview', 'review code',
+            'review my code', 'review this code', 'review the code',
+            'verifier code', 'verifier mon code', 'verifier ce code', 'verifie ce code',
+            'check code', 'check my code', 'check this code',
+            'analyser code', 'analyse de code', 'code analysis',
+            'revue de code', 'relecture de code',
+            '@codereviewer', 'code reviewer',
+            'securite code', 'code security', 'vulnerabilite', 'faille',
+            'qualite code', 'code quality', 'bonnes pratiques', 'best practices',
+            'bug dans le code', 'trouver bugs', 'find bugs',
+            'refactoring', 'refactorer', 'refacto', 'ameliorer code',
+            'optimiser code', 'optimize code', 'performance code',
+        ];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;

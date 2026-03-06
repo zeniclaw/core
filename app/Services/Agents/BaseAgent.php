@@ -24,6 +24,21 @@ abstract class BaseAgent implements AgentInterface
         $this->memory = new ConversationMemoryService();
     }
 
+    public function description(): string
+    {
+        return '';
+    }
+
+    public function keywords(): array
+    {
+        return [];
+    }
+
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
     protected function waha(int $timeout = 15)
     {
         return Http::timeout($timeout)->withHeaders(['X-Api-Key' => $this->wahaApiKey]);
@@ -81,6 +96,36 @@ abstract class BaseAgent implements AgentInterface
     {
         $store = new ContextStore();
         return $store->retrieve($userId);
+    }
+
+    /**
+     * Store pending context on the session so follow-up messages are routed back to this agent.
+     * Structure: {agent: "dev", type: "list_selection", data: {...}, expires_at: "..."}
+     */
+    protected function setPendingContext(AgentContext $context, string $type, array $data = [], int $ttlMinutes = 5): void
+    {
+        $context->session->update([
+            'pending_agent_context' => [
+                'agent' => $this->name(),
+                'type' => $type,
+                'data' => $data,
+                'expires_at' => now()->addMinutes($ttlMinutes)->toIso8601String(),
+            ],
+        ]);
+    }
+
+    protected function clearPendingContext(AgentContext $context): void
+    {
+        $context->session->update(['pending_agent_context' => null]);
+    }
+
+    /**
+     * Override in subclasses to handle follow-up messages from pending context.
+     * Return null to fall through to normal routing.
+     */
+    public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
+    {
+        return null;
     }
 
     protected function formatContextMemoryForPrompt(string $userId): string
