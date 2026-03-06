@@ -18,12 +18,13 @@
                         {{ $conversation->isGroup() ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700' }}">
                         {{ $conversation->isGroup() ? 'Groupe' : 'DM' }}
                     </span>
-                    {{ $conversation->displayName() }}
+                    {{ $conversation->display_name ?? $conversation->displayName() }}
                 </h2>
                 <p class="text-xs text-gray-400">
                     Agent: {{ $conversation->agent->name ?? '-' }}
                     &middot; {{ $conversation->message_count }} messages
                     &middot; {{ $conversation->last_message_at?->diffForHumans() ?? '-' }}
+                    &middot; <span class="font-mono text-gray-300">{{ $conversation->peer_id }}</span>
                 </p>
             </div>
         </div>
@@ -31,15 +32,20 @@
 
     {{-- Tabs --}}
     <div class="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
-        <button @click="tab = 'messages'"
+        <button @@click="tab = 'messages'"
                 :class="tab === 'messages' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
                 class="px-4 py-2 rounded-md text-sm font-medium transition-all">
             Messages
         </button>
-        <button @click="tab = 'memory'"
+        <button @@click="tab = 'memory'"
                 :class="tab === 'memory' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
                 class="px-4 py-2 rounded-md text-sm font-medium transition-all">
             Memoire <span class="text-xs text-gray-400">({{ count($memoryEntries) }})</span>
+        </button>
+        <button @@click="tab = 'debug'"
+                :class="tab === 'debug' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all">
+            Debug <span class="text-xs text-gray-400">({{ $debugLogs->count() }})</span>
         </button>
     </div>
 
@@ -118,10 +124,121 @@
         </div>
         @endif
     </div>
+
+    {{-- Debug tab --}}
+    <div x-show="tab === 'debug'" x-cloak class="space-y-4">
+
+        {{-- Routing decisions --}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <h3 class="text-sm font-semibold text-gray-700">Router Decisions ({{ $routingLogs->count() }})</h3>
+            </div>
+            @if($routingLogs->isEmpty())
+                <div class="p-4 text-sm text-gray-400">Aucune decision de routage.</div>
+            @else
+            <div class="divide-y divide-gray-50 max-h-[400px] overflow-y-auto">
+                @foreach($routingLogs as $rlog)
+                    @php
+                        $routing = $rlog->context['routing'] ?? [];
+                        $body = $rlog->context['body'] ?? '';
+                    @endphp
+                <div class="p-3 hover:bg-gray-50 text-xs">
+                    <div class="flex items-center gap-2 mb-1.5">
+                        <span class="text-gray-400 font-mono">{{ $rlog->created_at->format('d/m H:i:s') }}</span>
+                        <span class="px-2 py-0.5 rounded-full font-semibold text-white text-[10px]"
+                              style="background:{{ match($routing['agent'] ?? '') {
+                                  'chat' => '#3b82f6', 'dev' => '#8b5cf6', 'document' => '#0ea5e9',
+                                  'reminder' => '#f59e0b', 'project' => '#10b981', 'todo' => '#14b8a6',
+                                  'finance' => '#22c55e', 'habit' => '#22c55e', 'music' => '#ec4899',
+                                  'analysis' => '#ef4444', 'code_review' => '#3b82f6',
+                                  default => '#6b7280'
+                              } }}">
+                            {{ $routing['agent'] ?? '?' }}
+                        </span>
+                        <span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">{{ $routing['model'] ?? '?' }}</span>
+                        <span class="px-1.5 py-0.5 rounded font-medium
+                            {{ match($routing['complexity'] ?? '') {
+                                'simple' => 'bg-green-100 text-green-700',
+                                'medium' => 'bg-yellow-100 text-yellow-700',
+                                'complex' => 'bg-red-100 text-red-700',
+                                default => 'bg-gray-100 text-gray-500'
+                            } }}">
+                            {{ $routing['complexity'] ?? '?' }}
+                        </span>
+                        <span class="px-1.5 py-0.5 rounded {{ ($routing['autonomy'] ?? '') === 'auto' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600' }}">
+                            {{ $routing['autonomy'] ?? '?' }}
+                        </span>
+                    </div>
+                    <div class="text-gray-600 mb-1">
+                        <span class="text-gray-400">Message:</span> {{ Str::limit($body, 150) }}
+                    </div>
+                    @if(!empty($routing['reasoning']))
+                    <div class="text-gray-400 italic">
+                        {{ $routing['reasoning'] }}
+                    </div>
+                    @endif
+                </div>
+                @endforeach
+            </div>
+            @endif
+        </div>
+
+        {{-- Full agent logs --}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <h3 class="text-sm font-semibold text-gray-700">Agent Logs ({{ $debugLogs->count() }})</h3>
+            </div>
+            <div class="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
+                @foreach($debugLogs as $dlog)
+                <div class="p-3 hover:bg-gray-50 text-xs" x-data="{ open: false }">
+                    <div class="flex items-start gap-2 cursor-pointer" @@click="open = !open">
+                        <span class="text-gray-400 font-mono whitespace-nowrap">{{ $dlog->created_at->format('d/m H:i:s') }}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap
+                            {{ match($dlog->level) {
+                                'error' => 'bg-red-100 text-red-700',
+                                'warn', 'warning' => 'bg-yellow-100 text-yellow-700',
+                                'debug' => 'bg-gray-100 text-gray-500',
+                                default => 'bg-blue-100 text-blue-700'
+                            } }}">
+                            {{ $dlog->level }}
+                        </span>
+                        <span class="text-gray-800 font-medium truncate">{{ $dlog->message }}</span>
+                        <svg class="w-3.5 h-3.5 text-gray-400 flex-shrink-0 ml-auto transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <div x-show="open" x-cloak class="mt-2 p-2 bg-gray-900 text-gray-300 rounded-lg font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">{{ json_encode($dlog->context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</div>
+                </div>
+                @endforeach
+            </div>
+        </div>
+
+        {{-- Session info --}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <h3 class="text-sm font-semibold text-gray-700">Session Info</h3>
+            </div>
+            <div class="p-4 text-xs font-mono space-y-1 text-gray-600">
+                <p><span class="text-gray-400">session_id:</span> {{ $conversation->id }}</p>
+                <p><span class="text-gray-400">session_key:</span> {{ $conversation->session_key }}</p>
+                <p><span class="text-gray-400">agent_id:</span> {{ $conversation->agent_id }}</p>
+                <p><span class="text-gray-400">channel:</span> {{ $conversation->channel }}</p>
+                <p><span class="text-gray-400">peer_id:</span> {{ $conversation->peer_id }}</p>
+                <p><span class="text-gray-400">display_name:</span> {{ $conversation->display_name ?? 'null' }}</p>
+                <p><span class="text-gray-400">message_count:</span> {{ $conversation->message_count }}</p>
+                <p><span class="text-gray-400">last_message_at:</span> {{ $conversation->last_message_at }}</p>
+                <p><span class="text-gray-400">active_project_id:</span> {{ $conversation->active_project_id ?? 'null' }}</p>
+                <p><span class="text-gray-400">whitelisted:</span> {{ $conversation->whitelisted ? 'true' : 'false' }}</p>
+                @if($conversation->pending_agent_context)
+                <p><span class="text-gray-400">pending_context:</span></p>
+                <pre class="mt-1 p-2 bg-gray-900 text-gray-300 rounded-lg overflow-x-auto">{{ json_encode($conversation->pending_agent_context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                @endif
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
-    // Auto-scroll to bottom of chat messages
     document.addEventListener('DOMContentLoaded', function() {
         const el = document.getElementById('chat-messages');
         if (el) el.scrollTop = el.scrollHeight;

@@ -92,10 +92,30 @@ class ConversationController extends Controller
         $memory = new ConversationMemoryService();
         $memoryData = $memory->read($conversation->agent_id, $conversation->peer_id);
 
+        // Debug: all logs for this peer (routing, agent activity, errors)
+        $debugLogs = AgentLog::where('agent_id', $conversation->agent_id)
+            ->where(function ($q) use ($conversation) {
+                $q->where('context->from', $conversation->peer_id)
+                  ->orWhere('context->payload->from', $conversation->peer_id);
+            })
+            ->orderByDesc('created_at')
+            ->limit(100)
+            ->get();
+
+        // Routing decisions for this peer
+        $routingLogs = AgentLog::where('agent_id', $conversation->agent_id)
+            ->where('message', 'Router decision')
+            ->where('context->from', $conversation->peer_id)
+            ->orderByDesc('created_at')
+            ->limit(30)
+            ->get();
+
         return view('conversations.show', [
             'conversation' => $conversation,
             'messages' => $messages,
             'memoryEntries' => $memoryData['entries'] ?? [],
+            'debugLogs' => $debugLogs,
+            'routingLogs' => $routingLogs,
         ]);
     }
 
