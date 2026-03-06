@@ -32,6 +32,9 @@ LOG="$REPO/storage/app/update-rebuild.log"
 # Spawn an independent Docker container to rebuild the app.
 # This container runs on the host's Docker daemon and survives the
 # app container being removed/recreated during the rebuild.
+# IMPORTANT: We do NOT remove the old container before building.
+# docker compose up --build will only replace it after a successful build.
+# If the build fails, the old container keeps running.
 docker run --rm -d \
     --name zeniclaw_updater \
     -v /var/run/docker.sock:/var/run/docker.sock \
@@ -40,11 +43,12 @@ docker run --rm -d \
     -v "${HOST_REPO}/storage/app/update-rebuild.log:/tmp/rebuild.log" \
     docker:cli sh -c "\
         echo 'Started rebuild...' > /tmp/rebuild.log && \
-        docker rm -f zeniclaw_app 2>/dev/null; \
-        docker compose build app >> /tmp/rebuild.log 2>&1 && \
+        docker builder prune -f >> /tmp/rebuild.log 2>&1; \
+        docker compose up -d --build --force-recreate app >> /tmp/rebuild.log 2>&1 && \
         echo 'Successfully built app' >> /tmp/rebuild.log && \
-        docker compose up -d --force-recreate app >> /tmp/rebuild.log 2>&1 && \
         echo 'Started' >> /tmp/rebuild.log \
-        || echo 'ERROR: rebuild failed' >> /tmp/rebuild.log"
+        || { echo 'ERROR: rebuild failed' >> /tmp/rebuild.log; \
+             echo 'Ensuring app container is running...' >> /tmp/rebuild.log; \
+             docker compose up -d app >> /tmp/rebuild.log 2>&1; }"
 
 echo "REBUILD_STARTED"

@@ -84,8 +84,15 @@ class ZeniclawUpdate extends Command
         $this->info('▶ Rebuilding Docker containers...');
         $composeCmd = trim(shell_exec('docker compose version 2>/dev/null && echo "docker compose" || echo "docker-compose"'));
         $composeCmd = str_contains($composeCmd, 'docker compose') ? 'docker compose' : 'docker-compose';
+
+        // Prune builder cache to avoid stale snapshot errors
+        $prune = Process::fromShellCommandline('sudo docker builder prune -f 2>&1', $repoPath);
+        $prune->setTimeout(60);
+        $prune->run(fn($type, $buf) => $this->getOutput()->write($buf));
+
+        // Build and recreate in one step — old container stays up until build succeeds
         $rebuild = Process::fromShellCommandline(
-            "sudo {$composeCmd} up -d --build app 2>&1",
+            "sudo {$composeCmd} up -d --build --force-recreate app 2>&1",
             $repoPath
         );
         $rebuild->setTimeout(600);
@@ -93,6 +100,10 @@ class ZeniclawUpdate extends Command
 
         if (!$rebuild->isSuccessful()) {
             $this->warn('⚠ Docker rebuild may have failed — check logs');
+            // Ensure the app container is at least running with the old image
+            $fallback = Process::fromShellCommandline("sudo {$composeCmd} up -d app 2>&1", $repoPath);
+            $fallback->setTimeout(60);
+            $fallback->run(fn($type, $buf) => $this->getOutput()->write($buf));
         }
 
         $this->info("✅ Update v{$newVersion} complete.");
