@@ -189,14 +189,14 @@ class AgentOrchestrator
                     );
 
                     $dispatchAgent = $newRouting['agent'];
-                    if (!in_array($dispatchAgent, ['dev'])) {
+                    if (!in_array($dispatchAgent, ['dev', 'document'])) {
                         $dispatchAgent = 'chat';
                     }
                 } else {
                     // Low confidence or failed — voice agent already replied to user
                     return $voiceResult;
                 }
-            } elseif (!in_array($dispatchAgent, ['dev'])) {
+            } elseif (!in_array($dispatchAgent, ['dev', 'document'])) {
                 $dispatchAgent = 'chat';
             }
 
