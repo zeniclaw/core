@@ -16,3 +16,4 @@ Schedule::command('habits:remind')->dailyAt('08:00');
 Schedule::command('zeniclaw:update')->dailyAt('03:00')->when(function () {
     return AppSetting::get('auto_update_enabled') !== 'false';
 });
+Schedule::command('zeniclaw:heartbeat')->everyFifteenMinutes();
