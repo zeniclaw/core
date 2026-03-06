@@ -69,6 +69,21 @@ services:
     networks:
       - zeniclaw
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: zeniclaw_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - zeniclaw
+
   waha:
     build:
       context: ./whatsapp-gateway
@@ -98,6 +113,7 @@ volumes:
   redis_data:
   app_storage:
   waha_data:
+  ollama_data:
 
 networks:
   zeniclaw:

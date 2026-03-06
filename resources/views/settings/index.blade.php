@@ -216,8 +216,205 @@
                 </div>
             </div>
 
+            {{-- On-Prem (Ollama/vLLM) --}}
+            <div class="border border-gray-100 rounded-xl p-4 bg-gray-50" x-data="{ show: false }">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">🖥️</span>
+                        <div>
+                            <p class="font-medium text-sm text-gray-900">Modeles On-Prem (Ollama / vLLM)</p>
+                            <p class="text-xs text-gray-500">Qwen 2.5, DeepSeek Coder — API compatible OpenAI</p>
+                        </div>
+                    </div>
+                    @if($hasOnPremUrl)
+                        <span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">✓ Configure</span>
+                    @else
+                        <span class="px-2 py-1 bg-gray-200 text-gray-500 rounded-full text-xs">— Non configure</span>
+                    @endif
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">URL de l'API (Ollama, vLLM, LM Studio...)</label>
+                        <input type="text" name="onprem_api_url"
+                               value="{{ $onPremUrl ?? '' }}"
+                               placeholder="http://ollama:11434"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Cle API (optionnel)</label>
+                        <div class="relative">
+                            <input :type="show ? 'text' : 'password'" name="onprem_api_key"
+                                   placeholder="{{ $hasOnPremKey ? '••••••••••••••••••••••••' : 'optionnel' }}"
+                                   class="w-full px-3 py-2 pr-20 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono bg-white">
+                            <button type="button" @click="show = !show"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700 px-2 py-1">
+                                <span x-text="show ? '🙈 Hide' : '👁 Show'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Model download manager --}}
+                <div class="mt-3 space-y-2">
+                    <p class="text-xs font-medium text-gray-600 mb-1">Modeles disponibles</p>
+
+                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-qwen">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-900">Qwen 2.5 7B (intelligent)</p>
+                            <p class="text-xs text-gray-500">qwen2.5:7b — ~4.7 Go</p>
+                        </div>
+                        <div class="ollama-status">
+                            <button type="button" onclick="ollamaPull('qwen2.5:7b', this)"
+                                    class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                                Telecharger
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-deepseek">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-900">Qwen 2.5 Coder 7B (code)</p>
+                            <p class="text-xs text-gray-500">qwen2.5-coder:7b — ~4.7 Go</p>
+                        </div>
+                        <div class="ollama-status">
+                            <button type="button" onclick="ollamaPull('qwen2.5-coder:7b', this)"
+                                    class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                                Telecharger
+                            </button>
+                        </div>
+                    </div>
+
+                    <p id="ollama-connection-error" class="text-xs text-red-600 mt-1 hidden"></p>
+                </div>
+
+                <script>
+                // Check installed models on page load
+                document.addEventListener('DOMContentLoaded', function() {
+                    ollamaCheckInstalled();
+                    ollamaCheckPulling('qwen2.5:7b');
+                    ollamaCheckPulling('qwen2.5-coder:7b');
+                });
+
+                function ollamaGetStatusEl(model) {
+                    var id = model.includes('coder') ? 'ollama-model-deepseek' : 'ollama-model-qwen';
+                    return document.getElementById(id).querySelector('.ollama-status');
+                }
+
+                function ollamaSetInstalled(model) {
+                    var el = ollamaGetStatusEl(model);
+                    el.innerHTML = '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium whitespace-nowrap">Installe</span>';
+                }
+
+                function ollamaSetProgress(model, percent, detail) {
+                    var el = ollamaGetStatusEl(model);
+                    el.innerHTML = '<div class="w-40">' +
+                        '<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">' +
+                        '<span>' + (detail || 'Telechargement...') + '</span>' +
+                        '<span>' + percent + '%</span></div>' +
+                        '<div class="w-full bg-gray-200 rounded-full h-2">' +
+                        '<div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width:' + percent + '%"></div>' +
+                        '</div></div>';
+                }
+
+                function ollamaSetError(model, detail) {
+                    var el = ollamaGetStatusEl(model);
+                    el.innerHTML = '<div class="flex items-center gap-2">' +
+                        '<span class="text-xs text-red-600">' + detail + '</span>' +
+                        '<button type="button" onclick="ollamaPull(\'' + model + '\', this)" ' +
+                        'class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200">Reessayer</button></div>';
+                }
+
+                async function ollamaCheckInstalled() {
+                    try {
+                        var res = await fetch('{{ route("api.ollama.models") }}');
+                        if (!res.ok) return;
+                        var data = await res.json();
+                        var installed = (data.models || []).map(function(m) { return m.name; });
+                        ['qwen2.5:7b', 'qwen2.5-coder:7b'].forEach(function(model) {
+                            var base = model.split(':')[0];
+                            if (installed.some(function(i) { return i === model || i.startsWith(base); })) {
+                                ollamaSetInstalled(model);
+                            }
+                        });
+                    } catch (e) {
+                        // Ollama not reachable — buttons stay as-is
+                    }
+                }
+
+                async function ollamaCheckPulling(model) {
+                    try {
+                        var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
+                        if (!res.ok) return;
+                        var data = await res.json();
+                        if (data.status === 'pulling') {
+                            ollamaSetProgress(model, data.percent || 0, data.detail || '');
+                            ollamaStartPolling(model);
+                        } else if (data.status === 'done') {
+                            ollamaSetInstalled(model);
+                        } else if (data.status === 'error') {
+                            ollamaSetError(model, data.detail || 'Erreur');
+                        }
+                    } catch (e) {}
+                }
+
+                async function ollamaPull(model, btn) {
+                    // Auto-save URL if not configured yet
+                    var urlInput = document.querySelector('input[name="onprem_api_url"]');
+                    var urlVal = urlInput ? urlInput.value.trim() : '';
+                    if (urlVal) {
+                        await fetch('{{ route("api.ollama.save-url") }}', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                            body: JSON.stringify({ url: urlVal }),
+                        });
+                    }
+
+                    ollamaSetProgress(model, 0, 'Demarrage...');
+                    try {
+                        var res = await fetch('{{ route("api.ollama.pull") }}', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                            body: JSON.stringify({ model: model }),
+                        });
+                        if (!res.ok) {
+                            var err = await res.json();
+                            ollamaSetError(model, err.error || 'Erreur');
+                            return;
+                        }
+                        ollamaStartPolling(model);
+                    } catch (e) {
+                        ollamaSetError(model, 'Erreur reseau');
+                    }
+                }
+
+                var ollamaPollers = {};
+                function ollamaStartPolling(model) {
+                    if (ollamaPollers[model]) return;
+                    ollamaPollers[model] = setInterval(async function() {
+                        try {
+                            var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
+                            if (!res.ok) return;
+                            var data = await res.json();
+                            if (data.status === 'done') {
+                                ollamaSetInstalled(model);
+                                clearInterval(ollamaPollers[model]);
+                                delete ollamaPollers[model];
+                            } else if (data.status === 'error') {
+                                ollamaSetError(model, data.detail || 'Erreur');
+                                clearInterval(ollamaPollers[model]);
+                                delete ollamaPollers[model];
+                            } else {
+                                ollamaSetProgress(model, data.percent || 0, data.detail || '');
+                            }
+                        } catch (e) {}
+                    }, 2000);
+                }
+                </script>
+            </div>
+
             <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
-                💾 Sauvegarder les clés
+                💾 Sauvegarder les cles
             </button>
         </form>
     </div>

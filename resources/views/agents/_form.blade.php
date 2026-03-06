@@ -3,8 +3,8 @@ $models = [
     'claude-sonnet-4-5' => 'Claude Sonnet 4.5 (Claude Max)',
     'claude-opus-4-5'   => 'Claude Opus 4.5 (Claude Max)',
     'claude-haiku-4-5'  => 'Claude Haiku 4.5 (Claude Max)',
-    'gpt-4o'            => 'GPT-4o (OpenAI)',
-    'gpt-4o-mini'       => 'GPT-4o Mini (OpenAI)',
+    'qwen2.5:7b'        => 'Qwen 2.5 7B (On-Prem, intelligent)',
+    'qwen2.5-coder:7b'  => 'Qwen 2.5 Coder 7B (On-Prem, code)',
 ];
 @endphp
 

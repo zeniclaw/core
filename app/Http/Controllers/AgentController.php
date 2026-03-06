@@ -13,120 +13,160 @@ class AgentController extends Controller
             'label' => 'ChatAgent',
             'icon' => '💬',
             'color' => 'blue',
+            'version' => '2.3.0',
+            'updated_at' => '2026-02-15',
             'description' => 'Conversations générales et réponses contextuelles',
         ],
         'dev' => [
             'label' => 'DevAgent',
             'icon' => '💻',
             'color' => 'purple',
+            'version' => '2.5.0',
+            'updated_at' => '2026-03-01',
             'description' => 'Assistance développement, code et GitLab',
         ],
         'reminder' => [
             'label' => 'ReminderAgent',
             'icon' => '⏰',
             'color' => 'orange',
+            'version' => '1.4.0',
+            'updated_at' => '2026-01-20',
             'description' => 'Gestion des rappels et notifications',
         ],
         'project' => [
             'label' => 'ProjectAgent',
             'icon' => '📋',
             'color' => 'green',
+            'version' => '2.1.0',
+            'updated_at' => '2026-02-10',
             'description' => 'Gestion de projets et suivi des tâches',
         ],
         'analysis' => [
             'label' => 'AnalysisAgent',
             'icon' => '📊',
             'color' => 'red',
+            'version' => '1.2.0',
+            'updated_at' => '2026-01-15',
             'description' => 'Analyse de données et rapports',
         ],
         'todo' => [
             'label' => 'TodoAgent',
             'icon' => '✅',
             'color' => 'teal',
+            'version' => '1.3.0',
+            'updated_at' => '2026-02-05',
             'description' => 'Gestion de checklist et to-do list',
         ],
         'smart_context' => [
             'label' => 'SmartContextAgent',
             'icon' => '🧠',
             'color' => 'blue',
+            'version' => '2.0.0',
+            'updated_at' => '2026-02-20',
             'description' => 'Memorisation intelligente du contexte utilisateur',
         ],
         'mood_check' => [
             'label' => 'Mood Check',
             'icon' => '😊',
             'color' => 'pink',
+            'version' => '1.0.0',
+            'updated_at' => '2026-01-10',
             'description' => 'Suivi emotionnel & recommandations bien-etre',
         ],
         'finance' => [
             'label' => 'Finance',
             'icon' => '💰',
             'color' => 'green',
+            'version' => '1.1.0',
+            'updated_at' => '2026-01-25',
             'description' => 'Suivi budgets, depenses & alertes financieres',
         ],
         'smart_meeting' => [
             'label' => 'Smart Meeting',
             'icon' => '📋',
             'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2025-12-20',
             'description' => 'Capture et synthese auto de reunions',
         ],
         'hangman' => [
             'label' => 'Hangman Game',
             'icon' => '🎮',
             'color' => 'purple',
+            'version' => '1.1.0',
+            'updated_at' => '2026-01-05',
             'description' => 'Jeu du pendu interactif avec stats',
         ],
         'flashcard' => [
             'label' => 'Flashcards',
             'icon' => '📚',
             'color' => 'indigo',
+            'version' => '1.2.0',
+            'updated_at' => '2026-02-01',
             'description' => 'Apprentissage adaptatif avec repetition espacee',
         ],
         'voice_command' => [
             'label' => 'Voice Commands',
             'icon' => '🎤',
             'color' => 'cyan',
+            'version' => '1.0.0',
+            'updated_at' => '2025-12-15',
             'description' => 'Transcribe & execute audio commands',
         ],
         'code_review' => [
             'label' => 'Code Review',
             'icon' => '🔍',
             'color' => 'blue',
+            'version' => '1.3.0',
+            'updated_at' => '2026-02-25',
             'description' => 'Analyse de code, bugs, securite et optimisations',
         ],
         'screenshot' => [
             'label' => 'Screenshot & Annotate',
             'icon' => '📸',
             'color' => 'cyan',
+            'version' => '1.0.0',
+            'updated_at' => '2025-12-10',
             'description' => 'Capture, extract & annotate images',
         ],
         'content_summarizer' => [
             'label' => 'Resume Contenu',
             'icon' => '📰',
             'color' => 'cyan',
+            'version' => '1.1.0',
+            'updated_at' => '2026-01-30',
             'description' => 'Resume articles, videos & liens',
         ],
         'event_reminder' => [
             'label' => 'Event Reminder',
             'icon' => '📅',
             'color' => 'purple',
+            'version' => '1.2.0',
+            'updated_at' => '2026-02-08',
             'description' => 'Evenements intelligents avec rappels contextuels',
         ],
         'habit' => [
             'label' => 'HabitAgent',
             'icon' => '🎯',
             'color' => 'green',
+            'version' => '1.0.0',
+            'updated_at' => '2026-02-18',
             'description' => 'Suivi des habitudes quotidiennes, streaks et statistiques',
         ],
         'music' => [
             'label' => 'Music Agent',
             'icon' => '🎵',
             'color' => 'pink',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-03',
             'description' => 'Découvrez et gérez vos playlists musicales',
         ],
         'pomodoro' => [
             'label' => 'Pomodoro Timer',
             'icon' => '🍅',
             'color' => 'red',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-05',
             'description' => 'Focus sessions avec minuteur et stats',
         ],
     ];
@@ -308,6 +348,28 @@ class AgentController extends Controller
 
         $status = $agent->whitelist_enabled ? 'activée' : 'désactivée';
         return back()->with('success', "Whitelist {$status}.");
+    }
+
+    public function updateSubAgentModels(Request $request, Agent $agent)
+    {
+        $this->authorize('update', $agent);
+
+        $models = $request->input('sub_agent_models', []);
+
+        // Validate model values
+        $validModels = ['default', 'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'qwen2.5:7b', 'qwen2.5-coder:7b'];
+        $filtered = [];
+        foreach ($models as $key => $model) {
+            if (array_key_exists($key, self::SUB_AGENTS) && in_array($model, $validModels)) {
+                if ($model !== 'default') {
+                    $filtered[$key] = $model;
+                }
+            }
+        }
+
+        $agent->update(['sub_agent_models' => $filtered ?: null]);
+
+        return back()->with('success', 'Modeles des sub-agents mis a jour.');
     }
 
     public function destroy(Request $request, Agent $agent)

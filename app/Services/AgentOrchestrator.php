@@ -125,10 +125,14 @@ class AgentOrchestrator
                 ],
             ]);
 
+            // Override model if the agent has a specific sub-agent model configured
+            $configuredModel = $context->agent->getSubAgentModel($routing['agent']);
+            $routingModel = $this->resolveFullModelId($configuredModel) ?? $routing['model'];
+
             // Enrich context with routing info
             $routedContext = $context->withRouting(
                 $routing['agent'],
-                $routing['model'],
+                $routingModel,
                 $routing['complexity'],
                 $routing['reasoning'],
                 $routing['autonomy'] ?? 'confirm'
@@ -420,6 +424,26 @@ class AgentOrchestrator
         } catch (\Exception $e) {
             Log::warning('Debug message failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Map short model names (from UI) to full Anthropic model IDs.
+     */
+    private function resolveFullModelId(string $model): ?string
+    {
+        // Already a full model ID
+        if (str_contains($model, '-202')) {
+            return $model;
+        }
+
+        return match ($model) {
+            'claude-haiku-4-5' => 'claude-haiku-4-5-20251001',
+            'claude-sonnet-4-5' => 'claude-sonnet-4-20250514',
+            'claude-opus-4-5' => 'claude-opus-4-20250514',
+            'qwen2.5:7b' => 'qwen2.5:7b',
+            'qwen2.5-coder:7b' => 'qwen2.5-coder:7b',
+            default => null,
+        };
     }
 
     private function saveMemory(AgentContext $context, string $reply): void

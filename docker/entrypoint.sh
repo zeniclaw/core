@@ -101,6 +101,12 @@ foreach ($improvements as $si) {
 }
 ' 2>/dev/null || true
 
+# Auto-configure Ollama URL if ollama container is reachable
+if curl -sf http://ollama:11434/api/tags >/dev/null 2>&1; then
+    echo "🖥️ Ollama detected, setting on-prem URL..."
+    php artisan tinker --execute="\App\Models\AppSetting::set('onprem_api_url', 'http://ollama:11434');" 2>/dev/null || true
+fi
+
 # Auto-start WAHA WhatsApp session in background
 (
     set +e

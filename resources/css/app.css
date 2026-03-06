@@ -128,6 +128,42 @@ body.dark-theme {
 .dark-theme .bg-purple-100 {
   background-color: rgba(139, 92, 246, 0.15) !important;
 }
+.dark-theme .bg-teal-100 {
+  background-color: rgba(20, 184, 166, 0.15) !important;
+}
+.dark-theme .bg-pink-100 {
+  background-color: rgba(236, 72, 153, 0.15) !important;
+}
+.dark-theme .bg-cyan-100 {
+  background-color: rgba(6, 182, 212, 0.15) !important;
+}
+.dark-theme .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+.dark-theme .bg-teal-50 {
+  background-color: rgba(20, 184, 166, 0.08) !important;
+}
+.dark-theme .bg-pink-50 {
+  background-color: rgba(236, 72, 153, 0.08) !important;
+}
+.dark-theme .bg-cyan-50 {
+  background-color: rgba(6, 182, 212, 0.08) !important;
+}
+.dark-theme .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.08) !important;
+}
+.dark-theme .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.08) !important;
+}
+.dark-theme .bg-purple-50 {
+  background-color: rgba(139, 92, 246, 0.08) !important;
+}
+.dark-theme .bg-orange-50 {
+  background-color: rgba(249, 115, 22, 0.08) !important;
+}
+.dark-theme .bg-indigo-50 {
+  background-color: rgba(99, 102, 241, 0.08) !important;
+}
 
 /* badge text colors — keep readable */
 .dark-theme .text-indigo-700 { color: #818cf8 !important; }
@@ -136,8 +172,31 @@ body.dark-theme {
 .dark-theme .text-green-600 { color: #6ee7b7 !important; }
 .dark-theme .text-yellow-700 { color: #fcd34d !important; }
 .dark-theme .text-orange-500 { color: #fb923c !important; }
+.dark-theme .text-orange-700 { color: #fb923c !important; }
 .dark-theme .text-red-600 { color: #fca5a5 !important; }
 .dark-theme .text-red-700 { color: #fca5a5 !important; }
+.dark-theme .text-blue-700 { color: #93c5fd !important; }
+.dark-theme .text-blue-600 { color: #93c5fd !important; }
+.dark-theme .text-purple-700 { color: #c4b5fd !important; }
+.dark-theme .text-purple-600 { color: #c4b5fd !important; }
+.dark-theme .text-teal-700 { color: #5eead4 !important; }
+.dark-theme .text-teal-600 { color: #5eead4 !important; }
+.dark-theme .text-pink-700 { color: #f9a8d4 !important; }
+.dark-theme .text-pink-600 { color: #f9a8d4 !important; }
+.dark-theme .text-cyan-700 { color: #67e8f9 !important; }
+.dark-theme .text-cyan-600 { color: #67e8f9 !important; }
+.dark-theme .text-amber-700 { color: #fcd34d !important; }
+.dark-theme .text-amber-600 { color: #fcd34d !important; }
+
+/* border colors for dark mode */
+.dark-theme .border-blue-200 { border-color: rgba(59, 130, 246, 0.3) !important; }
+.dark-theme .border-purple-200 { border-color: rgba(139, 92, 246, 0.3) !important; }
+.dark-theme .border-orange-200 { border-color: rgba(249, 115, 22, 0.3) !important; }
+.dark-theme .border-teal-200 { border-color: rgba(20, 184, 166, 0.3) !important; }
+.dark-theme .border-pink-200 { border-color: rgba(236, 72, 153, 0.3) !important; }
+.dark-theme .border-cyan-200 { border-color: rgba(6, 182, 212, 0.3) !important; }
+.dark-theme .border-amber-200 { border-color: rgba(245, 158, 11, 0.3) !important; }
+.dark-theme .border-indigo-200 { border-color: rgba(99, 102, 241, 0.3) !important; }
 
 /* ── Flash messages ── */
 .dark-theme .bg-green-50 {

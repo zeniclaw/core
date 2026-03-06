@@ -13,11 +13,14 @@ class SettingsController extends Controller
         $hasAnthropicKey = AppSetting::has('anthropic_api_key');
         $hasOpenAiKey = AppSetting::has('openai_api_key');
         $hasGitlabToken = AppSetting::has('gitlab_access_token');
+        $hasOnPremUrl = AppSetting::has('onprem_api_url');
+        $hasOnPremKey = AppSetting::has('onprem_api_key');
+        $onPremUrl = AppSetting::get('onprem_api_url');
         $adminWhatsappPhone = AppSetting::get('admin_whatsapp_phone');
         $autoUpdateEnabled = AppSetting::get('auto_update_enabled') !== 'false';
         $appTimezone = AppSetting::timezone();
         $tokens = $user->tokens()->latest()->get();
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens'));
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -25,6 +28,8 @@ class SettingsController extends Controller
         $request->validate([
             'anthropic_api_key' => 'nullable|string',
             'openai_api_key'    => 'nullable|string',
+            'onprem_api_url'    => 'nullable|string|url',
+            'onprem_api_key'    => 'nullable|string',
         ]);
 
         if ($request->filled('anthropic_api_key')) {
@@ -32,6 +37,12 @@ class SettingsController extends Controller
         }
         if ($request->filled('openai_api_key')) {
             AppSetting::set('openai_api_key', $request->openai_api_key);
+        }
+        if ($request->filled('onprem_api_url')) {
+            AppSetting::set('onprem_api_url', $request->onprem_api_url);
+        }
+        if ($request->filled('onprem_api_key')) {
+            AppSetting::set('onprem_api_key', $request->onprem_api_key);
         }
 
         return redirect()->route('settings.index')->with('success', 'Clés API sauvegardées.');

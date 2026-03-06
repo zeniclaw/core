@@ -49,8 +49,11 @@ class AnalyzeSelfImprovementJob implements ShouldQueue
                 . "Chaque agent herite de BaseAgent et implemente handle(). Le RouterAgent dans RouterAgent.php route les messages.\n\n"
                 . "Si tu identifies une amelioration systeme concrete et actionnable:\n"
                 . "Reponds UNIQUEMENT avec du JSON valide:\n"
-                . "{\"improve\": true, \"title\": \"titre court de l'amelioration\", \"analysis\": \"explication du probleme ou de la fonctionnalite manquante\", "
-                . "\"plan\": \"etapes numerotees avec fichiers a creer/modifier. Sois precis: noms de fichiers, classes, methodes.\"}\n\n"
+                . "{\"improve\": true, \"new_capability\": true/false, \"title\": \"titre court\", \"analysis\": \"explication\", \"plan\": \"etapes\"}\n\n"
+                . "IMPORTANT sur new_capability:\n"
+                . "- true = l'utilisateur demande quelque chose de COMPLETEMENT NOUVEAU que ZeniClaw ne peut pas faire du tout (ex: generer une image, envoyer un email)\n"
+                . "- false = l'agent a ESSAYE de repondre mais a mal fait (bug, erreur API, mauvaise analyse, info incomplete). C'est une amelioration technique, pas une nouvelle fonctionnalite.\n"
+                . "- La plupart des cas sont false. N'utilise true QUE si c'est vraiment une capacite totalement absente.\n\n"
                 . "Si la reponse etait correcte et aucune amelioration n'est necessaire:\n"
                 . "{\"improve\": false}\n\n"
                 . "IMPORTANT: Reponds UNIQUEMENT avec du JSON valide, rien d'autre.";
@@ -79,6 +82,10 @@ class AnalyzeSelfImprovementJob implements ShouldQueue
                 return;
             }
 
+            // Check if the agent actually tried to handle the request (vs completely failing)
+            // Only notify for genuinely NEW capabilities, not for poor execution of existing ones
+            $isNewCapability = $data['new_capability'] ?? false;
+
             $improvement = SelfImprovement::create([
                 'agent_id' => $this->agentId,
                 'trigger_message' => $this->body,
@@ -90,13 +97,16 @@ class AnalyzeSelfImprovementJob implements ShouldQueue
                 'status' => 'pending',
             ]);
 
-            Log::info('SelfImprovement created', ['title' => $data['title'] ?? '']);
+            Log::info('SelfImprovement created', ['title' => $data['title'] ?? '', 'new_capability' => $isNewCapability]);
 
-            // Notify the user that their idea has been forwarded to admin
-            $this->notifyUser(
-                "Hey, bonne idee ! Je ne sais pas encore faire ca, mais ta suggestion a ete transmise a l'admin pour validation. "
-                . "Si c'est approuve, je serai bientot capable de le faire !"
-            );
+            // Only notify user for genuinely new capabilities they requested
+            // Do NOT notify when the agent tried but did a poor job — that's a bug fix, not a feature request
+            if ($isNewCapability) {
+                $this->notifyUser(
+                    "Hey, bonne idee ! Je ne sais pas encore faire ca, mais ta suggestion a ete transmise a l'admin pour validation. "
+                    . "Si c'est approuve, je serai bientot capable de le faire !"
+                );
+            }
         } catch (\Exception $e) {
             Log::error('AnalyzeSelfImprovementJob failed: ' . $e->getMessage());
         }

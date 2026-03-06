@@ -6,6 +6,7 @@ use App\Jobs\RunSubAgentJob;
 use App\Models\AppSetting;
 use App\Models\Project;
 use App\Models\SubAgent;
+use App\Models\UserKnowledge;
 use App\Services\AgentContext;
 use App\Services\GitLabService;
 use Illuminate\Support\Facades\Log;
@@ -321,6 +322,17 @@ class DevAgent extends BaseAgent
                 }
             }
 
+            // Inject stored user knowledge relevant to this project
+            $userKnowledge = UserKnowledge::search($context->from, $project->name);
+            $knowledgeText = '';
+            if ($userKnowledge->isNotEmpty()) {
+                $knowledgeText = "\n\nDONNEES DEJA CONNUES POUR CET UTILISATEUR (ne pas redemander!):\n";
+                foreach ($userKnowledge as $k) {
+                    $knowledgeText .= "--- [{$k->topic_key}] {$k->label} ---\n";
+                    $knowledgeText .= mb_substr(json_encode($k->data, JSON_UNESCAPED_UNICODE), 0, 2000) . "\n\n";
+                }
+            }
+
             $systemPrompt = <<<PROMPT
 Tu es un agent API autonome. Tu fais PLUSIEURS appels si necessaire pour repondre completement.
 
@@ -329,7 +341,7 @@ CONFIGURATION STOCKEE: {$settingsJson}
 CODE SOURCE (routes): {$projectCode}
 CONVERSATION: {$conversationText}
 DEMANDE: {$query}
-{$collectedText}
+{$collectedText}{$knowledgeText}
 ITERATION: {$i} sur {$maxIterations}
 
 ACTIONS (reponds en JSON):
@@ -338,7 +350,7 @@ A) APPEL API — Fais un appel pour collecter des donnees:
 {"action": "call", "store": {}, "method": "GET", "url": "https://...", "headers": {}, "params": {}, "explanation": "pourquoi cet appel"}
 
 B) REPONSE FINALE — Tu as ASSEZ de donnees pour repondre completement:
-{"action": "reply", "store": {}, "message": "ta reponse complete et formatee"}
+{"action": "reply", "store": {}, "knowledge": [{"key": "...", "label": "...", "data": {...}}], "message": "ta reponse complete et formatee"}
 
 C) QUESTION — DERNIER RECOURS, info impossible a deduire:
 {"action": "ask", "store": {}, "message": "question", "save_as": "setting_name"}
@@ -350,6 +362,9 @@ REGLES CRITIQUES:
 4. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
 5. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
 6. REPONSE FINALE: Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}].
+7. SAUVEGARDER: Dans "knowledge", inclus les donnees importantes a retenir (listes de clients, factures, totaux) pour ne pas refaire les memes appels.
+8. VERIFIER: Regarde "DONNEES DEJA CONNUES" ci-dessus AVANT de faire un appel API. Ne refais pas un appel si tu as deja l'info.
+9. PAGINER: Si l'API retourne des resultats pagines, fais TOUS les appels necessaires pour avoir TOUTES les pages.
 
 JSON UNIQUEMENT.
 PROMPT;
@@ -371,6 +386,22 @@ PROMPT;
 
             // Handle action
             if ($parsed['action'] === 'reply') {
+                // Auto-store knowledge from the reply
+                $knowledge = $parsed['knowledge'] ?? [];
+                if (!empty($knowledge) && is_array($knowledge)) {
+                    foreach ($knowledge as $item) {
+                        if (!empty($item['key']) && !empty($item['data'])) {
+                            UserKnowledge::store(
+                                $context->from,
+                                $item['key'],
+                                $item['data'],
+                                $item['label'] ?? null,
+                                $project->name,
+                                $item['ttl_minutes'] ?? null
+                            );
+                        }
+                    }
+                }
                 return ($parsed['message'] ?? '');
             }
 

@@ -11,10 +11,75 @@ class AnthropicClient
     private string $baseUrl = 'https://api.anthropic.com/v1';
 
     /**
+     * Check if a model is on-prem (non-Claude).
+     */
+    private function isOnPremModel(string $model): bool
+    {
+        return !str_starts_with($model, 'claude-');
+    }
+
+    /**
+     * Route on-prem model calls to Ollama/OpenAI-compatible API.
+     */
+    private function chatOnPrem(string|array $message, string $model, string $systemPrompt = ''): ?string
+    {
+        $baseUrl = AppSetting::get('onprem_api_url');
+        if (!$baseUrl) {
+            Log::warning('On-prem model requested but no onprem_api_url configured', ['model' => $model]);
+            return null;
+        }
+
+        $messages = [];
+        if ($systemPrompt) {
+            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
+        }
+
+        $content = is_array($message) ? json_encode($message) : $message;
+        $messages[] = ['role' => 'user', 'content' => $content];
+
+        $body = [
+            'model' => $model,
+            'messages' => $messages,
+            'max_tokens' => 2048,
+            'stream' => false,
+        ];
+
+        $headers = ['content-type' => 'application/json'];
+        $apiKey = AppSetting::get('onprem_api_key');
+        if ($apiKey) {
+            $headers['Authorization'] = "Bearer {$apiKey}";
+        }
+
+        try {
+            $response = Http::timeout(120)
+                ->withHeaders($headers)
+                ->post(rtrim($baseUrl, '/') . '/v1/chat/completions', $body);
+
+            if ($response->successful()) {
+                return $response->json('choices.0.message.content');
+            }
+
+            Log::error('OnPrem chat failed', [
+                'status' => $response->status(),
+                'body' => substr($response->body(), 0, 500),
+                'model' => $model,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('OnPrem chat exception', ['model' => $model, 'error' => $e->getMessage()]);
+        }
+
+        return null;
+    }
+
+    /**
      * @param string|array $message Text string or array of content blocks (multimodal)
      */
     public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = ''): ?string
     {
+        if ($this->isOnPremModel($model)) {
+            return $this->chatOnPrem($message, $model, $systemPrompt);
+        }
+
         $apiKey = AppSetting::get('anthropic_api_key');
         if (!$apiKey) {
             return null;
@@ -83,6 +148,25 @@ class AnthropicClient
      */
     public function chatWithToolUse(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): ?array
     {
+        // On-prem models don't support tool_use — fallback to simple chat
+        if ($this->isOnPremModel($model)) {
+            $lastMessage = end($messages);
+            $content = $lastMessage['content'] ?? '';
+            if (is_array($content)) {
+                $content = collect($content)->where('type', 'text')->pluck('text')->implode("\n");
+            }
+            $reply = $this->chatOnPrem($content, $model, $systemPrompt);
+            if ($reply) {
+                return [
+                    'content' => [['type' => 'text', 'text' => $reply]],
+                    'stop_reason' => 'end_turn',
+                    'model' => $model,
+                    'usage' => null,
+                ];
+            }
+            return null;
+        }
+
         $apiKey = AppSetting::get('anthropic_api_key');
         if (!$apiKey) {
             return null;
@@ -150,6 +234,12 @@ class AnthropicClient
      */
     public function chatWithMessages(array $messages, string $model, string $systemPrompt = '', int $maxTokens = 4096): ?string
     {
+        if ($this->isOnPremModel($model)) {
+            $lastMessage = end($messages);
+            $content = $lastMessage['content'] ?? '';
+            return $this->chatOnPrem($content, $model, $systemPrompt);
+        }
+
         $apiKey = AppSetting::get('anthropic_api_key');
         if (!$apiKey) {
             return null;

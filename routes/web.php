@@ -15,6 +15,7 @@ use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LogController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ReminderController;
+use App\Http\Controllers\OllamaController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SelfImprovementController;
 use App\Http\Controllers\SubAgentController;
@@ -55,7 +56,8 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/agents/{agent}/sessions/{session}', [AgentSessionController::class, 'destroy'])->name('agents.sessions.destroy');
     Route::get('/agents/{agent}/sub/{subAgent}', [AgentController::class, 'showSubAgent'])
         ->name('agents.sub-agent')
-        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit');
+        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro');
+    Route::post('/agents/{agent}/sub-agent-models', [AgentController::class, 'updateSubAgentModels'])->name('agents.sub-agent-models');
 
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');
@@ -113,6 +115,12 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/settings/gitlab', [SettingsController::class, 'saveGitlabSettings'])->name('settings.gitlab');
     Route::post('/settings/auto-update', [SettingsController::class, 'toggleAutoUpdate'])->name('settings.auto-update');
     Route::post('/settings/timezone', [SettingsController::class, 'saveTimezone'])->name('settings.timezone');
+
+    // Ollama model management
+    Route::get('/api/ollama/models', [OllamaController::class, 'models'])->name('api.ollama.models');
+    Route::post('/api/ollama/pull', [OllamaController::class, 'pull'])->name('api.ollama.pull');
+    Route::get('/api/ollama/pull-status', [OllamaController::class, 'pullStatus'])->name('api.ollama.pull-status');
+    Route::post('/api/ollama/save-url', [OllamaController::class, 'saveUrl'])->name('api.ollama.save-url');
 
     // API Tokens
     Route::post('/settings/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');

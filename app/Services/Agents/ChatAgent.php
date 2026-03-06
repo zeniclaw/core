@@ -4,6 +4,7 @@ namespace App\Services\Agents;
 
 use App\Models\AppSetting;
 use App\Models\Project;
+use App\Models\UserKnowledge;
 use App\Services\AgentContext;
 use App\Services\AgenticLoop;
 use App\Services\AgentTools;
@@ -117,6 +118,12 @@ class ChatAgent extends BaseAgent
             . "Si l'utilisateur parle de sa todo list, utilise les outils todo directement. "
             . "Tu es proactif : si tu peux resoudre le probleme avec un outil, fais-le. "
             . "\n\n"
+            . "MEMOIRE PERSISTANTE (CRITIQUE):\n"
+            . "- AVANT de demander une info a l'utilisateur ou de faire un appel API, utilise TOUJOURS recall_knowledge ou list_knowledge pour verifier si tu n'as pas deja cette info.\n"
+            . "- Quand tu obtiens des donnees importantes (listes de clients, resultats API, infos financieres, etc.), utilise store_knowledge pour les sauvegarder.\n"
+            . "- Les donnees sont stockees PAR UTILISATEUR et persistent entre les conversations.\n"
+            . "- Ne redemande JAMAIS une info que tu as deja stockee.\n"
+            . "\n\n"
             . "STYLE: Tu parles comme un ami ou un collegue decontracte. "
             . "Tu tutoies, tu es direct, drole et bienveillant. "
             . "Tu utilises un langage naturel et detendu (pas trop formel). "
@@ -143,6 +150,12 @@ class ChatAgent extends BaseAgent
         $projectContext = $this->buildProjectContext($context);
         if ($projectContext) {
             $systemPrompt .= "\n\n" . $projectContext;
+        }
+
+        // Stored knowledge summary (per-user persistent data)
+        $knowledgeSummary = $this->buildKnowledgeSummary($context);
+        if ($knowledgeSummary) {
+            $systemPrompt .= "\n\n" . $knowledgeSummary;
         }
 
         // User context (active todos, reminders)
@@ -362,6 +375,24 @@ class ChatAgent extends BaseAgent
         $blocks[] = ['type' => 'text', 'text' => $text];
 
         return $blocks;
+    }
+
+    private function buildKnowledgeSummary(AgentContext $context): string
+    {
+        $entries = UserKnowledge::allFor($context->from);
+
+        if ($entries->isEmpty()) {
+            return '';
+        }
+
+        $lines = ["DONNEES STOCKEES POUR CET UTILISATEUR (utilise recall_knowledge pour acceder aux details):"];
+        foreach ($entries->take(20) as $entry) {
+            $label = $entry->label ?? $entry->topic_key;
+            $age = $entry->updated_at->diffForHumans();
+            $lines[] = "- [{$entry->topic_key}] {$label} (source: {$entry->source}, {$age})";
+        }
+
+        return implode("\n", $lines);
     }
 
     private function buildProjectContext(AgentContext $context): ?string
