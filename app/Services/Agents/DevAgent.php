@@ -72,12 +72,17 @@ class DevAgent extends BaseAgent
             'diff', 'compare', 'comparer branches',
             'cherry-pick', 'cherry pick', 'rebase',
             'stash', 'checkout',
+            // API interaction
+            'api', 'endpoint', 'route', 'appel api', 'requete api',
+            'lister les donnees', 'voir les donnees', 'combien de',
+            'campagnes', 'users', 'clients', 'commandes', 'produits',
+            'statistiques', 'stats', 'dashboard data',
         ];
     }
 
     public function version(): string
     {
-        return '2.1.0';
+        return '2.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -122,6 +127,7 @@ class DevAgent extends BaseAgent
         return match ($type) {
             'list_selection' => $this->handleListSelection($context, $data),
             'ambiguous_project' => $this->handleAmbiguousProjectSelection($context, $data),
+            'api_credentials' => $this->handleApiCredentials($context, $data),
             default => null,
         };
     }
@@ -240,6 +246,216 @@ class DevAgent extends BaseAgent
         return AgentResult::reply($reply);
     }
 
+    // ── API Query (Generic Project API Interaction) ───────────────────
+
+    private function handleApiCredentials(AgentContext $context, array $data): ?AgentResult
+    {
+        $body = trim($context->body);
+        $projectId = $data['project_id'] ?? null;
+        $missing = $data['missing'] ?? '';
+        $originalQuery = $data['original_query'] ?? '';
+
+        $project = $projectId ? Project::find($projectId) : null;
+        if (!$project) {
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        // Store the provided credential
+        $project->setSetting($missing, $body);
+        $this->clearPendingContext($context);
+
+        $reply = "Merci ! {$missing} enregistre pour *{$project->name}*.";
+        $this->sendText($context->from, $reply);
+
+        // Retry the original query now that we have credentials
+        if ($originalQuery) {
+            $retryReply = $this->executeApiQuery($project, $originalQuery, $context);
+            $this->sendText($context->from, $retryReply);
+            return AgentResult::reply($reply . "\n\n" . $retryReply);
+        }
+
+        return AgentResult::reply($reply);
+    }
+
+    private function cmdApiQuery(string $query, AgentContext $context): string
+    {
+        $project = $this->findProjectForUser($context);
+        if (!$project) {
+            return "Aucun projet actif. Selectionne d'abord un projet.";
+        }
+
+        $baseUrl = $project->getSetting('base_url');
+        $apiKey = $project->getSetting('api_key');
+
+        // If missing base_url, ask for it
+        if (!$baseUrl) {
+            $this->setPendingContext($context, 'api_credentials', [
+                'project_id' => $project->id,
+                'missing' => 'base_url',
+                'original_query' => $query,
+            ], 10);
+            return "[{$project->name}] J'ai besoin de l'URL de base de l'API pour ce projet.\n"
+                . "Exemple: https://mon-app.com ou https://api.mon-app.com\n\n"
+                . "Envoie-moi l'URL :";
+        }
+
+        return $this->executeApiQuery($project, $query, $context);
+    }
+
+    private function executeApiQuery(Project $project, string $query, AgentContext $context): string
+    {
+        $baseUrl = rtrim($project->getSetting('base_url'), '/');
+        $apiKey = $project->getSetting('api_key');
+
+        // Step 1: Read project routes/API structure from GitLab to understand available endpoints
+        $apiStructure = $this->discoverProjectApi($project);
+
+        // Step 2: Ask Claude to determine the right API call
+        $settingsInfo = "Base URL: {$baseUrl}";
+        if ($apiKey) {
+            $settingsInfo .= "\nAPI Key: disponible (sera envoyee en header Authorization: Bearer)";
+        }
+
+        $prompt = "Tu es un assistant qui aide a interroger l'API d'un projet.\n\n"
+            . "PROJET: {$project->name}\n"
+            . "CONFIG:\n{$settingsInfo}\n\n"
+            . "STRUCTURE API DU PROJET (extraite du code source):\n{$apiStructure}\n\n"
+            . "DEMANDE DE L'UTILISATEUR: {$query}\n\n"
+            . "Determine l'appel API a faire. Reponds en JSON:\n"
+            . '{"method": "GET|POST|...", "endpoint": "/api/...", "params": {}, "needs_auth": true|false, "explanation": "..."}' . "\n\n"
+            . "Si tu ne trouves pas l'endpoint adapte, reponds:\n"
+            . '{"error": "explication du probleme"}' . "\n\n"
+            . "Si l'API necessite une cle/token et qu'on n'en a pas, reponds:\n"
+            . '{"needs_credential": "api_key", "message": "explication"}' . "\n\n"
+            . "Reponds UNIQUEMENT en JSON.";
+
+        $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $prompt);
+        $parsed = $this->parseJson($response);
+
+        if (!$parsed) {
+            return "[{$project->name}] Je n'ai pas pu determiner l'appel API. Reformule ta demande.";
+        }
+
+        // Handle missing credential
+        if (!empty($parsed['needs_credential'])) {
+            $credName = $parsed['needs_credential'];
+            $this->setPendingContext($context, 'api_credentials', [
+                'project_id' => $project->id,
+                'missing' => $credName,
+                'original_query' => $query,
+            ], 10);
+            return "[{$project->name}] " . ($parsed['message'] ?? "J'ai besoin de: {$credName}") . "\n\nEnvoie-moi la valeur :";
+        }
+
+        // Handle error
+        if (!empty($parsed['error'])) {
+            return "[{$project->name}] {$parsed['error']}";
+        }
+
+        // Step 3: Execute the API call
+        $method = strtoupper($parsed['method'] ?? 'GET');
+        $endpoint = $parsed['endpoint'] ?? '/';
+        $params = $parsed['params'] ?? [];
+        $needsAuth = $parsed['needs_auth'] ?? false;
+        $url = $baseUrl . $endpoint;
+
+        try {
+            $http = \Illuminate\Support\Facades\Http::timeout(15);
+
+            if ($needsAuth && $apiKey) {
+                $http = $http->withHeaders(['Authorization' => "Bearer {$apiKey}"]);
+            }
+
+            $httpResponse = match ($method) {
+                'POST' => $http->post($url, $params),
+                'PUT' => $http->put($url, $params),
+                'DELETE' => $http->delete($url, $params),
+                default => $http->get($url, $params),
+            };
+
+            if (!$httpResponse->successful()) {
+                // If 401/403 and no API key, ask for one
+                if (in_array($httpResponse->status(), [401, 403]) && !$apiKey) {
+                    $this->setPendingContext($context, 'api_credentials', [
+                        'project_id' => $project->id,
+                        'missing' => 'api_key',
+                        'original_query' => $query,
+                    ], 10);
+                    return "[{$project->name}] L'API repond {$httpResponse->status()} (non autorise).\n"
+                        . "Envoie-moi la cle API / token d'acces :";
+                }
+
+                return "[{$project->name}] Erreur API: HTTP {$httpResponse->status()}\n"
+                    . mb_substr($httpResponse->body(), 0, 300);
+            }
+
+            $data = $httpResponse->json();
+
+            // Step 4: Ask Claude to format the response nicely
+            $formatPrompt = "Tu es un assistant. L'utilisateur a demande: \"{$query}\"\n"
+                . "Voici la reponse de l'API (JSON):\n" . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n\n"
+                . "Formate cette reponse de maniere claire et lisible pour WhatsApp (pas de markdown complexe, utilise des listes numerotees et *gras* pour les titres).\n"
+                . "Si la reponse est longue, resume les elements principaux (max 20 items).\n"
+                . "Commence par le nom du projet entre crochets.";
+
+            $formatted = $this->claude->chat(
+                json_encode($data, JSON_UNESCAPED_UNICODE),
+                'claude-haiku-4-5-20251001',
+                $formatPrompt
+            );
+
+            return $formatted ?: "[{$project->name}] Reponse:\n" . mb_substr(json_encode($data, JSON_PRETTY_PRINT), 0, 2000);
+
+        } catch (\Exception $e) {
+            Log::warning("API query failed for {$project->name}: " . $e->getMessage());
+            return "[{$project->name}] Erreur lors de l'appel API: " . $e->getMessage();
+        }
+    }
+
+    private function discoverProjectApi(Project $project): string
+    {
+        $projectId = GitLabService::encodeProjectPath($project->gitlab_url);
+        $gitlab = $this->getGitlab();
+
+        // Try to read common API route files
+        $routeFiles = ['routes/api.php', 'routes/web.php', 'src/routes.js', 'src/router/index.js', 'app/urls.py'];
+        $apiInfo = [];
+
+        foreach ($routeFiles as $file) {
+            $content = $gitlab->readFile($projectId, $file);
+            if ($content) {
+                $decoded = base64_decode($content['content'] ?? '');
+                $apiInfo[] = "=== {$file} ===\n" . mb_substr($decoded, 0, 3000);
+            }
+        }
+
+        if (empty($apiInfo)) {
+            // Fallback: check root tree for clues
+            $tree = $gitlab->listTree($projectId);
+            if ($tree) {
+                $names = array_map(fn($t) => $t['name'], array_slice($tree, 0, 30));
+                return "Structure du projet (racine): " . implode(', ', $names) . "\n(Pas de fichier de routes standard trouve)";
+            }
+            return "(Structure API non determinee)";
+        }
+
+        return implode("\n\n", $apiInfo);
+    }
+
+    private function parseJson(?string $response): ?array
+    {
+        if (!$response) return null;
+        $clean = trim($response);
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+        return json_decode($clean, true);
+    }
+
     // ── Smart Commands Detection (LLM-based) ─────────────────────────
 
     private function detectSmartCommand(string $body): ?array
@@ -267,6 +483,7 @@ SMART COMMANDS DISPONIBLES:
 - task_history = historique des taches executees
 - rollback = annuler/revert la derniere modification
 - deploy_status = status de deploiement
+- api_query = l'utilisateur veut interroger/interagir avec l'API live du projet (lister des donnees, voir des entites, stats, etc.) — PAS modifier le code, mais CONSULTER les donnees de l'app en production (args: query = ce qu'il veut savoir)
 
 Si c'est une smart command, reponds en JSON:
 {"command": "nom_commande", "args": {"name": "nom_projet_si_mentionne", ...}}
@@ -281,6 +498,9 @@ EXEMPLES:
 - "status du projet zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
 - "les MRs ouvertes sur mon-app" → {"command": "list_mrs", "args": {"name": "mon-app"}}
 - "la CI passe ?" → {"command": "pipeline_status", "args": {}}
+- "liste les campagnes" → {"command": "api_query", "args": {"query": "lister les campagnes"}}
+- "combien de users" → {"command": "api_query", "args": {"query": "compter les utilisateurs"}}
+- "montre moi les commandes recentes" → {"command": "api_query", "args": {"query": "lister les commandes recentes"}}
 - "fix le bug du login" → {"command": null}
 - "ajoute un bouton" → {"command": null}
 
@@ -334,6 +554,7 @@ PROMPT
             'task_history' => $this->cmdTaskHistory($command['args']['name'], $context),
             'rollback' => $this->cmdRollback($context),
             'deploy_status' => $this->cmdDeployStatus($command['args']['name'], $context),
+            'api_query' => $this->cmdApiQuery($command['args']['query'] ?? $context->body, $context),
             default => "Commande non reconnue.",
         };
 

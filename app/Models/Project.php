@@ -17,6 +17,7 @@ class Project extends Model
         'requester_name',
         'allowed_phones',
         'notify_groups',
+        'settings',
         'agent_id',
         'status',
         'approved_by',
@@ -28,6 +29,7 @@ class Project extends Model
         'approved_at' => 'datetime',
         'allowed_phones' => 'array',
         'notify_groups' => 'array',
+        'settings' => 'array',
     ];
 
     public function agent(): BelongsTo
@@ -48,5 +50,17 @@ class Project extends Model
     public function latestSubAgent(): HasOne
     {
         return $this->hasOne(SubAgent::class)->latestOfMany();
+    }
+
+    public function getSetting(string $key, mixed $default = null): mixed
+    {
+        return data_get($this->settings, $key, $default);
+    }
+
+    public function setSetting(string $key, mixed $value): void
+    {
+        $settings = $this->settings ?? [];
+        data_set($settings, $key, $value);
+        $this->update(['settings' => $settings]);
     }
 }
