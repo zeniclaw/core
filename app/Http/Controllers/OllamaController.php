@@ -16,6 +16,25 @@ class OllamaController extends Controller
         return AppSetting::get('onprem_api_url');
     }
 
+    private function getOrDetectBaseUrl(): ?string
+    {
+        $url = $this->getBaseUrl();
+        if ($url) {
+            return $url;
+        }
+
+        foreach (['http://ollama:11434', 'http://localhost:11434'] as $candidate) {
+            try {
+                if (Http::timeout(3)->get($candidate . '/api/tags')->successful()) {
+                    AppSetting::set('onprem_api_url', $candidate);
+                    return $candidate;
+                }
+            } catch (\Exception $e) {}
+        }
+
+        return null;
+    }
+
     private function getHeaders(): array
     {
         $headers = ['content-type' => 'application/json'];
@@ -41,7 +60,8 @@ class OllamaController extends Controller
      */
     public function models(): JsonResponse
     {
-        $baseUrl = $this->getBaseUrl();
+        $baseUrl = $this->getOrDetectBaseUrl();
+
         if (!$baseUrl) {
             return response()->json(['error' => 'On-prem URL not configured'], 422);
         }
@@ -75,7 +95,7 @@ class OllamaController extends Controller
         $request->validate(['model' => 'required|string|max:100']);
 
         $model = $request->input('model');
-        $baseUrl = $this->getBaseUrl();
+        $baseUrl = $this->getOrDetectBaseUrl();
 
         if (!$baseUrl) {
             return response()->json(['error' => 'On-prem URL not configured'], 422);
