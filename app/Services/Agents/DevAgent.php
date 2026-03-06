@@ -532,7 +532,7 @@ Tu analyses un message envoye a un agent de developpement. Determine si c'est un
 
 SMART COMMANDS DISPONIBLES:
 - list_gitlab_projects = lister les projets, repos, "mes projets", "quels projets tu as"
-- project_info = info/status/details d'un projet specifique
+- project_info = selectionner/ouvrir/travailler sur un projet, ou voir info/status/details d'un projet specifique. Utilise cette commande quand l'utilisateur veut CHANGER de projet, switcher, bosser sur un autre projet, passer sur un autre repo.
 - list_branches = voir les branches d'un projet
 - list_mrs = voir les merge requests ouvertes
 - pipeline_status = status CI/CD, pipelines
@@ -560,6 +560,10 @@ EXEMPLES:
 - "mes repos" → {"command": "list_gitlab_projects", "args": {}}
 - "quels projets tu geres" → {"command": "list_gitlab_projects", "args": {}}
 - "status du projet zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
+- "je veux travailler sur invoices" → {"command": "project_info", "args": {"name": "invoices"}}
+- "passe sur le projet padel" → {"command": "project_info", "args": {"name": "padel"}}
+- "bosser sur ginette" → {"command": "project_info", "args": {"name": "ginette"}}
+- "switch sur zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
 - "les MRs ouvertes sur mon-app" → {"command": "list_mrs", "args": {"name": "mon-app"}}
 - "la CI passe ?" → {"command": "pipeline_status", "args": {}}
 - "liste les campagnes" → {"command": "api_query", "args": {"query": "lister les campagnes"}}
@@ -666,6 +670,9 @@ PROMPT
     {
         $project = $this->resolveProject($name, $context);
         if (is_string($project)) return $project; // error message
+
+        // Set as active project on session
+        $context->session->update(['active_project_id' => $project->id]);
 
         $projectId = GitLabService::encodeProjectPath($project->gitlab_url);
         $gitlab = $this->getGitlab();
