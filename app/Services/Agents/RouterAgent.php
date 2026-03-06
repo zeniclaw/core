@@ -9,6 +9,7 @@ use App\Services\AgentContext;
 use App\Services\Agents\SmartContextAgent;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
+use App\Services\ConversationMemoryService;
 use Illuminate\Support\Facades\Log;
 
 class RouterAgent
@@ -82,10 +83,17 @@ class RouterAgent
             $memoryContext = "\n\nMEMOIRE CONTEXTUELLE:\n" . implode("\n", $lines);
         }
 
+        // Recent conversation history for contextual routing
+        $conversationMemory = new ConversationMemoryService();
+        $recentHistory = $this->getRecentHistory($conversationMemory, $context, 5);
+
         $message = "Message: \"{$body}\"";
         if ($context->hasMedia) {
             $mime = $effectiveMimetype ?? 'unknown';
             $message .= "\n[Le message contient un media: {$mime}]";
+        }
+        if ($recentHistory) {
+            $message .= "\n\n{$recentHistory}";
         }
         if ($userContext) {
             $message .= "\n\n{$userContext}";
@@ -147,6 +155,10 @@ INTELLIGENCE CONTEXTUELLE:
 4. Le mot "projet" ne signifie PAS l'agent "project" ! "project" = UNIQUEMENT switcher de projet actif
 5. TOUT ce qui concerne lister/consulter/modifier des projets, repos, code, GitLab = dev
 6. Doute entre dev et project → TOUJOURS dev
+7. HISTORIQUE DE CONVERSATION: lis l'historique recent pour comprendre les messages courts/implicites
+   - Un numero apres une liste = selection dans la liste → meme agent que celui qui a affiche la liste
+   - "corrige X" apres avoir parle d'un projet = dev task sur ce projet
+   - Tout message qui fait reference a un echange precedent doit aller vers l'agent concerne
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -361,6 +373,26 @@ CATALOG;
     private function detectGitlabUrl(string $body): bool
     {
         return (bool) preg_match('#https?://gitlab\.[^\s]+#i', $body);
+    }
+
+    private function getRecentHistory(ConversationMemoryService $memory, AgentContext $context, int $count = 5): string
+    {
+        $data = $memory->read($context->agent->id, $context->from);
+        $entries = $data['entries'] ?? [];
+
+        if (empty($entries)) return '';
+
+        $recent = array_slice($entries, -$count);
+        $lines = ['HISTORIQUE RECENT:'];
+        foreach ($recent as $entry) {
+            $msg = mb_substr($entry['sender_message'] ?? '', 0, 150);
+            $reply = mb_substr($entry['agent_reply'] ?? '', 0, 200);
+            $lines[] = "User: {$msg}";
+            $lines[] = "ZeniClaw: {$reply}";
+            $lines[] = "";
+        }
+
+        return implode("\n", $lines);
     }
 
     private function isAudioMessage(?string $mimetype): bool

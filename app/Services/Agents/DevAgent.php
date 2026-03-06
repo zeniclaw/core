@@ -87,7 +87,14 @@ class DevAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
-        // Handle task awaiting validation first
+        // Check pending context first (list selection, ambiguous project, etc.)
+        $pendingCtx = $context->session->pending_agent_context;
+        if ($pendingCtx && ($pendingCtx['agent'] ?? '') === 'dev') {
+            $result = $this->handlePendingContext($context, $pendingCtx);
+            if ($result) return $result;
+        }
+
+        // Handle task awaiting validation
         $awaitingProject = Project::where('status', 'awaiting_validation')
             ->where('requester_phone', $context->from)
             ->orderByDesc('created_at')
