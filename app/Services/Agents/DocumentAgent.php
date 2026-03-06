@@ -132,6 +132,12 @@ PROMPT;
 
         try {
             $response = $this->claude->chat($message, $model, $systemPrompt);
+
+            if (!$response) {
+                $this->sendText($context->from, "Erreur: pas de reponse du modele LLM. Verifie que le modele est disponible.");
+                return AgentResult::reply("LLM returned null");
+            }
+
             $spec = $this->parseJson($response);
 
             if (!$spec || !isset($spec['format'])) {
@@ -437,8 +443,12 @@ HTML;
         return $path;
     }
 
-    private function parseJson(string $response): ?array
+    private function parseJson(?string $response): ?array
     {
+        if (!$response) {
+            return null;
+        }
+
         // Extract JSON from response (may be wrapped in markdown code blocks)
         if (preg_match('/```(?:json)?\s*\n?(.*?)\n?```/s', $response, $m)) {
             $response = $m[1];
