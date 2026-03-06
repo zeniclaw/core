@@ -181,6 +181,10 @@ function dashboardChat() {
 
                 if (data.ok) {
                     this.messages.push({ role: 'assistant', text: data.reply, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                    // If a SubAgent was dispatched, poll for completion
+                    if (data.sub_agent_id) {
+                        this.pollSubAgent(data.sub_agent_id);
+                    }
                 } else {
                     this.messages.push({ role: 'assistant', text: '\u26a0 ' + (data.error || 'Something went wrong'), time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
                 }
@@ -190,6 +194,25 @@ function dashboardChat() {
 
             this.loading = false;
             this.$nextTick(() => { this.scrollBottom(); this.$refs.chatInput?.focus(); });
+        },
+
+        async pollSubAgent(id) {
+            const poll = async () => {
+                try {
+                    const res = await fetch(`/api/subagent/${id}/status`);
+                    const data = await res.json();
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        const text = data.status === 'completed'
+                            ? (data.log_tail || 'Tache terminee.')
+                            : '⚠ Erreur: ' + (data.error || 'La tache a echoue.');
+                        this.messages.push({ role: 'assistant', text, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                        this.$nextTick(() => this.scrollBottom());
+                        return;
+                    }
+                    setTimeout(poll, 5000);
+                } catch (e) { setTimeout(poll, 10000); }
+            };
+            setTimeout(poll, 5000);
         },
 
         scrollBottom() {

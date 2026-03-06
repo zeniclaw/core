@@ -44,6 +44,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Web chat API
     Route::post('/api/chat', [ChannelController::class, 'webChat'])->name('api.chat');
+    Route::get('/api/subagent/{id}/status', [ChannelController::class, 'subAgentStatus'])->name('api.subagent.status');
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 

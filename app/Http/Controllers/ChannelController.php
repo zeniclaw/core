@@ -270,10 +270,27 @@ class ChannelController extends Controller
                 'reply' => $result->reply ?? 'No response',
                 'action' => $result->action,
                 'agent' => $agent->name,
+                'sub_agent_id' => $result->metadata['sub_agent_id'] ?? null,
             ]);
         } catch (\Exception $e) {
             Log::error('Web chat error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Poll SubAgent status for web chat async updates.
+     */
+    public function subAgentStatus(Request $request, int $id): JsonResponse
+    {
+        $subAgent = \App\Models\SubAgent::findOrFail($id);
+
+        return response()->json([
+            'id' => $subAgent->id,
+            'status' => $subAgent->status,
+            'log_tail' => mb_substr($subAgent->execution_log ?? '', -500),
+            'error' => $subAgent->error_message,
+            'completed_at' => $subAgent->completed_at?->toIso8601String(),
+        ]);
     }
 }
