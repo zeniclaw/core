@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Reminder;
 use App\Models\Todo;
 use App\Services\AgentContext;
@@ -80,7 +81,7 @@ class TodoAgent extends BaseAgent
         $contextHint = $contextMemory ? "\n\n{$contextMemory}" : '';
 
         $response = $this->claude->chat(
-            "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now('Europe/Paris')->format('Y-m-d H:i (l)') . $contextHint,
+            "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now(AppSetting::timezone())->format('Y-m-d H:i (l)') . $contextHint,
             'claude-haiku-4-5-20251001',
             $this->buildPrompt()
         );
@@ -116,7 +117,7 @@ class TodoAgent extends BaseAgent
 
                     if ($dueAt) {
                         try {
-                            $todoData['due_at'] = Carbon::parse($dueAt, 'Europe/Paris')->utc();
+                            $todoData['due_at'] = Carbon::parse($dueAt, AppSetting::timezone())->utc();
                         } catch (\Exception $e) {
                             // Ignore invalid date
                         }
@@ -477,8 +478,8 @@ PROMPT;
 
     private function formatDueDate(Todo $todo): string
     {
-        $now = now('Europe/Paris');
-        $due = $todo->due_at->copy()->timezone('Europe/Paris');
+        $now = now(AppSetting::timezone());
+        $due = $todo->due_at->copy()->timezone(AppSetting::timezone());
 
         $dayNames = [
             'Monday' => 'lun.',
@@ -618,7 +619,7 @@ PROMPT;
 
     private function createRecurringReminder(AgentContext $context, string $title, string $recurrence): ?Reminder
     {
-        $nextAt = $this->getNextOccurrence($recurrence, now('Europe/Paris'));
+        $nextAt = $this->getNextOccurrence($recurrence, now(AppSetting::timezone()));
         if (!$nextAt) {
             return null;
         }

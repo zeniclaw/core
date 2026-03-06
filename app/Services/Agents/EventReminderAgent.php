@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\EventReminder;
 use App\Services\AgentContext;
 use Illuminate\Support\Carbon;
@@ -79,10 +80,10 @@ class EventReminderAgent extends BaseAgent
     private function handleNaturalLanguage(AgentContext $context, string $body): AgentResult
     {
         $model = $this->resolveModel($context);
-        $now = Carbon::now('Europe/Paris');
+        $now = Carbon::now(AppSetting::timezone());
 
         $response = $this->claude->chat(
-            "Message utilisateur: \"{$body}\"\nDate/heure actuelle: {$now->format('Y-m-d H:i')} (Europe/Paris)\nJour: {$now->translatedFormat('l')}",
+            "Message utilisateur: \"{$body}\"\nDate/heure actuelle: {$now->format('Y-m-d H:i')} (" . AppSetting::timezone() . ")\nJour: {$now->translatedFormat('l')}",
             $model,
             "Tu es un assistant de gestion d'evenements. Analyse le message et reponds UNIQUEMENT en JSON.\n\n"
             . "Format JSON attendu:\n"

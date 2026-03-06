@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AppSetting;
 use App\Models\Habit;
 use App\Models\HabitLog;
 use Illuminate\Console\Command;
@@ -18,8 +19,8 @@ class SendHabitReminders extends Command
 
     public function handle(): void
     {
-        $today = now('Europe/Paris')->toDateString();
-        $dayOfWeek = now('Europe/Paris')->dayOfWeekIso; // 1=Monday, 7=Sunday
+        $today = now(AppSetting::timezone())->toDateString();
+        $dayOfWeek = now(AppSetting::timezone())->dayOfWeekIso; // 1=Monday, 7=Sunday
 
         $habits = Habit::whereNull('deleted_at')->get();
 

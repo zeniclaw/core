@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\AppSetting;
 use App\Models\EventReminder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -26,7 +27,7 @@ class ProcessEventRemindersJob implements ShouldQueue
 
     public function handle(): void
     {
-        $now = Carbon::now('Europe/Paris');
+        $now = Carbon::now(AppSetting::timezone());
 
         $events = EventReminder::where('status', 'active')
             ->where('event_date', '>=', $now->toDateString())

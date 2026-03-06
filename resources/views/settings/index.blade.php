@@ -28,6 +28,30 @@
         </div>
     </div>
 
+    {{-- Timezone --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-1">🕐 Fuseau horaire</h2>
+        <p class="text-sm text-gray-500 mb-4">Fuseau horaire utilise pour les rappels, todos, habitudes et toutes les heures affichees.</p>
+
+        <form method="POST" action="{{ route('settings.timezone') }}" class="flex items-end gap-3">
+            @csrf
+            <div class="flex-1">
+                <label for="app_timezone" class="block text-sm font-medium text-gray-700 mb-1">Fuseau horaire</label>
+                <select name="app_timezone" id="app_timezone"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                    @foreach(timezone_identifiers_list() as $tz)
+                        <option value="{{ $tz }}" {{ $appTimezone === $tz ? 'selected' : '' }}>{{ $tz }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                Sauvegarder
+            </button>
+        </form>
+
+        <p class="text-xs text-gray-400 mt-2">Actuellement : <strong>{{ $appTimezone }}</strong> — {{ now($appTimezone)->format('d/m/Y H:i') }}</p>
+    </div>
+
     {{-- Change Password --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-4">🔒 Changer le mot de passe</h2>

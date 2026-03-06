@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AgentLog;
+use App\Models\AppSetting;
 use App\Models\Reminder;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -40,7 +41,7 @@ class ProcessReminders extends Command
             ]);
 
             if ($reminder->recurrence_rule) {
-                $nextAt = $this->getNextOccurrence($reminder->recurrence_rule, now('Europe/Paris'));
+                $nextAt = $this->getNextOccurrence($reminder->recurrence_rule, now(AppSetting::timezone()));
                 if ($nextAt) {
                     $reminder->update([
                         'scheduled_at' => $nextAt->utc(),

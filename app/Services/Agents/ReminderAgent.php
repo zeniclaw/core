@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Reminder;
 use App\Services\AgentContext;
 use Carbon\Carbon;
@@ -57,10 +58,10 @@ class ReminderAgent extends BaseAgent
             ->get();
 
         $listText = $this->formatReminderList($reminders);
-        $now = now('Europe/Paris')->format('Y-m-d H:i (l)');
+        $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
 
         $response = $this->claude->chat(
-            "Date et heure actuelles (heure de Paris): {$now}\nMessage: \"{$context->body}\"\n\nRappels actifs:\n{$listText}",
+            "Date et heure actuelles (" . AppSetting::timezone() . "): {$now}\nMessage: \"{$context->body}\"\n\nRappels actifs:\n{$listText}",
             'claude-haiku-4-5-20251001',
             $this->buildPrompt()
         );
@@ -168,7 +169,7 @@ PROMPT;
         }
 
         try {
-            $scheduledAt = Carbon::parse($parsed['scheduled_at'], 'Europe/Paris')->utc();
+            $scheduledAt = Carbon::parse($parsed['scheduled_at'], AppSetting::timezone())->utc();
         } catch (\Exception $e) {
             $reply = "J'ai pas reussi a comprendre la date/heure. Precise un peu plus ?";
             $this->sendText($context->from, $reply);
@@ -186,7 +187,7 @@ PROMPT;
             'status' => 'pending',
         ]);
 
-        $parisTime = $scheduledAt->copy()->setTimezone('Europe/Paris');
+        $parisTime = $scheduledAt->copy()->setTimezone(AppSetting::timezone());
         $recurrenceText = '';
         if (!empty($parsed['recurrence'])) {
             $recurrenceText = "\nRecurrence : " . $this->formatRecurrenceHuman($parsed['recurrence']);
@@ -290,7 +291,7 @@ PROMPT;
 
         $reminder->update(['scheduled_at' => $newScheduledAt->utc()]);
 
-        $parisTime = $newScheduledAt->copy()->setTimezone('Europe/Paris');
+        $parisTime = $newScheduledAt->copy()->setTimezone(AppSetting::timezone());
         $reply = "Rappel reporte !\n"
             . "{$reminder->message}\n"
             . "Nouveau : le {$parisTime->format('d/m/Y')} a {$parisTime->format('H:i')}";
@@ -307,7 +308,7 @@ PROMPT;
     private function parseNewTime(string $expr, Carbon $currentScheduledAt): ?Carbon
     {
         $expr = trim($expr);
-        $now = now('Europe/Paris');
+        $now = now(AppSetting::timezone());
 
         // Relative: +Xmin, +Xh, +Xj
         if (preg_match('/^\+(\d+)\s*(min|h|j)$/i', $expr, $m)) {
@@ -330,14 +331,14 @@ PROMPT;
 
         // "demain" alone — keep same time
         if (strtolower($expr) === 'demain') {
-            $currentParis = $currentScheduledAt->copy()->setTimezone('Europe/Paris');
+            $currentParis = $currentScheduledAt->copy()->setTimezone(AppSetting::timezone());
             return $now->copy()->addDay()->setTime($currentParis->hour, $currentParis->minute, 0);
         }
 
         // Absolute YYYY-MM-DD HH:MM
         if (preg_match('/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/', $expr)) {
             try {
-                return Carbon::parse($expr, 'Europe/Paris');
+                return Carbon::parse($expr, AppSetting::timezone());
             } catch (\Exception $e) {
                 return null;
             }
@@ -351,11 +352,11 @@ PROMPT;
      */
     private function formatAgendaView($reminders): string
     {
-        $today = now('Europe/Paris')->startOfDay();
+        $today = now(AppSetting::timezone())->startOfDay();
         $grouped = [];
 
         foreach ($reminders as $i => $reminder) {
-            $parisTime = $reminder->scheduled_at->copy()->setTimezone('Europe/Paris');
+            $parisTime = $reminder->scheduled_at->copy()->setTimezone(AppSetting::timezone());
             $dayKey = $parisTime->format('Y-m-d');
 
             if (!isset($grouped[$dayKey])) {
@@ -457,7 +458,7 @@ PROMPT;
         $lines = [];
         foreach ($reminders->values() as $i => $reminder) {
             $num = $i + 1;
-            $parisTime = $reminder->scheduled_at->copy()->setTimezone('Europe/Paris');
+            $parisTime = $reminder->scheduled_at->copy()->setTimezone(AppSetting::timezone());
             $recText = $reminder->recurrence_rule ? " [recurrent: {$reminder->recurrence_rule}]" : '';
             $lines[] = "#{$num} {$parisTime->format('Y-m-d H:i')} — {$reminder->message}{$recText}";
         }

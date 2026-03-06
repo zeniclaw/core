@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\MoodLog;
 use App\Services\AgentContext;
 use Illuminate\Support\Carbon;
@@ -91,7 +92,7 @@ class MoodCheckAgent extends BaseAgent
         ]);
 
         // Get context for recommendations
-        $hour = (int) Carbon::now('Europe/Paris')->format('H');
+        $hour = (int) Carbon::now(AppSetting::timezone())->format('H');
         $trend = MoodLog::getDailyTrend($context->from, 7);
         $lowEnergyHours = MoodLog::detectLowEnergyHours($context->from);
 
@@ -243,7 +244,7 @@ PROMPT;
     {
         $msg = "L'utilisateur {$senderName} rapporte son humeur:\n";
         $msg .= "- Niveau: {$moodData['level']}/5 ({$moodData['label']})\n";
-        $msg .= "- Heure actuelle: {$hour}h (Europe/Paris)\n";
+        $msg .= "- Heure actuelle: {$hour}h (" . AppSetting::timezone() . ")\n";
 
         if ($trendSummary) {
             $msg .= "\nTENDANCE RECENTE:\n{$trendSummary}\n";

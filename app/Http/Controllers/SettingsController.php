@@ -15,8 +15,9 @@ class SettingsController extends Controller
         $hasGitlabToken = AppSetting::has('gitlab_access_token');
         $adminWhatsappPhone = AppSetting::get('admin_whatsapp_phone');
         $autoUpdateEnabled = AppSetting::get('auto_update_enabled') !== 'false';
+        $appTimezone = AppSetting::timezone();
         $tokens = $user->tokens()->latest()->get();
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'autoUpdateEnabled', 'tokens'));
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -51,6 +52,17 @@ class SettingsController extends Controller
         }
 
         return redirect()->route('settings.index')->with('success', 'Parametres GitLab sauvegardes.');
+    }
+
+    public function saveTimezone(Request $request)
+    {
+        $request->validate([
+            'app_timezone' => 'required|string|timezone',
+        ]);
+
+        AppSetting::set('app_timezone', $request->app_timezone);
+
+        return redirect()->route('settings.index')->with('success', 'Fuseau horaire mis à jour : ' . $request->app_timezone);
     }
 
     public function toggleAutoUpdate()

@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Project;
 use App\Models\Reminder;
 use App\Models\Todo;
@@ -344,7 +345,7 @@ CATALOG;
         if ($reminders->isNotEmpty()) {
             $lines = ['REMINDERS EN ATTENTE:'];
             foreach ($reminders as $r) {
-                $at = $r->scheduled_at->setTimezone('Europe/Paris')->format('d/m H:i');
+                $at = $r->scheduled_at->setTimezone(AppSetting::timezone())->format('d/m H:i');
                 $recurrence = $r->recurrence_rule ? " (recurrent: {$r->recurrence_rule})" : '';
                 $lines[] = "  - {$r->message} → {$at}{$recurrence}";
             }
