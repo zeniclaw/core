@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\UserKnowledge;
 use App\Services\AgentContext;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -123,11 +124,13 @@ IMPORTANT:
 - Pour les factures: inclus TVA, totaux, etc.
 - Pour les CV: structure professionnelle
 - filename sans extension (elle sera ajoutee)
-- Si l'utilisateur fait reference a des donnees d'un echange precedent (ex: "cette liste", "ces clients"), utilise les donnees EXACTES de l'historique de conversation fourni. Ne les invente pas.
-- Extrait et structure toutes les donnees disponibles dans l'historique pour les inclure dans le document
+- Si des DONNEES STRUCTUREES sont fournies, utilise-les en PRIORITE. Ce sont les vraies donnees brutes (API, base de donnees). Inclus TOUTES les entrees, pas un resume.
+- Si l'utilisateur fait reference a "cette liste", "ces clients", etc., cherche dans les donnees structurees d'abord, puis dans l'historique.
+- N'invente JAMAIS de donnees. Utilise uniquement ce qui est fourni.
 PROMPT;
 
         $userContext = $this->formatContextMemoryForPrompt($context->from);
+        $knowledgeData = $this->getStoredKnowledge($context);
         $conversationHistory = $this->getRecentConversationHistory($context);
         $message = $context->body;
 
@@ -135,8 +138,11 @@ PROMPT;
         if ($userContext) {
             $preamble .= "{$userContext}\n\n";
         }
+        if ($knowledgeData) {
+            $preamble .= "DONNEES STRUCTUREES DISPONIBLES (donnees brutes API/stockees — utilise-les en priorite):\n{$knowledgeData}\n\n";
+        }
         if ($conversationHistory) {
-            $preamble .= "HISTORIQUE RECENT DE LA CONVERSATION (utilise ces donnees si l'utilisateur y fait reference):\n{$conversationHistory}\n\n";
+            $preamble .= "HISTORIQUE RECENT DE LA CONVERSATION:\n{$conversationHistory}\n\n";
         }
         if ($preamble) {
             $message = "{$preamble}Demande: {$message}";
@@ -458,6 +464,31 @@ HTML;
         $writer->save($path);
 
         return $path;
+    }
+
+    /**
+     * Get stored structured data (UserKnowledge) — raw API data from other agents.
+     * This is the primary data source for document generation.
+     */
+    private function getStoredKnowledge(AgentContext $context): string
+    {
+        $entries = UserKnowledge::allFor($context->from);
+
+        if ($entries->isEmpty()) {
+            return '';
+        }
+
+        $lines = [];
+        foreach ($entries->take(10) as $entry) {
+            $label = $entry->label ?? $entry->topic_key;
+            $source = $entry->source ? " (source: {$entry->source})" : '';
+            $dataJson = json_encode($entry->data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            // Limit each entry to avoid blowing up the prompt
+            $dataJson = mb_substr($dataJson, 0, 4000);
+            $lines[] = "--- [{$entry->topic_key}] {$label}{$source} ---\n{$dataJson}";
+        }
+
+        return implode("\n\n", $lines);
     }
 
     /**
