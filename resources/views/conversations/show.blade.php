@@ -75,8 +75,11 @@
                     @if(!empty($msg['body']))
                     <p class="text-sm whitespace-pre-wrap">{{ $msg['body'] }}</p>
                     @endif
-                    <p class="text-xs mt-1 {{ $msg['direction'] === 'out' ? 'text-indigo-300' : 'text-gray-400' }}">
-                        {{ $msg['timestamp']->format('d/m H:i') }}
+                    <p class="text-xs mt-1 {{ $msg['direction'] === 'out' ? 'text-indigo-300' : 'text-gray-400' }} flex items-center gap-2">
+                        <span>{{ $msg['timestamp']->format('d/m H:i') }}</span>
+                        @if(!empty($msg['model']))
+                            <span class="px-1.5 py-0.5 rounded {{ $msg['direction'] === 'out' ? 'bg-indigo-500/30 text-indigo-200' : 'bg-gray-200 text-gray-500' }} text-[10px] font-mono">{{ $msg['model'] }}</span>
+                        @endif
                     </p>
                 </div>
             </div>

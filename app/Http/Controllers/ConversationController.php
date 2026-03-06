@@ -43,11 +43,16 @@ class ConversationController extends Controller
         $conversation->load('agent');
 
         // Get messages from AgentLog for this peer
+        // Incoming: "WhatsApp message received" with context->payload->from = peer_id
+        // Outgoing: "Reply sent" logs with context->from = peer_id
         $messages = AgentLog::where('agent_id', $conversation->agent_id)
             ->where('level', 'info')
             ->where(function ($q) use ($conversation) {
                 $q->where('context->payload->from', $conversation->peer_id)
-                  ->orWhere('context->to', $conversation->peer_id);
+                  ->orWhere(function ($q2) use ($conversation) {
+                      $q2->where('context->from', $conversation->peer_id)
+                          ->where('message', 'like', '%Reply sent%');
+                  });
             })
             ->orderBy('created_at')
             ->get()
@@ -61,6 +66,11 @@ class ConversationController extends Controller
                 $mediaUrl = $media['url'] ?? null;
                 $mimetype = $media['mimetype'] ?? null;
 
+                $model = null;
+                if (!$isIncoming) {
+                    $model = $context['model'] ?? null;
+                }
+
                 return [
                     'direction' => $isIncoming ? 'in' : 'out',
                     'body' => $isIncoming
@@ -73,6 +83,7 @@ class ConversationController extends Controller
                     'has_media' => $isIncoming && $hasMedia,
                     'media_url' => $isIncoming ? $mediaUrl : null,
                     'media_type' => $isIncoming ? $mimetype : null,
+                    'model' => $model,
                 ];
             })
             ->filter(fn ($m) => !empty($m['body']) || $m['has_media']);
