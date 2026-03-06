@@ -291,85 +291,165 @@ class DevAgent extends BaseAgent
     }
 
     /**
-     * Fully Claude-driven API agent. Claude reads the project code, the stored settings,
-     * and decides autonomously what to do: ask questions, make API calls, store info.
+     * Agentic API loop — Claude makes multiple API calls, accumulates data,
+     * and decides when it has enough to answer. Max 10 iterations.
      */
     private function runApiAgent(Project $project, string $query, array $conversation, AgentContext $context): string
     {
-        // Gather everything Claude needs
         $projectCode = $this->discoverProjectApi($project);
-        $storedSettings = $project->settings ?? [];
-        $settingsJson = !empty($storedSettings) ? json_encode($storedSettings, JSON_UNESCAPED_UNICODE) : '(aucun)';
+        $collectedData = [];
+        $maxIterations = 10;
 
-        $conversationText = '';
-        foreach ($conversation as $msg) {
-            $role = $msg['role'] === 'user' ? 'UTILISATEUR' : 'ASSISTANT';
-            $conversationText .= "{$role}: {$msg['content']}\n";
-        }
+        for ($i = 0; $i < $maxIterations; $i++) {
+            // Refresh settings each iteration (may have been updated by store)
+            $project->refresh();
+            $storedSettings = $project->settings ?? [];
+            $settingsJson = !empty($storedSettings) ? json_encode($storedSettings, JSON_UNESCAPED_UNICODE) : '(aucun)';
 
-        $systemPrompt = <<<PROMPT
-Tu es un agent API qui AGIT. Tu ne poses des questions qu'en DERNIER RECOURS.
+            $conversationText = '';
+            foreach ($conversation as $msg) {
+                $role = $msg['role'] === 'user' ? 'UTILISATEUR' : 'ASSISTANT';
+                $conversationText .= "{$role}: {$msg['content']}\n";
+            }
+
+            $collectedText = '';
+            if (!empty($collectedData)) {
+                $collectedText = "\n\nDONNEES DEJA COLLECTEES (appels precedents):\n";
+                foreach ($collectedData as $j => $cd) {
+                    $collectedText .= "--- Appel " . ($j + 1) . ": {$cd['method']} {$cd['url']} ---\n";
+                    $collectedText .= mb_substr($cd['response'], 0, 2000) . "\n\n";
+                }
+            }
+
+            $systemPrompt = <<<PROMPT
+Tu es un agent API autonome. Tu fais PLUSIEURS appels si necessaire pour repondre completement.
 
 PROJET: {$project->name}
-GITLAB: {$project->gitlab_url}
-
-CONFIGURATION DEJA STOCKEE:
-{$settingsJson}
-
-CODE SOURCE (routes/endpoints):
-{$projectCode}
-
-CONVERSATION:
-{$conversationText}
-
+CONFIGURATION STOCKEE: {$settingsJson}
+CODE SOURCE (routes): {$projectCode}
+CONVERSATION: {$conversationText}
 DEMANDE: {$query}
+{$collectedText}
+ITERATION: {$i} sur {$maxIterations}
 
-REGLE #1 — EXTRAIRE ET STOCKER: Si le message contient des infos utiles (URL, cle API, token, identifiant...), TOUJOURS les inclure dans "store" pour les sauvegarder. Cherche dans le message ET la conversation: URLs (https://...), cles API (pk_..., sk_..., Bearer ..., longues chaines alphanumeriques), identifiants.
+ACTIONS (reponds en JSON):
 
-REGLE #2 — AGIR: Si tu as une URL + un endpoint + les infos d'auth necessaires → fais l'appel API. Ne pose PAS de question si tu peux deviner ou deduire l'info du code source.
+A) APPEL API — Fais un appel pour collecter des donnees:
+{"action": "call", "store": {}, "method": "GET", "url": "https://...", "headers": {}, "params": {}, "explanation": "pourquoi cet appel"}
 
-REGLE #3 — DEDUIRE: Analyse le code source pour comprendre le mecanisme d'auth (middleware, headers, etc.) et construire l'appel. Si le code montre ApiKeyAuth → utilise le header adapte. Si Bearer → Authorization: Bearer. Si query param → ?api_key=xxx.
+B) REPONSE FINALE — Tu as ASSEZ de donnees pour repondre completement:
+{"action": "reply", "store": {}, "message": "ta reponse complete et formatee"}
 
-Reponds en JSON avec UNE action:
+C) QUESTION — DERNIER RECOURS, info impossible a deduire:
+{"action": "ask", "store": {}, "message": "question", "save_as": "setting_name"}
 
-A) APPEL API — Tu as assez d'infos:
-{"action": "call", "store": {"cle": "valeur", ...}, "method": "GET", "url": "https://...", "headers": {}, "params": {}, "explanation": "..."}
-
-B) QUESTION — Tu manques d'une info IMPOSSIBLE a deduire (dernier recours):
-{"action": "ask", "store": {"cle": "valeur", ...}, "message": "question precise", "save_as": "nom_setting"}
-
-C) REPONSE — Pas besoin d'appel API:
-{"action": "reply", "store": {"cle": "valeur", ...}, "message": "reponse"}
-
-Le champ "store" est OPTIONNEL mais UTILISE-LE des que tu detectes une info a sauvegarder. Les valeurs stockees seront disponibles dans CONFIGURATION DEJA STOCKEE aux prochains appels.
+REGLES CRITIQUES:
+1. EXTRAIRE ET STOCKER: Si le message/conversation contient URL, cle API, token → mets dans "store"
+2. AGIR: Ne pose JAMAIS de question si tu peux deduire du code source ou des settings
+3. ENCHAINER: Si tu as besoin de plusieurs endpoints (ex: d'abord les projets, puis les factures par projet), fais-les un par un. Tu reverras les resultats a chaque iteration.
+4. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
+5. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
+6. REPONSE FINALE: Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}].
 
 JSON UNIQUEMENT.
 PROMPT;
 
-        $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $systemPrompt);
-        $parsed = $this->parseJson($response);
+            $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $systemPrompt);
+            $parsed = $this->parseJson($response);
 
-        if (!$parsed || empty($parsed['action'])) {
-            return "[{$project->name}] Je n'ai pas reussi a analyser ce projet. Reformule ta demande.";
-        }
+            if (!$parsed || empty($parsed['action'])) {
+                return "[{$project->name}] Erreur d'analyse. Reformule ta demande.";
+            }
 
-        // Always store any extracted info
-        $toStore = $parsed['store'] ?? [];
-        if (!empty($toStore) && is_array($toStore)) {
-            foreach ($toStore as $key => $value) {
-                if ($key && $value) {
-                    $project->setSetting($key, $value);
+            // Store extracted info
+            $toStore = $parsed['store'] ?? [];
+            if (!empty($toStore) && is_array($toStore)) {
+                foreach ($toStore as $key => $value) {
+                    if ($key && $value) $project->setSetting($key, $value);
                 }
             }
-            $this->log($context, 'API agent stored settings', ['project' => $project->name, 'keys' => array_keys($toStore)]);
+
+            // Handle action
+            if ($parsed['action'] === 'reply') {
+                return ($parsed['message'] ?? '');
+            }
+
+            if ($parsed['action'] === 'ask') {
+                return $this->handleApiAsk($project, $parsed, $query, $conversation, $context);
+            }
+
+            if ($parsed['action'] === 'call') {
+                $callResult = $this->executeRawApiCall($parsed);
+                $collectedData[] = [
+                    'method' => $parsed['method'] ?? 'GET',
+                    'url' => $parsed['url'] ?? '',
+                    'status' => $callResult['status'],
+                    'response' => $callResult['body'],
+                ];
+
+                // Auto-store base_url on first successful call
+                if ($callResult['status'] >= 200 && $callResult['status'] < 300) {
+                    $parsedUrl = parse_url($parsed['url'] ?? '');
+                    $baseUrl = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '');
+                    if ($baseUrl && !$project->getSetting('base_url')) {
+                        $project->setSetting('base_url', $baseUrl);
+                    }
+                }
+
+                // If auth error, let Claude handle it in next iteration
+                // (it will see the 401 in collected data and decide to ask or fix)
+            }
         }
 
-        return match ($parsed['action']) {
-            'ask' => $this->handleApiAsk($project, $parsed, $query, $conversation, $context),
-            'call' => $this->handleApiCall($project, $parsed, $query, $context),
-            'reply' => "[{$project->name}] " . ($parsed['message'] ?? ''),
-            default => "[{$project->name}] Action non reconnue.",
-        };
+        // Max iterations reached — ask Claude to summarize what it has
+        return $this->finalizeApiResponse($project, $query, $collectedData);
+    }
+
+    private function executeRawApiCall(array $parsed): array
+    {
+        $method = strtoupper($parsed['method'] ?? 'GET');
+        $url = $parsed['url'] ?? '';
+        $headers = $parsed['headers'] ?? [];
+        $params = $parsed['params'] ?? [];
+
+        if (!$url) return ['status' => 0, 'body' => 'No URL'];
+
+        try {
+            $http = \Illuminate\Support\Facades\Http::timeout(15)->withHeaders($headers);
+            $httpResponse = match ($method) {
+                'POST' => $http->post($url, $params),
+                'PUT' => $http->put($url, $params),
+                'DELETE' => $http->delete($url, $params),
+                default => empty($params) ? $http->get($url) : $http->get($url, $params),
+            };
+
+            return [
+                'status' => $httpResponse->status(),
+                'body' => mb_substr($httpResponse->body(), 0, 5000),
+            ];
+        } catch (\Exception $e) {
+            return ['status' => 0, 'body' => 'Error: ' . $e->getMessage()];
+        }
+    }
+
+    private function finalizeApiResponse(Project $project, string $query, array $collectedData): string
+    {
+        $dataText = '';
+        foreach ($collectedData as $j => $cd) {
+            $dataText .= "Appel " . ($j + 1) . ": {$cd['method']} {$cd['url']} (HTTP {$cd['status']})\n";
+            $dataText .= mb_substr($cd['response'], 0, 3000) . "\n\n";
+        }
+
+        $response = $this->claude->chat(
+            "Donnees collectees:\n{$dataText}",
+            'claude-sonnet-4-20250514',
+            "L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n"
+            . "Voici toutes les donnees collectees via API. Fais une analyse complete:\n"
+            . "- Resume, totaux, tendances\n- Alertes ou anomalies\n- Recommandations\n"
+            . "Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}]."
+        );
+
+        return $response ?: "[{$project->name}] Donnees collectees mais analyse impossible.";
     }
 
     private function handleApiAsk(Project $project, array $parsed, string $query, array $conversation, AgentContext $context): string
@@ -387,88 +467,6 @@ PROMPT;
         ], 10, true);
 
         return "[{$project->name}] {$message}";
-    }
-
-    private function handleApiCall(Project $project, array $parsed, string $query, AgentContext $context): string
-    {
-        $method = strtoupper($parsed['method'] ?? 'GET');
-        $url = $parsed['url'] ?? '';
-        $headers = $parsed['headers'] ?? [];
-        $params = $parsed['params'] ?? [];
-
-        if (!$url) {
-            return "[{$project->name}] Pas d'URL determinee pour cet appel.";
-        }
-
-        try {
-            $http = \Illuminate\Support\Facades\Http::timeout(15)->withHeaders($headers);
-
-            $httpResponse = match ($method) {
-                'POST' => $http->post($url, $params),
-                'PUT' => $http->put($url, $params),
-                'DELETE' => $http->delete($url, $params),
-                default => empty($params) ? $http->get($url) : $http->get($url, $params),
-            };
-
-            $status = $httpResponse->status();
-            $body = $httpResponse->body();
-
-            if (!$httpResponse->successful()) {
-                // Let Claude figure out what went wrong and what to ask
-                $errorPrompt = "L'appel API a echoue.\n"
-                    . "URL: {$method} {$url}\n"
-                    . "Status: {$status}\n"
-                    . "Response: " . mb_substr($body, 0, 500) . "\n\n"
-                    . "Explique le probleme a l'utilisateur de maniere claire.\n"
-                    . "Si c'est un probleme d'auth (401/403), propose-lui de fournir les credentials necessaires.\n"
-                    . "Commence par [{$project->name}].";
-
-                $errorReply = $this->claude->chat($body, 'claude-haiku-4-5-20251001', $errorPrompt);
-
-                // If auth error, set pending context to ask for credentials
-                if (in_array($status, [401, 403])) {
-                    $this->setPendingContext($context, 'api_followup', [
-                        'project_id' => $project->id,
-                        'original_query' => $query,
-                        'conversation' => [
-                            ['role' => 'assistant', 'content' => $errorReply],
-                        ],
-                        'save_as' => 'api_token',
-                    ], 10, true);
-                }
-
-                return $errorReply ?: "[{$project->name}] Erreur API: HTTP {$status}";
-            }
-
-            $data = $httpResponse->json() ?? $body;
-
-            // Store successful URL pattern in settings for future use
-            $parsedUrl = parse_url($url);
-            $baseUrl = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '') . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
-            if ($baseUrl && !$project->getSetting('base_url')) {
-                $project->setSetting('base_url', $baseUrl);
-            }
-
-            // Format response with Claude
-            $formatPrompt = "L'utilisateur a demande: \"{$query}\"\n"
-                . "Voici la reponse de l'API ({$method} {$url}):\n"
-                . (is_array($data) ? json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : mb_substr($body, 0, 3000)) . "\n\n"
-                . "Formate cette reponse de maniere claire et lisible (listes numerotees, *gras* pour les titres).\n"
-                . "Si la reponse est longue, resume les elements principaux (max 20 items).\n"
-                . "Commence par [{$project->name}].";
-
-            $formatted = $this->claude->chat(
-                is_array($data) ? json_encode($data, JSON_UNESCAPED_UNICODE) : $body,
-                'claude-haiku-4-5-20251001',
-                $formatPrompt
-            );
-
-            return $formatted ?: "[{$project->name}] Reponse:\n" . mb_substr(is_array($data) ? json_encode($data, JSON_PRETTY_PRINT) : $body, 0, 2000);
-
-        } catch (\Exception $e) {
-            Log::warning("API query failed for {$project->name}: " . $e->getMessage());
-            return "[{$project->name}] Erreur: " . $e->getMessage();
-        }
     }
 
     private function discoverProjectApi(Project $project): string

@@ -43,7 +43,7 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
     && chmod 0440 /etc/sudoers.d/zeniclaw-update
 
 # Version file for health check
-RUN echo "2.20.1" > storage/app/version.txt
+RUN echo "2.21.0" > storage/app/version.txt
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \
