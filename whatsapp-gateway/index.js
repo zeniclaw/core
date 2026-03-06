@@ -295,6 +295,35 @@ app.post("/api/sendText", async (req, res) => {
   }
 });
 
+// Send file/document (base64 encoded)
+app.post("/api/sendFile", async (req, res) => {
+  const { chatId, file, caption } = req.body;
+
+  if (!chatId || !file?.data || !file?.filename) {
+    return res.status(400).json({ error: "chatId and file (data, filename) required" });
+  }
+
+  if (sessionStatus !== "WORKING" || !sock) {
+    return res.status(503).json({ error: "Session not connected" });
+  }
+
+  try {
+    const buffer = Buffer.from(file.data, "base64");
+    const mimetype = file.mimetype || "application/octet-stream";
+
+    const result = await sock.sendMessage(chatId, {
+      document: buffer,
+      mimetype,
+      fileName: file.filename,
+      caption: caption || undefined,
+    });
+    res.json(result);
+  } catch (err) {
+    logger.error({ error: err.message, chatId }, "sendFile failed");
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Landing page with QR code
 app.get("/", async (req, res) => {
   let statusText = "Gateway Running";

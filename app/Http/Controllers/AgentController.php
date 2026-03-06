@@ -169,6 +169,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-05',
             'description' => 'Focus sessions avec minuteur et stats',
         ],
+        'document' => [
+            'label' => 'Document Creator',
+            'icon' => '📄',
+            'color' => 'blue',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-06',
+            'description' => 'Creation de fichiers Excel, PDF et Word',
+        ],
     ];
 
     public function index(Request $request)

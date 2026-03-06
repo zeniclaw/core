@@ -82,6 +82,31 @@ abstract class BaseAgent implements AgentInterface
         }
     }
 
+    protected function sendFile(string $chatId, string $filePath, string $filename, ?string $caption = null): void
+    {
+        if (str_starts_with($chatId, 'web-')) {
+            return;
+        }
+
+        $data = base64_encode(file_get_contents($filePath));
+        $mimetype = mime_content_type($filePath) ?: 'application/octet-stream';
+
+        try {
+            $this->waha(30)->post("{$this->wahaBase}/api/sendFile", [
+                'chatId' => $chatId,
+                'file' => [
+                    'data' => $data,
+                    'filename' => $filename,
+                    'mimetype' => $mimetype,
+                ],
+                'caption' => $caption,
+                'session' => $this->sessionName,
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("sendFile failed: " . $e->getMessage());
+        }
+    }
+
     protected function log(AgentContext $context, string $message, array $extra = [], string $level = 'info'): void
     {
         AgentLog::create([
