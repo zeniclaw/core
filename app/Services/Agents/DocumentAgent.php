@@ -158,9 +158,25 @@ PROMPT;
 
             $ext = pathinfo($filePath, PATHINFO_EXTENSION);
             $finalName = "{$filename}.{$ext}";
+            $isWeb = str_starts_with($context->from, 'web-');
 
-            $this->sendFile($context->from, $filePath, $finalName, "📄 {$title}");
-            @unlink($filePath);
+            $fileUrl = null;
+
+            if ($isWeb) {
+                // Store in public storage for web download
+                $docDir = storage_path('app/public/documents');
+                if (!is_dir($docDir)) {
+                    mkdir($docDir, 0775, true);
+                }
+                $uniqueName = uniqid() . '_' . $finalName;
+                $destPath = "{$docDir}/{$uniqueName}";
+                rename($filePath, $destPath);
+                $fileUrl = url("storage/documents/{$uniqueName}");
+            } else {
+                // Send via WhatsApp
+                $this->sendFile($context->from, $filePath, $finalName, $title);
+                @unlink($filePath);
+            }
 
             $this->log($context, "Document created", [
                 'format' => $format,
@@ -168,8 +184,19 @@ PROMPT;
                 'title' => $title,
             ]);
 
-            $this->sendText($context->from, "✅ Document *{$title}* ({$ext}) envoye !");
-            return AgentResult::reply("Document {$finalName} cree et envoye");
+            $replyText = "Document *{$title}* ({$ext}) cree !";
+            if (!$isWeb) {
+                $this->sendText($context->from, "✅ {$replyText}");
+            }
+
+            return AgentResult::reply($replyText, [
+                'files' => $fileUrl ? [[
+                    'url' => $fileUrl,
+                    'name' => $finalName,
+                    'format' => $format,
+                    'title' => $title,
+                ]] : [],
+            ]);
 
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error("DocumentAgent error: " . $e->getMessage());

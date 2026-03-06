@@ -270,13 +270,20 @@ class ChannelController extends Controller
             $orchestrator = new AgentOrchestrator();
             $result = $orchestrator->process($context);
 
-            return response()->json([
+            $response = [
                 'ok' => true,
                 'reply' => $result->reply ?? 'No response',
                 'action' => $result->action,
                 'agent' => $agent->name,
                 'sub_agent_id' => $result->metadata['sub_agent_id'] ?? null,
-            ]);
+            ];
+
+            // Pass generated files (DocumentAgent etc.)
+            if (!empty($result->metadata['files'])) {
+                $response['files'] = $result->metadata['files'];
+            }
+
+            return response()->json($response);
         } catch (\Exception $e) {
             Log::error('Web chat error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);

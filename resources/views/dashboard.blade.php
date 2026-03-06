@@ -78,6 +78,23 @@
                                 ? 'background:linear-gradient(135deg,#3b82f6,#8b5cf6);'
                                 : 'background:#1a1f2e;'">
                             <div x-html="formatMsg(msg.text)"></div>
+                            <template x-if="msg.files && msg.files.length > 0">
+                                <div class="mt-2 space-y-1.5">
+                                    <template x-for="(file, fi) in msg.files" :key="fi">
+                                        <a :href="file.url" target="_blank" download
+                                           class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                                           style="background:rgba(255,255,255,0.1);color:#93c5fd;border:1px solid rgba(147,197,253,0.2);"
+                                           onmouseover="this.style.background='rgba(255,255,255,0.15)'"
+                                           onmouseout="this.style.background='rgba(255,255,255,0.1)'">
+                                            <span x-text="file.format === 'xlsx' ? '📊' : file.format === 'pdf' ? '📕' : '📝'"></span>
+                                            <span x-text="file.name" class="truncate"></span>
+                                            <svg class="w-3.5 h-3.5 flex-shrink-0 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                            </svg>
+                                        </a>
+                                    </template>
+                                </div>
+                            </template>
                             <p class="mt-1 text-right text-gray-500" style="font-size:0.65rem;" x-text="msg.time"></p>
                         </div>
                     </div>
@@ -180,7 +197,11 @@ function dashboardChat() {
                 const data = await res.json();
 
                 if (data.ok) {
-                    this.messages.push({ role: 'assistant', text: data.reply, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                    var msg = { role: 'assistant', text: data.reply, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) };
+                    if (data.files && data.files.length > 0) {
+                        msg.files = data.files;
+                    }
+                    this.messages.push(msg);
                     // If a SubAgent was dispatched, poll for completion
                     if (data.sub_agent_id) {
                         this.pollSubAgent(data.sub_agent_id);
