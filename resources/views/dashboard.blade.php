@@ -203,7 +203,7 @@ function dashboardChat() {
                     const data = await res.json();
                     if (data.status === 'completed' || data.status === 'failed') {
                         const text = data.status === 'completed'
-                            ? (data.log_tail || 'Tache terminee.')
+                            ? (data.findings || 'Tache terminee.')
                             : '⚠ Erreur: ' + (data.error || 'La tache a echoue.');
                         this.messages.push({ role: 'assistant', text, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
                         this.$nextTick(() => this.scrollBottom());

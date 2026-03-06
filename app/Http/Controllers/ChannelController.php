@@ -285,12 +285,38 @@ class ChannelController extends Controller
     {
         $subAgent = \App\Models\SubAgent::findOrFail($id);
 
+        $findings = null;
+        if ($subAgent->status === 'completed' && $subAgent->output_log) {
+            // Extract Claude's findings from [RESULT] blocks
+            $findings = $this->extractSubAgentFindings($subAgent->output_log);
+        }
+
         return response()->json([
             'id' => $subAgent->id,
             'status' => $subAgent->status,
-            'log_tail' => mb_substr($subAgent->execution_log ?? '', -500),
+            'findings' => $findings,
             'error' => $subAgent->error_message,
             'completed_at' => $subAgent->completed_at?->toIso8601String(),
         ]);
+    }
+
+    private function extractSubAgentFindings(string $outputLog): ?string
+    {
+        // Extract [RESULT] blocks — these contain Claude's actual findings
+        preg_match_all('/\[RESULT\]\s*(.*?)(?=\n\[|$)/s', $outputLog, $matches);
+
+        if (!empty($matches[1])) {
+            // Take the last (most complete) result
+            $lastResult = end($matches[1]);
+            return trim($lastResult);
+        }
+
+        // Fallback: extract [CLAUDE] blocks
+        preg_match_all('/\[CLAUDE\]\s*(.*?)(?=\n\[|$)/s', $outputLog, $matches);
+        if (!empty($matches[1])) {
+            return trim(end($matches[1]));
+        }
+
+        return mb_substr($outputLog, -1000);
     }
 }
