@@ -149,12 +149,12 @@ class ChannelController extends Controller
                 $mediaUrl = str_replace('http://localhost:3000', $this->wahaBase, $mediaUrl);
             }
 
-            // Log incoming message
+            // Log incoming message (use json() for raw JSON POST bodies)
             AgentLog::create([
                 'agent_id' => $agent->id,
                 'level' => 'info',
                 'message' => 'WhatsApp message received',
-                'context' => $request->all(),
+                'context' => ['payload' => $payload],
             ]);
 
             // Skip: sent by us, system messages, status broadcasts, or no content at all
@@ -179,14 +179,19 @@ class ChannelController extends Controller
 
             // Create or update AgentSession
             $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $from);
+            $pushName = $payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? null;
+            $sessionData = [
+                'agent_id' => $agent->id,
+                'channel' => 'whatsapp',
+                'peer_id' => $from,
+                'last_message_at' => now(),
+            ];
+            if ($pushName) {
+                $sessionData['display_name'] = $pushName;
+            }
             $session = AgentSession::updateOrCreate(
                 ['session_key' => $sessionKey],
-                [
-                    'agent_id' => $agent->id,
-                    'channel' => 'whatsapp',
-                    'peer_id' => $from,
-                    'last_message_at' => now(),
-                ]
+                $sessionData,
             );
             $session->increment('message_count');
 
@@ -195,7 +200,7 @@ class ChannelController extends Controller
                 agent: $agent,
                 session: $session,
                 from: $from,
-                senderName: $payload['_data']['pushName'] ?? 'ami',
+                senderName: $payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? 'ami',
                 body: $body,
                 hasMedia: $hasMedia,
                 mediaUrl: $mediaUrl,

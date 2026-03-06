@@ -154,6 +154,7 @@ async function connectWhatsApp() {
                   : null,
             ack: 0,
             _data: {
+              pushName: msg.pushName || "",
               notifyName: msg.pushName || "",
             },
           },

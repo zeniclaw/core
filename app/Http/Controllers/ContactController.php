@@ -29,37 +29,35 @@ class ContactController extends Controller
 
         $sessions = $query->get();
 
-        // Build name lookup from webhook logs (pushName)
-        $pushNames = $this->buildPushNameMap();
-
         // Build group name lookup from WAHA
         $groupNames = $this->buildGroupNameMap($sessions);
 
-        $contacts = $sessions->map(function ($session) use ($pushNames, $groupNames) {
+        $contacts = $sessions->map(function ($session) use ($groupNames) {
             $peerId = $session->peer_id;
             $isGroup = $session->isGroup();
 
             $name = null;
 
             if ($isGroup) {
-                // Use WAHA group name first
-                $name = $groupNames[$peerId] ?? null;
+                $name = $groupNames[$peerId] ?? $session->display_name;
             } else {
-                // For DMs: try project requester_name, then pushName from logs
-                $name = Project::where('requester_phone', $peerId)
+                // Use stored display_name (pushName from WhatsApp)
+                $name = $session->display_name;
+
+                // Override with project requester_name if available
+                $projectName = Project::where('requester_phone', $peerId)
                     ->orderByDesc('created_at')
                     ->value('requester_name');
-                if (!$name) {
-                    $name = $pushNames[$peerId] ?? null;
+                if ($projectName) {
+                    $name = $projectName;
                 }
             }
 
-            // Fallback to displayName (phone number without suffix)
+            // Fallback to phone number
             if (!$name) {
                 $name = $session->displayName();
             }
 
-            // Count projects for this contact
             $projectCount = Project::where('requester_phone', $peerId)->count();
 
             return (object) [
@@ -74,39 +72,13 @@ class ContactController extends Controller
             ];
         });
 
-        // Counts for filter badges (exclude status@broadcast)
+        // Counts for filter badges
         $baseQuery = AgentSession::where('channel', 'whatsapp')->where('peer_id', '!=', 'status@broadcast');
         $allCount = (clone $baseQuery)->count();
         $dmCount = (clone $baseQuery)->where('peer_id', 'NOT LIKE', '%@g.us')->count();
         $groupCount = (clone $baseQuery)->where('peer_id', 'LIKE', '%@g.us')->count();
 
         return view('contacts.index', compact('contacts', 'filter', 'allCount', 'dmCount', 'groupCount'));
-    }
-
-    /**
-     * Extract pushName from webhook logs for each peer_id.
-     * Returns the most recent pushName found per peer_id.
-     */
-    private function buildPushNameMap(): array
-    {
-        $names = [];
-
-        $logs = AgentLog::where('message', 'WhatsApp message received')
-            ->orderByDesc('id')
-            ->limit(500)
-            ->get(['context']);
-
-        foreach ($logs as $log) {
-            $payload = $log->context['payload'] ?? [];
-            $from = $payload['from'] ?? null;
-            $pushName = $payload['_data']['pushName'] ?? null;
-
-            if ($from && $pushName && !isset($names[$from])) {
-                $names[$from] = $pushName;
-            }
-        }
-
-        return $names;
     }
 
     /**
@@ -153,7 +125,6 @@ class ContactController extends Controller
         $phone = preg_replace('/[^0-9]/', '', $request->input('phone'));
         $peerId = $phone . '@s.whatsapp.net';
 
-        // Use the user's first active agent
         $agent = $request->user()->agents()->where('status', 'active')->first()
             ?? $request->user()->agents()->first();
 
@@ -168,18 +139,19 @@ class ContactController extends Controller
             return back()->with('error', 'This contact already exists.');
         }
 
+        $contactName = $request->input('name', $phone);
+
         AgentSession::create([
             'session_key' => $sessionKey,
             'agent_id' => $agent->id,
             'channel' => 'whatsapp',
             'peer_id' => $peerId,
+            'display_name' => $contactName !== $phone ? $contactName : null,
             'last_message_at' => now(),
             'message_count' => 0,
             'whitelisted' => true,
         ]);
 
-        // Send greeting message via WhatsApp
-        $contactName = $request->input('name', $phone);
         $greeting = $request->input('greeting')
             ?: "Hi {$contactName}! I'm *{$agent->name}*, your AI assistant powered by ZeniClaw. Feel free to send me a message anytime — I can help with questions, reminders, projects, and much more!";
 
@@ -201,7 +173,7 @@ class ContactController extends Controller
 
     public function destroy(AgentSession $session): RedirectResponse
     {
-        $name = $session->displayName();
+        $name = $session->display_name ?? $session->displayName();
         $session->delete();
         return back()->with('success', "Contact {$name} deleted.");
     }

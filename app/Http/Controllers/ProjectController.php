@@ -163,25 +163,12 @@ class ProjectController extends Controller
             ->orderByDesc('last_message_at')
             ->get();
 
-        // Build pushName lookup from logs
-        $pushNames = [];
-        $logs = \App\Models\AgentLog::where('message', 'WhatsApp message received')
-            ->orderByDesc('id')->limit(500)->get(['context']);
-        foreach ($logs as $log) {
-            $payload = $log->context['payload'] ?? [];
-            $from = $payload['from'] ?? null;
-            $pushName = $payload['_data']['pushName'] ?? null;
-            if ($from && $pushName && !isset($pushNames[$from])) {
-                $pushNames[$from] = $pushName;
-            }
-        }
-
-        $contacts = $sessions->map(function ($session) use ($pushNames) {
+        $contacts = $sessions->map(function ($session) {
             $peerId = $session->peer_id;
 
             $name = Project::where('requester_phone', $peerId)->value('requester_name');
             if (!$name) {
-                $name = $pushNames[$peerId] ?? $session->displayName();
+                $name = $session->display_name ?? $session->displayName();
             }
 
             return [
@@ -257,17 +244,11 @@ class ProjectController extends Controller
                 ];
             })->filter(fn($p) => $p['peer_id'] !== null)->values();
 
-            // Enrich with known names from contacts/projects
+            // Enrich with known names from contacts/projects/sessions
             $participants = $participants->map(function ($p) {
                 $name = \App\Models\Project::where('requester_phone', $p['peer_id'])->value('requester_name');
                 if (!$name) {
-                    // Check pushNames from logs
-                    $log = \App\Models\AgentLog::where('message', 'WhatsApp message received')
-                        ->where('context->payload->from', $p['peer_id'])
-                        ->orderByDesc('id')->first(['context']);
-                    if ($log) {
-                        $name = $log->context['payload']['_data']['pushName'] ?? null;
-                    }
+                    $name = AgentSession::where('peer_id', $p['peer_id'])->value('display_name');
                 }
                 if ($name) {
                     $p['name'] = $name;

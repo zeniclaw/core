@@ -28,7 +28,7 @@ class ConversationController extends Controller
 
         $conversations = $query->paginate(20)->appends($request->query());
 
-        // Build name lookup: pushNames from logs + group names from WAHA
+        // Build name map: display_name from session + group names from WAHA + project names
         $nameMap = $this->buildNameMap($conversations->items());
 
         return view('conversations.index', [
@@ -67,7 +67,7 @@ class ConversationController extends Controller
                         ? ($payload['body'] ?? '')
                         : ($context['reply'] ?? ''),
                     'sender' => $isIncoming
-                        ? ($payload['_data']['pushName'] ?? $conversation->displayName())
+                        ? ($payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? $conversation->display_name ?? $conversation->displayName())
                         : 'ZeniClaw',
                     'timestamp' => $log->created_at,
                     'has_media' => $isIncoming && $hasMedia,
@@ -89,28 +89,20 @@ class ConversationController extends Controller
     }
 
     /**
-     * Build a peer_id => display name map from logs, projects, and WAHA groups.
+     * Build a peer_id => display name map from session display_name, projects, and WAHA groups.
      */
     private function buildNameMap(array $sessions): array
     {
         $nameMap = [];
 
-        // 1. pushNames from webhook logs
-        $logs = AgentLog::where('message', 'WhatsApp message received')
-            ->orderByDesc('id')
-            ->limit(500)
-            ->get(['context']);
-
-        foreach ($logs as $log) {
-            $payload = $log->context['payload'] ?? [];
-            $from = $payload['from'] ?? null;
-            $pushName = $payload['_data']['pushName'] ?? null;
-            if ($from && $pushName && !isset($nameMap[$from])) {
-                $nameMap[$from] = $pushName;
+        // 1. display_name stored on session (WhatsApp pushName)
+        foreach ($sessions as $session) {
+            if ($session->display_name) {
+                $nameMap[$session->peer_id] = $session->display_name;
             }
         }
 
-        // 2. Project requester names (override pushNames for DMs)
+        // 2. Project requester names (override for DMs)
         $peerIds = array_map(fn($s) => $s->peer_id, $sessions);
         $projectNames = Project::whereIn('requester_phone', $peerIds)
             ->orderByDesc('created_at')
