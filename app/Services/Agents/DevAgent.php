@@ -195,6 +195,9 @@ class DevAgent extends BaseAgent
         $this->clearPendingContext($context);
         $project = $this->createProjectFromGitlab($selected, $context);
 
+        // Set as active project on session
+        $context->session->update(['active_project_id' => $project->id]);
+
         // If there was an original command, re-execute it with the resolved project
         if ($originalCommand) {
             $fakeCommand = ['command' => $originalCommand['command'], 'args' => array_merge($originalCommand['args'] ?? [], ['name' => $project->name])];
@@ -210,6 +213,9 @@ class DevAgent extends BaseAgent
     {
         // Auto-import the project from GitLab if needed
         $project = $this->createProjectFromGitlab($item, $context);
+
+        // Set as active project on session
+        $context->session->update(['active_project_id' => $project->id]);
 
         // Execute the requested action
         $reply = match ($action) {
