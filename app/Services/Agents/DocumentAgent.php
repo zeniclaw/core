@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Services\AgentContext;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpWord\PhpWord;
@@ -134,8 +135,8 @@ PROMPT;
             $response = $this->claude->chat($message, $model, $systemPrompt);
 
             if (!$response) {
-                $this->sendText($context->from, "Erreur: pas de reponse du modele LLM. Verifie que le modele est disponible.");
-                return AgentResult::reply("LLM returned null");
+                $this->sendText($context->from, "Erreur: pas de reponse du modele LLM. Verifie qu'un modele est telecharge dans Parametres > On-Prem / Ollama.");
+                return AgentResult::reply("LLM returned null — model may not be downloaded");
             }
 
             $spec = $this->parseJson($response);
@@ -230,7 +231,9 @@ PROMPT;
 
             // Write headers with bold style
             foreach ($headers as $col => $header) {
-                $cell = $sheet->getCellByColumnAndRow($col + 1, 1);
+                $colLetter = Coordinate::stringFromColumnIndex($col + 1);
+                $cellRef = "{$colLetter}1";
+                $cell = $sheet->getCell($cellRef);
                 $cell->setValue($header);
                 $cell->getStyle()->getFont()->setBold(true);
                 $cell->getStyle()->getFill()
@@ -242,16 +245,19 @@ PROMPT;
             // Write data rows
             foreach ($rows as $rowIndex => $row) {
                 foreach ($row as $col => $value) {
+                    $colLetter = Coordinate::stringFromColumnIndex($col + 1);
+                    $cellRef = "{$colLetter}" . ($rowIndex + 2);
                     $cellValue = is_numeric(str_replace([',', ' '], ['.', ''], (string) $value))
                         ? (float) str_replace([',', ' '], ['.', ''], (string) $value)
                         : $value;
-                    $sheet->setCellValueByColumnAndRow($col + 1, $rowIndex + 2, $cellValue);
+                    $sheet->getCell($cellRef)->setValue($cellValue);
                 }
             }
 
             // Auto-size columns
             foreach (range(1, max(count($headers), 1)) as $col) {
-                $sheet->getColumnDimensionByColumn($col)->setAutoSize(true);
+                $colLetter = Coordinate::stringFromColumnIndex($col);
+                $sheet->getColumnDimension($colLetter)->setAutoSize(true);
             }
         }
 

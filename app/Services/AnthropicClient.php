@@ -19,14 +19,84 @@ class AnthropicClient
     }
 
     /**
+     * Auto-detect Ollama URL if not configured.
+     */
+    private function getOrDetectOnPremUrl(): ?string
+    {
+        $url = AppSetting::get('onprem_api_url');
+        if ($url) {
+            return $url;
+        }
+
+        foreach (['http://ollama:11434', 'http://localhost:11434'] as $candidate) {
+            try {
+                if (Http::timeout(3)->get($candidate . '/api/tags')->successful()) {
+                    AppSetting::set('onprem_api_url', $candidate);
+                    return $candidate;
+                }
+            } catch (\Exception $e) {}
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if a model is available on Ollama, return list of available models if not.
+     */
+    private function checkModelAvailable(string $baseUrl, string $model): array
+    {
+        try {
+            $response = Http::timeout(5)
+                ->get(rtrim($baseUrl, '/') . '/api/tags');
+
+            if ($response->successful()) {
+                $models = collect($response->json('models') ?? [])
+                    ->pluck('name')
+                    ->map(fn($n) => strtolower($n))
+                    ->all();
+
+                $modelLower = strtolower($model);
+                // Check exact match or match without tag (e.g. "qwen2.5:7b" matches "qwen2.5:7b")
+                $found = in_array($modelLower, $models)
+                    || in_array($modelLower . ':latest', $models);
+
+                return ['available' => $found, 'models' => $models];
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to check Ollama models', ['error' => $e->getMessage()]);
+        }
+
+        return ['available' => false, 'models' => []];
+    }
+
+    /**
      * Route on-prem model calls to Ollama/OpenAI-compatible API.
      */
     private function chatOnPrem(string|array $message, string $model, string $systemPrompt = ''): ?string
     {
-        $baseUrl = AppSetting::get('onprem_api_url');
+        $baseUrl = $this->getOrDetectOnPremUrl();
         if (!$baseUrl) {
-            Log::warning('On-prem model requested but no onprem_api_url configured', ['model' => $model]);
+            Log::warning('On-prem model requested but no Ollama instance found', ['model' => $model]);
             return null;
+        }
+
+        // Check if the model is actually available before attempting (avoids 120s timeout)
+        $check = $this->checkModelAvailable($baseUrl, $model);
+        if (!$check['available']) {
+            $available = implode(', ', $check['models']);
+            Log::warning('On-prem model not available on Ollama', [
+                'model' => $model,
+                'available' => $check['models'],
+            ]);
+
+            // If there are other models available, use the first one as fallback
+            if (!empty($check['models'])) {
+                $fallback = $check['models'][0];
+                Log::info("Falling back to available Ollama model", ['from' => $model, 'to' => $fallback]);
+                $model = $fallback;
+            } else {
+                return null;
+            }
         }
 
         $messages = [];
@@ -51,7 +121,7 @@ class AnthropicClient
         }
 
         try {
-            $response = Http::timeout(120)
+            $response = Http::timeout(180)
                 ->withHeaders($headers)
                 ->post(rtrim($baseUrl, '/') . '/v1/chat/completions', $body);
 
