@@ -123,12 +123,23 @@ IMPORTANT:
 - Pour les factures: inclus TVA, totaux, etc.
 - Pour les CV: structure professionnelle
 - filename sans extension (elle sera ajoutee)
+- Si l'utilisateur fait reference a des donnees d'un echange precedent (ex: "cette liste", "ces clients"), utilise les donnees EXACTES de l'historique de conversation fourni. Ne les invente pas.
+- Extrait et structure toutes les donnees disponibles dans l'historique pour les inclure dans le document
 PROMPT;
 
         $userContext = $this->formatContextMemoryForPrompt($context->from);
+        $conversationHistory = $this->getRecentConversationHistory($context);
         $message = $context->body;
+
+        $preamble = '';
         if ($userContext) {
-            $message = "{$userContext}\n\nDemande: {$message}";
+            $preamble .= "{$userContext}\n\n";
+        }
+        if ($conversationHistory) {
+            $preamble .= "HISTORIQUE RECENT DE LA CONVERSATION (utilise ces donnees si l'utilisateur y fait reference):\n{$conversationHistory}\n\n";
+        }
+        if ($preamble) {
+            $message = "{$preamble}Demande: {$message}";
         }
 
         try {
@@ -447,6 +458,38 @@ HTML;
         $writer->save($path);
 
         return $path;
+    }
+
+    /**
+     * Get recent conversation history so the DocumentAgent can reference data from previous agents.
+     */
+    private function getRecentConversationHistory(AgentContext $context): string
+    {
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $entries = $memoryData['entries'] ?? [];
+
+        if (empty($entries)) {
+            return '';
+        }
+
+        // Take last 5 exchanges — enough context without overloading the prompt
+        $recent = array_slice($entries, -5);
+        $lines = [];
+
+        foreach ($recent as $entry) {
+            $sender = $entry['sender'] ?? 'Utilisateur';
+            $msg = $entry['sender_message'] ?? '';
+            $reply = $entry['agent_reply'] ?? '';
+
+            if ($msg) {
+                $lines[] = "{$sender}: {$msg}";
+            }
+            if ($reply) {
+                $lines[] = "ZeniClaw: {$reply}";
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     private function parseJson(?string $response): ?array
