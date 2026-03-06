@@ -1054,7 +1054,7 @@ PROMPT
 
         $this->log($context, 'SubAgent launched', ['project_id' => $project->id, 'sub_agent_id' => $subAgent->id]);
 
-        return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id, 'reply' => $reply]);
+        return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id], $reply);
     }
 
     private function createAndLaunchAutoProject(AgentContext $context, string $repoName, string $gitlabUrl, string $description, ?array $gitlabData): AgentResult
@@ -1089,7 +1089,7 @@ PROMPT
             'sub_agent_id' => $subAgent->id,
         ]);
 
-        return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id, 'reply' => $reply]);
+        return AgentResult::dispatched(['project_id' => $project->id, 'sub_agent_id' => $subAgent->id], $reply);
     }
 
     private function createPendingProject(AgentContext $context, string $repoName, string $gitlabUrl, string $description, ?array $gitlabData): AgentResult

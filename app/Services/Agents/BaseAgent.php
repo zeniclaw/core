@@ -46,6 +46,11 @@ abstract class BaseAgent implements AgentInterface
 
     protected function sendText(string $chatId, string $text): void
     {
+        // Skip WhatsApp send for web chat sessions — reply goes through HTTP response
+        if (str_starts_with($chatId, 'web-')) {
+            return;
+        }
+
         $maxRetries = 3;
         $lastException = null;
 

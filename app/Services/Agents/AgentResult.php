@@ -21,9 +21,9 @@ class AgentResult
         return new self(action: 'handoff', handoffTo: $targetAgent, metadata: $metadata);
     }
 
-    public static function dispatched(array $metadata = []): self
+    public static function dispatched(array $metadata = [], ?string $reply = null): self
     {
-        return new self(action: 'dispatched', metadata: $metadata);
+        return new self(action: 'dispatched', reply: $reply, metadata: $metadata);
     }
 
     public static function silent(array $metadata = []): self
