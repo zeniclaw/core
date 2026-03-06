@@ -285,7 +285,9 @@ class DevAgent extends BaseAgent
             return "Aucun projet actif. Selectionne d'abord un projet.";
         }
 
-        return $this->runApiAgent($project, $query, [], $context);
+        // Pass the full original message so Claude can extract all info (API keys, URLs, etc.)
+        $fullMessage = $context->body ?? $query;
+        return $this->runApiAgent($project, $fullMessage, [], $context);
     }
 
     /**
@@ -306,57 +308,42 @@ class DevAgent extends BaseAgent
         }
 
         $systemPrompt = <<<PROMPT
-Tu es un agent intelligent qui aide a interagir avec l'API live d'un projet.
+Tu es un agent API qui AGIT. Tu ne poses des questions qu'en DERNIER RECOURS.
 
 PROJET: {$project->name}
 GITLAB: {$project->gitlab_url}
 
-CONFIGURATION STOCKEE (settings du projet):
+CONFIGURATION DEJA STOCKEE:
 {$settingsJson}
 
-CODE SOURCE DU PROJET (routes/endpoints trouves):
+CODE SOURCE (routes/endpoints):
 {$projectCode}
 
-CONVERSATION PRECEDENTE:
+CONVERSATION:
 {$conversationText}
 
-DEMANDE ORIGINALE: {$query}
+DEMANDE: {$query}
 
-Tu dois repondre en JSON avec UNE action parmi:
+REGLE #1 — EXTRAIRE ET STOCKER: Si le message contient des infos utiles (URL, cle API, token, identifiant...), TOUJOURS les inclure dans "store" pour les sauvegarder. Cherche dans le message ET la conversation: URLs (https://...), cles API (pk_..., sk_..., Bearer ..., longues chaines alphanumeriques), identifiants.
 
-1. QUESTION — Tu as besoin d'info (URL, cle API, token, identifiant...). Claude formule la question.
-{
-  "action": "ask",
-  "message": "Ta question a l'utilisateur",
-  "save_as": "nom_du_setting_a_stocker_quand_il_repond"
-}
+REGLE #2 — AGIR: Si tu as une URL + un endpoint + les infos d'auth necessaires → fais l'appel API. Ne pose PAS de question si tu peux deviner ou deduire l'info du code source.
 
-2. API CALL — Tu as toutes les infos pour faire l'appel.
-{
-  "action": "call",
-  "method": "GET|POST|PUT|DELETE",
-  "url": "https://url-complete/endpoint",
-  "headers": {"Authorization": "Bearer xxx", ...},
-  "params": {},
-  "explanation": "ce que je fais"
-}
+REGLE #3 — DEDUIRE: Analyse le code source pour comprendre le mecanisme d'auth (middleware, headers, etc.) et construire l'appel. Si le code montre ApiKeyAuth → utilise le header adapte. Si Bearer → Authorization: Bearer. Si query param → ?api_key=xxx.
 
-3. REPONSE DIRECTE — Tu peux repondre sans appel API (ex: expliquer le code, lister les routes).
-{
-  "action": "reply",
-  "message": "ta reponse"
-}
+Reponds en JSON avec UNE action:
 
-REGLES:
-- Analyse le code source pour comprendre les routes, l'auth, les endpoints
-- Utilise la CONFIGURATION STOCKEE si elle contient des infos utiles (url, tokens, cles...)
-- Si tu poses une question, "save_as" sera la cle sous laquelle la reponse sera stockee pour la prochaine fois
-- Pour l'auth, deduis le mecanisme du code (Bearer, Basic, cookie, API key header, etc.)
-- Construis l'URL complete avec le bon domaine + endpoint
-- Sois malin: si le code montre un .env avec APP_URL ou des constantes, utilise-les
-- Si la reponse de l'utilisateur dans la conversation repond a ta question precedente, utilise cette info
+A) APPEL API — Tu as assez d'infos:
+{"action": "call", "store": {"cle": "valeur", ...}, "method": "GET", "url": "https://...", "headers": {}, "params": {}, "explanation": "..."}
 
-Reponds UNIQUEMENT en JSON valide.
+B) QUESTION — Tu manques d'une info IMPOSSIBLE a deduire (dernier recours):
+{"action": "ask", "store": {"cle": "valeur", ...}, "message": "question precise", "save_as": "nom_setting"}
+
+C) REPONSE — Pas besoin d'appel API:
+{"action": "reply", "store": {"cle": "valeur", ...}, "message": "reponse"}
+
+Le champ "store" est OPTIONNEL mais UTILISE-LE des que tu detectes une info a sauvegarder. Les valeurs stockees seront disponibles dans CONFIGURATION DEJA STOCKEE aux prochains appels.
+
+JSON UNIQUEMENT.
 PROMPT;
 
         $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $systemPrompt);
@@ -364,6 +351,17 @@ PROMPT;
 
         if (!$parsed || empty($parsed['action'])) {
             return "[{$project->name}] Je n'ai pas reussi a analyser ce projet. Reformule ta demande.";
+        }
+
+        // Always store any extracted info
+        $toStore = $parsed['store'] ?? [];
+        if (!empty($toStore) && is_array($toStore)) {
+            foreach ($toStore as $key => $value) {
+                if ($key && $value) {
+                    $project->setSetting($key, $value);
+                }
+            }
+            $this->log($context, 'API agent stored settings', ['project' => $project->name, 'keys' => array_keys($toStore)]);
         }
 
         return match ($parsed['action']) {
