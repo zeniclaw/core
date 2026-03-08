@@ -133,9 +133,9 @@ class AgentController extends Controller
             'label' => 'Resume Contenu',
             'icon' => '📰',
             'color' => 'cyan',
-            'version' => '1.1.0',
-            'updated_at' => '2026-01-30',
-            'description' => 'Resume articles, videos & liens',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-08',
+            'description' => 'Resume automatique d\'articles, pages web et videos YouTube avec transcription',
         ],
         'event_reminder' => [
             'label' => 'Event Reminder',
