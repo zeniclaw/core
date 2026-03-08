@@ -51,10 +51,10 @@ class RunAutoImproveAgentJob implements ShouldQueue
 
             // Ensure workdir is clean and up to date
             $this->subAgent->appendLog("[GIT] Preparing workdir...");
-            Process::run('git config --global --add safe.directory ' . $this->workdir);
-            Process::path($this->workdir)->run('git checkout -- . 2>&1');
-            Process::path($this->workdir)->run('git clean -fd 2>&1');
-            $pullResult = Process::path($this->workdir)->run('git pull --rebase 2>&1');
+            Process::env(['HOME' => '/tmp'])->run('git config --global --add safe.directory ' . $this->workdir);
+            Process::env(['HOME' => '/tmp'])->path($this->workdir)->run('git checkout -- . 2>&1');
+            Process::env(['HOME' => '/tmp'])->path($this->workdir)->run('git clean -fd 2>&1');
+            $pullResult = Process::env(['HOME' => '/tmp'])->path($this->workdir)->run('git pull --rebase 2>&1');
             $this->subAgent->appendLog("[GIT] " . trim($pullResult->output() ?: 'Pull OK'));
 
             $prompt = $this->buildPrompt();
@@ -173,13 +173,9 @@ PROMPT;
     {
         $claudeTimeout = max(($this->subAgent->timeout_minutes ?: 15) * 60 - 60, 120);
 
-        // Run as www-data to avoid root restriction in Claude Code
         $cmd = sprintf(
-            'su -s /bin/sh www-data -c %s',
-            escapeshellarg(sprintf(
-                'claude -p %s --model sonnet --dangerously-skip-permissions --verbose --output-format stream-json 2>&1',
-                escapeshellarg($prompt)
-            ))
+            'claude -p %s --model sonnet --dangerously-skip-permissions --verbose --output-format stream-json 2>&1',
+            escapeshellarg($prompt)
         );
 
         $envKey = str_starts_with($apiKey, 'sk-ant-oat')
