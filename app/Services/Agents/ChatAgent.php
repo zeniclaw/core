@@ -15,6 +15,12 @@ class ChatAgent extends BaseAgent
 {
     private const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
+    /** Maximum media size accepted before download (20 MB). */
+    private const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+
+    /** Quick commands resolved without agentic loop. */
+    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities'];
+
     private ?string $lastVoiceTranscript = null;
 
     public function name(): string
@@ -42,7 +48,7 @@ class ChatAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -52,6 +58,18 @@ class ChatAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        // Quick commands bypass the agentic loop for instant responses
+        $quickResult = $this->handleQuickCommand($context);
+        if ($quickResult) {
+            return $quickResult;
+        }
+
+        // Guard against empty body with no media
+        $emptyResult = $this->buildEmptyMessageFallback($context);
+        if ($emptyResult) {
+            return $emptyResult;
+        }
+
         $model = $this->resolveModel($context);
         $systemPrompt = $this->buildSystemPrompt($context);
         $this->lastVoiceTranscript = null;
@@ -73,11 +91,7 @@ class ChatAgent extends BaseAgent
 
         // Fallback to simple chat if agentic loop fails
         if (!$reply) {
-            $reply = $this->claude->chat(
-                is_array($claudeMessage) ? $claudeMessage : $claudeMessage,
-                'claude-haiku-4-5-20251001',
-                $systemPrompt
-            );
+            $reply = $this->claude->chat($claudeMessage, 'claude-haiku-4-5-20251001', $systemPrompt);
         }
 
         if (!$reply) {
@@ -102,6 +116,7 @@ class ChatAgent extends BaseAgent
             'complexity' => $context->complexity,
             'tools_used' => $result->toolsUsed,
             'iterations' => $result->iterations,
+            'voice_transcript' => $this->lastVoiceTranscript,
         ]);
     }
 
@@ -130,6 +145,11 @@ class ChatAgent extends BaseAgent
             . "Tu peux utiliser des emojis avec moderation. "
             . "Reponds dans la meme langue que l'utilisateur. "
             . $this->buildLengthDirective($context->complexity)
+            . "\n\nFORMATAGE WHATSAPP: "
+            . "Utilise *texte* pour le gras, _texte_ pour l'italique, ~texte~ pour le barre. "
+            . "Pour les listes, utilise des tirets ou des numeros. "
+            . "Evite le Markdown classique (##, **, etc.) — utilise le formatage WhatsApp natif. "
+            . "Si tu affiches du code, encadre-le avec des backticks (`) ou triple backticks (```)."
             . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
             . "\nLe message vient de {$context->senderName}.";
 
@@ -290,9 +310,12 @@ class ChatAgent extends BaseAgent
                     "[{$context->senderName} a envoye un message vocal/audio. Tu ne peux pas l'ecouter, " .
                     "dis-le poliment et propose de continuer la conversation.]";
             } else {
+                $mediaType = $context->media['mediaType'] ?? $context->media['type'] ?? '';
                 $mediaDesc = match (true) {
                     str_starts_with($mimetype, 'video/') => 'une video',
-                    $mimetype === 'image/webp' && str_contains($context->mediaUrl, 'sticker') => 'un sticker',
+                    $mimetype === 'image/webp' && $mediaType === 'sticker' => 'un sticker',
+                    $mimetype === 'image/webp' => 'un sticker ou une image webp',
+                    str_starts_with($mimetype, 'image/') => 'une image',
                     default => "un fichier de type {$mimetype}",
                 };
                 $message = ($context->body ? "{$context->body}\n\n" : '') .
@@ -307,12 +330,28 @@ class ChatAgent extends BaseAgent
     private function downloadMedia(string $mediaUrl): ?string
     {
         try {
+            // Check size before downloading to avoid fetching huge files
+            $headResponse = $this->waha(10)->head($mediaUrl);
+            if ($headResponse->successful()) {
+                $contentLength = (int) ($headResponse->header('Content-Length') ?? 0);
+                if ($contentLength > 0 && $contentLength > self::MAX_MEDIA_BYTES) {
+                    $sizeMb = round($contentLength / 1024 / 1024, 1);
+                    \Illuminate\Support\Facades\Log::warning("[chat] Media too large to download: {$sizeMb} MB ({$mediaUrl})");
+                    return null;
+                }
+            }
+
             $response = $this->waha(30)->get($mediaUrl);
             if ($response->successful()) {
-                return base64_encode($response->body());
+                $body = $response->body();
+                if (strlen($body) > self::MAX_MEDIA_BYTES) {
+                    \Illuminate\Support\Facades\Log::warning('[chat] Downloaded media exceeds size limit, discarding.');
+                    return null;
+                }
+                return base64_encode($body);
             }
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Failed to download media: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::warning('[chat] Failed to download media: ' . $e->getMessage());
         }
         return null;
     }
@@ -371,7 +410,16 @@ class ChatAgent extends BaseAgent
             ];
         }
 
-        $text = $caption ?: 'Decris ce que tu vois.';
+        if ($mimetype === 'application/pdf') {
+            $text = $caption
+                ? $caption
+                : 'Analyse ce document PDF : resume le contenu, les points cles et toute information importante.';
+        } else {
+            $imageHint = "Si l'image contient du texte, lis-le integralement. "
+                . "Decris precisement ce que tu vois : personnes, objets, lieux, couleurs, texte visible, contexte.";
+            $text = $caption ? "{$caption}\n\n({$imageHint})" : $imageHint;
+        }
+
         $blocks[] = ['type' => 'text', 'text' => $text];
 
         return $blocks;
@@ -393,6 +441,76 @@ class ChatAgent extends BaseAgent
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * New Feature 1: Quick command handler.
+     * Resolves /aide, /help, /capacites instantly without LLM call.
+     */
+    private function handleQuickCommand(AgentContext $context): ?AgentResult
+    {
+        $body = trim(mb_strtolower($context->body ?? ''));
+
+        if (!in_array($body, self::QUICK_COMMANDS, true)) {
+            return null;
+        }
+
+        $senderName = $context->senderName;
+        $reply = "*Bonjour {$senderName} ! Voici ce que je sais faire :*\n\n"
+            . "*Messages & conversation*\n"
+            . "- Discuter librement, repondre a tes questions\n"
+            . "- Analyser une image ou lire un PDF\n"
+            . "- Transcrire et comprendre un message vocal\n\n"
+            . "*Rappels*\n"
+            . "- \"Rappelle-moi d'appeler Jean demain a 10h\"\n"
+            . "- \"Rappel chaque lundi a 9h : reunion equipe\"\n"
+            . "- \"Annule mon rappel du soir\"\n\n"
+            . "*Todos*\n"
+            . "- \"Ajoute acheter du pain a ma liste courses\"\n"
+            . "- \"Montre ma todo list\"\n"
+            . "- \"Marque le point 2 comme fait\"\n\n"
+            . "*Projets*\n"
+            . "- \"Passe sur le projet ZeniClaw\"\n"
+            . "- \"Quels projets j'ai ?\"\n\n"
+            . "*Musique*\n"
+            . "- \"Cherche Hotel California\"\n"
+            . "- \"Recommande-moi de la musique chill\"\n\n"
+            . "*Memoire*\n"
+            . "- Je me souviens de tes preferences et donnees entre conversations\n\n"
+            . "_Tape simplement ce que tu veux faire, je comprends le langage naturel !_";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /aide handled');
+
+        return AgentResult::reply($reply, ['quick_command' => $body]);
+    }
+
+    /**
+     * New Feature 2: Contextual empty-message guard.
+     * Returns a friendly nudge if the message body and media are both absent.
+     */
+    private function buildEmptyMessageFallback(AgentContext $context): ?AgentResult
+    {
+        $body = trim($context->body ?? '');
+        if ($body !== '' || $context->hasMedia) {
+            return null;
+        }
+
+        $hour = (int) now(AppSetting::timezone())->format('H');
+        $greeting = match (true) {
+            $hour >= 5 && $hour < 12  => 'Bonjour',
+            $hour >= 12 && $hour < 18 => 'Coucou',
+            $hour >= 18 && $hour < 22 => 'Bonsoir',
+            default                    => 'Salut',
+        };
+
+        $reply = "{$greeting} ! Tu m'as envoye un message vide. "
+            . "Ecris-moi quelque chose, envoie une image, un PDF ou un vocal — je suis la !";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Empty message received — nudge sent');
+
+        return AgentResult::reply($reply, ['empty_message' => true]);
     }
 
     private function buildProjectContext(AgentContext $context): ?string
