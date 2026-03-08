@@ -55,6 +55,17 @@ class DebugController extends Controller
         ]);
     }
 
+    public function triggerAutoImprove(Request $request): JsonResponse
+    {
+        $exitCode = \Illuminate\Support\Facades\Artisan::call('zeniclaw:auto-improve-agents');
+        $output = trim(\Illuminate\Support\Facades\Artisan::output());
+
+        return response()->json([
+            'success' => $exitCode === 0,
+            'message' => $output ?: ($exitCode === 0 ? 'Auto-improve triggered' : 'Failed to trigger'),
+        ]);
+    }
+
     public function systemInfo(): JsonResponse
     {
         return response()->json($this->gatherSystemInfo());

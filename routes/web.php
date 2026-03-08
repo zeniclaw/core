@@ -141,6 +141,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/debug', [DebugController::class, 'index'])->name('debug');
         Route::post('/debug/toggle-auto-suggest', [DebugController::class, 'toggleAutoSuggest'])->name('debug.toggle-auto-suggest');
         Route::post('/debug/toggle-auto-improve', [DebugController::class, 'toggleAutoImprove'])->name('debug.toggle-auto-improve');
+        Route::post('/debug/trigger-auto-improve', [DebugController::class, 'triggerAutoImprove'])->name('debug.trigger-auto-improve');
         Route::get('/debug/system-info', [DebugController::class, 'systemInfo'])->name('debug.system-info');
     });
 });

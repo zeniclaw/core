@@ -172,11 +172,17 @@
                                 <span x-text="autoSuggestEnabled ? 'Disable' : 'Enable'">{{ $autoSuggestEnabled ? 'Disable' : 'Enable' }}</span>
                             </button>
                         @elseif($job['name'] === 'zeniclaw:auto-improve-agents')
-                            <button @click="toggleAutoImprove()"
-                                    class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
-                                    :class="autoImproveEnabled ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'">
-                                <span x-text="autoImproveEnabled ? 'Disable' : 'Enable'">{{ $autoImproveEnabled ? 'Disable' : 'Enable' }}</span>
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button @click="toggleAutoImprove()"
+                                        class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                                        :class="autoImproveEnabled ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'">
+                                    <span x-text="autoImproveEnabled ? 'Disable' : 'Enable'">{{ $autoImproveEnabled ? 'Disable' : 'Enable' }}</span>
+                                </button>
+                                <button @click="triggerAutoImprove()" :disabled="triggeringImprove"
+                                        class="px-3 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors disabled:opacity-50">
+                                    <span x-text="triggeringImprove ? 'Launching...' : 'Run Now'"></span>
+                                </button>
+                            </div>
                         @else
                             <span class="text-xs text-gray-400">-</span>
                         @endif
@@ -261,6 +267,7 @@ function debugPage() {
     return {
         autoSuggestEnabled: @json($autoSuggestEnabled),
         autoImproveEnabled: @json($autoImproveEnabled),
+        triggeringImprove: false,
         refreshing: false,
         sys: @json($system),
 
@@ -286,6 +293,22 @@ function debugPage() {
             });
             const d = await r.json();
             this.autoImproveEnabled = d.enabled;
+        },
+
+        async triggerAutoImprove() {
+            this.triggeringImprove = true;
+            try {
+                const r = await fetch('{{ route("admin.debug.trigger-auto-improve") }}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                    },
+                });
+                const d = await r.json();
+                alert(d.message);
+            } catch(e) { alert('Error: ' + e.message); }
+            this.triggeringImprove = false;
         },
 
         async refreshSystemInfo() {
