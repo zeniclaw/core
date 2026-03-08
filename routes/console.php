@@ -17,3 +17,6 @@ Schedule::command('zeniclaw:update')->dailyAt('03:00')->when(function () {
     return AppSetting::get('auto_update_enabled') !== 'false';
 });
 Schedule::command('zeniclaw:heartbeat')->everyFifteenMinutes();
+Schedule::command('zeniclaw:auto-improve-agents')->everyThirtyMinutes()->when(function () {
+    return AppSetting::get('auto_improve_agents_enabled') === 'true';
+});

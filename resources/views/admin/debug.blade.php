@@ -152,7 +152,13 @@
                     <td class="px-4 py-3 font-mono text-xs text-gray-900">{{ $job['name'] }}</td>
                     <td class="px-4 py-3 text-xs text-gray-500">{{ $job['schedule'] }}</td>
                     <td class="px-4 py-3 text-center">
-                        @if($job['enabled'])
+                        @if($job['name'] === 'zeniclaw:auto-suggest')
+                            <span x-show="autoSuggestEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
+                            <span x-show="!autoSuggestEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Disabled</span>
+                        @elseif($job['name'] === 'zeniclaw:auto-improve-agents')
+                            <span x-show="autoImproveEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
+                            <span x-show="!autoImproveEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Disabled</span>
+                        @elseif($job['enabled'])
                             <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
                         @else
                             <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Disabled</span>
@@ -164,6 +170,12 @@
                                     class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
                                     :class="autoSuggestEnabled ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'">
                                 <span x-text="autoSuggestEnabled ? 'Disable' : 'Enable'">{{ $autoSuggestEnabled ? 'Disable' : 'Enable' }}</span>
+                            </button>
+                        @elseif($job['name'] === 'zeniclaw:auto-improve-agents')
+                            <button @click="toggleAutoImprove()"
+                                    class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                                    :class="autoImproveEnabled ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'">
+                                <span x-text="autoImproveEnabled ? 'Disable' : 'Enable'">{{ $autoImproveEnabled ? 'Disable' : 'Enable' }}</span>
                             </button>
                         @else
                             <span class="text-xs text-gray-400">-</span>
@@ -248,6 +260,7 @@
 function debugPage() {
     return {
         autoSuggestEnabled: @json($autoSuggestEnabled),
+        autoImproveEnabled: @json($autoImproveEnabled),
         refreshing: false,
         sys: @json($system),
 
@@ -261,6 +274,18 @@ function debugPage() {
             });
             const d = await r.json();
             this.autoSuggestEnabled = d.enabled;
+        },
+
+        async toggleAutoImprove() {
+            const r = await fetch('{{ route("admin.debug.toggle-auto-improve") }}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                    'Accept': 'application/json',
+                },
+            });
+            const d = await r.json();
+            this.autoImproveEnabled = d.enabled;
         },
 
         async refreshSystemInfo() {

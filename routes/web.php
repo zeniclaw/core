@@ -140,6 +140,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/health', [HealthDashboardController::class, 'index'])->name('health');
         Route::get('/debug', [DebugController::class, 'index'])->name('debug');
         Route::post('/debug/toggle-auto-suggest', [DebugController::class, 'toggleAutoSuggest'])->name('debug.toggle-auto-suggest');
+        Route::post('/debug/toggle-auto-improve', [DebugController::class, 'toggleAutoImprove'])->name('debug.toggle-auto-improve');
         Route::get('/debug/system-info', [DebugController::class, 'systemInfo'])->name('debug.system-info');
     });
 });

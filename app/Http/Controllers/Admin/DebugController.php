@@ -17,6 +17,7 @@ class DebugController extends Controller
     public function index()
     {
         $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') === 'true';
+        $autoImproveEnabled = AppSetting::get('auto_improve_agents_enabled') === 'true';
 
         // System info
         $system = $this->gatherSystemInfo();
@@ -27,7 +28,7 @@ class DebugController extends Controller
         // Recent improvements
         $recentImprovements = SelfImprovement::orderByDesc('created_at')->limit(10)->get();
 
-        return view('admin.debug', compact('autoSuggestEnabled', 'system', 'jobs', 'recentImprovements'));
+        return view('admin.debug', compact('autoSuggestEnabled', 'autoImproveEnabled', 'system', 'jobs', 'recentImprovements'));
     }
 
     public function toggleAutoSuggest(Request $request): JsonResponse
@@ -39,6 +40,18 @@ class DebugController extends Controller
         return response()->json([
             'enabled' => $newValue,
             'message' => $newValue ? 'Auto-suggest enabled' : 'Auto-suggest disabled',
+        ]);
+    }
+
+    public function toggleAutoImprove(Request $request): JsonResponse
+    {
+        $current = AppSetting::get('auto_improve_agents_enabled') === 'true';
+        $newValue = !$current;
+        AppSetting::set('auto_improve_agents_enabled', $newValue ? 'true' : 'false');
+
+        return response()->json([
+            'enabled' => $newValue,
+            'message' => $newValue ? 'Auto-improve agents enabled' : 'Auto-improve agents disabled',
         ]);
     }
 
@@ -152,6 +165,7 @@ class DebugController extends Controller
             ['name' => 'reminders:process', 'schedule' => 'Every minute', 'enabled' => true],
             ['name' => 'zeniclaw:watchdog', 'schedule' => 'Every minute', 'enabled' => true],
             ['name' => 'zeniclaw:auto-suggest', 'schedule' => 'Every 15 minutes', 'enabled' => $autoSuggestEnabled],
+            ['name' => 'zeniclaw:auto-improve-agents', 'schedule' => 'Continuous (chained)', 'enabled' => AppSetting::get('auto_improve_agents_enabled') === 'true'],
             ['name' => 'zeniclaw:compact-logs', 'schedule' => 'Daily', 'enabled' => true],
             ['name' => 'finance:check-alerts', 'schedule' => 'Daily at 09:00', 'enabled' => true],
             ['name' => 'habits:remind', 'schedule' => 'Daily at 08:00', 'enabled' => true],
