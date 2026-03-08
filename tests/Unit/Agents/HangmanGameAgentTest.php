@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_1_0(): void
+    public function test_agent_version_is_1_2_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -320,6 +320,150 @@ class HangmanGameAgentTest extends TestCase
 
         $this->assertStringContainsString('stats Pendu', $result->reply);
         $this->assertStringContainsString('0', $result->reply);
+    }
+
+    // ── History ───────────────────────────────────────────────────────────────
+
+    public function test_history_shows_message_when_no_games_played(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman history');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Aucune partie terminee', $result->reply);
+    }
+
+    public function test_history_shows_completed_games(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman history');
+
+        // Create a won game
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['status' => 'won', 'wrong_count' => 1]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('LARAVEL', $result->reply);
+        $this->assertStringContainsString('Historique', $result->reply);
+    }
+
+    // ── Reset stats ───────────────────────────────────────────────────────────
+
+    public function test_reset_stats_when_no_stats_informs_user(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman reset');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Aucune statistique', $result->reply);
+    }
+
+    public function test_reset_stats_clears_all_values(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman reset');
+
+        // Create stats with values
+        $stats = HangmanStats::getOrCreate($context->from, $context->agent->id);
+        $stats->update([
+            'games_played'   => 5,
+            'games_won'      => 3,
+            'best_streak'    => 3,
+            'current_streak' => 2,
+            'total_guesses'  => 40,
+        ]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('remises a zero', $result->reply);
+
+        $stats->refresh();
+        $this->assertEquals(0, $stats->games_played);
+        $this->assertEquals(0, $stats->games_won);
+        $this->assertEquals(0, $stats->best_streak);
+        $this->assertEquals(0, $stats->current_streak);
+        $this->assertEquals(0, $stats->total_guesses);
+    }
+
+    // ── Category selection ────────────────────────────────────────────────────
+
+    public function test_start_with_tech_category_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start tech');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertDatabaseHas('hangman_games', [
+            'user_phone' => $context->from,
+            'agent_id'   => $context->agent->id,
+            'status'     => 'playing',
+        ]);
+    }
+
+    public function test_start_with_unknown_category_falls_back_to_random(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start unknowncategory');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+    }
+
+    // ── Score ─────────────────────────────────────────────────────────────────
+
+    public function test_winning_game_shows_score(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('A');
+
+        $this->createActiveGame($context, 'A');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Score', $result->reply);
+        $this->assertStringContainsString('pts', $result->reply);
+    }
+
+    // ── Hint safety guard ─────────────────────────────────────────────────────
+
+    public function test_hint_blocked_when_only_one_life_left(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman hint');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['wrong_count' => 5]); // 1 life left
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('risque', $result->reply);
+        // Game should still be active
+        $game->refresh();
+        $this->assertEquals('playing', $game->status);
+        $this->assertEquals(5, $game->wrong_count);
+    }
+
+    // ── Status details ────────────────────────────────────────────────────────
+
+    public function test_status_shows_guess_count(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman status');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['guessed_letters' => ['A', 'B', 'C']]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('3', $result->reply);
     }
 
     // ── HangmanStats model ────────────────────────────────────────────────────
