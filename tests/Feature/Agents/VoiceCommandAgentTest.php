@@ -34,9 +34,12 @@ class VoiceCommandAgentTest extends TestCase
     ): AgentContext {
         $user = User::factory()->create();
         $agent = Agent::factory()->create(['user_id' => $user->id]);
+        $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $this->testPhone);
         $session = AgentSession::create([
             'agent_id' => $agent->id,
-            'chat_id' => $this->testPhone,
+            'session_key' => $sessionKey,
+            'channel' => 'whatsapp',
+            'peer_id' => $this->testPhone,
             'last_message_at' => now(),
         ]);
 

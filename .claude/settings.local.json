@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec zeniclaw_app bash -c \"cd /opt/zeniclaw-repo && git reset --hard origin/main\" 2>&1)"
+    ]
+  }
+}
