@@ -16,6 +16,20 @@ class VoiceCommandAgent extends BaseAgent
     // Max audio size in bytes (25MB — Whisper API limit)
     private const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
+    // Minimum meaningful characters in a transcript (below = silence/noise)
+    private const MIN_TRANSCRIPT_CHARS = 3;
+
+    // Max download attempts before giving up
+    private const MAX_DOWNLOAD_ATTEMPTS = 2;
+
+    // Language code to WhatsApp-friendly flag emoji
+    private const LANGUAGE_FLAGS = [
+        'fr' => '🇫🇷', 'en' => '🇬🇧', 'es' => '🇪🇸', 'de' => '🇩🇪',
+        'it' => '🇮🇹', 'pt' => '🇵🇹', 'ar' => '🇸🇦', 'zh' => '🇨🇳',
+        'ja' => '🇯🇵', 'ko' => '🇰🇷', 'ru' => '🇷🇺', 'nl' => '🇳🇱',
+        'tr' => '🇹🇷', 'pl' => '🇵🇱', 'sv' => '🇸🇪',
+    ];
+
     public function name(): string
     {
         return 'voice_command';
@@ -23,7 +37,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription et confirmation interactive en cas de doute. Supporte ogg, mp3, wav, mp4, webm, amr et plus.';
+        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription, detection du silence/bruit, confirmation interactive en cas de doute et indicateur de langue par drapeau. Supporte ogg, mp3, wav, mp4, webm, amr et plus.';
     }
 
     public function keywords(): array
@@ -33,7 +47,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -53,8 +67,8 @@ class VoiceCommandAgent extends BaseAgent
             'is_video' => $isVideo,
         ]);
 
-        // Download audio from WAHA
-        $audioBytes = $this->downloadAudio($context);
+        // Download audio from WAHA (with retry on transient failures)
+        $audioBytes = $this->downloadAudioWithRetry($context);
         if (!$audioBytes) {
             $this->log($context, 'Failed to download audio', [
                 'mediaUrl' => $context->mediaUrl,
@@ -95,12 +109,25 @@ class VoiceCommandAgent extends BaseAgent
         $confidence = $result['confidence'] ?? 1.0;
         $language = $result['language'] ?? config('voice_command.default_language', 'fr');
         $minConfidence = config('voice_command.min_confidence', 0.8);
+        $sizeKb = round($audioSize / 1024, 1);
+
+        // Detect silence or background noise (transcript too short to be meaningful)
+        if ($this->isSilenceOrNoise($transcript)) {
+            $this->log($context, 'Transcript too short — likely silence or noise', [
+                'transcript' => $transcript,
+                'size_kb' => $sizeKb,
+            ], 'warn');
+            $reply = "Je n'ai pas detecte de parole dans ton message. C'est peut-etre du silence ou du bruit de fond ? Reessaie ou ecris-moi directement en texte.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
 
         $this->log($context, 'Transcription successful', [
             'transcript' => mb_substr($transcript, 0, 200),
             'confidence' => $confidence,
             'language' => $language,
             'is_video' => $isVideo,
+            'size_kb' => $sizeKb,
         ]);
 
         // If confidence is too low, store transcript and ask for confirmation
@@ -108,11 +135,8 @@ class VoiceCommandAgent extends BaseAgent
             return $this->handleLowConfidence($context, $transcript, $confidence, $language);
         }
 
-        // Add language note for non-default-language transcriptions
-        $defaultLang = config('voice_command.default_language', 'fr');
-        $languageNote = ($language && $language !== $defaultLang)
-            ? "\n_(Langue detectee : {$language})_"
-            : '';
+        // Build language note with flag emoji for non-default-language transcriptions
+        $languageNote = $this->buildLanguageNote($language);
 
         // Return transcript — orchestrator will re-route to the appropriate agent
         return AgentResult::reply($transcript . $languageNote, [
@@ -182,10 +206,13 @@ class VoiceCommandAgent extends BaseAgent
 
     /**
      * Handle low-confidence transcription: store in pending context and ask user to confirm.
+     * Formatting: bold for confidence %, italic for transcript preview.
      */
     private function handleLowConfidence(AgentContext $context, string $transcript, float $confidence, string $language): AgentResult
     {
         $confidencePct = round($confidence * 100);
+        $languageNote = $this->buildLanguageNote($language);
+        $langSuffix = $languageNote ? " {$languageNote}" : '';
 
         $this->setPendingContext($context, 'low_confidence_confirm', [
             'transcript' => $transcript,
@@ -194,8 +221,8 @@ class VoiceCommandAgent extends BaseAgent
         ], ttlMinutes: 5, expectRawInput: true);
 
         $preview = mb_substr($transcript, 0, 200) . (mb_strlen($transcript) > 200 ? '...' : '');
-        $reply = "J'ai transcrit ton vocal (confiance : {$confidencePct}%) :\n\n"
-            . "\"{$preview}\"\n\n"
+        $reply = "J'ai transcrit ton vocal (confiance : *{$confidencePct}%*){$langSuffix} :\n\n"
+            . "_{$preview}_\n\n"
             . "C'est bien ca ? Reponds *oui* pour valider ou *non* pour annuler.";
 
         $this->sendText($context->from, $reply);
@@ -207,7 +234,10 @@ class VoiceCommandAgent extends BaseAgent
         ]);
     }
 
-    private function downloadAudio(AgentContext $context): ?string
+    /**
+     * Download audio from WAHA with retry on transient failures.
+     */
+    private function downloadAudioWithRetry(AgentContext $context): ?string
     {
         $mediaUrl = $context->mediaUrl ?? ($context->media['url'] ?? null);
         if (!$mediaUrl) {
@@ -218,28 +248,64 @@ class VoiceCommandAgent extends BaseAgent
             return null;
         }
 
-        try {
-            $response = $this->waha(30)->get($mediaUrl);
-            if ($response->successful()) {
-                $body = $response->body();
-                if (empty($body)) {
-                    Log::warning('[voice_command] Download returned empty body', ['url' => $mediaUrl]);
-                    return null;
+        for ($attempt = 1; $attempt <= self::MAX_DOWNLOAD_ATTEMPTS; $attempt++) {
+            try {
+                $response = $this->waha(30)->get($mediaUrl);
+                if ($response->successful()) {
+                    $body = $response->body();
+                    if (!empty($body)) {
+                        return $body;
+                    }
+                    Log::warning('[voice_command] Download returned empty body', [
+                        'url' => $mediaUrl,
+                        'attempt' => $attempt,
+                    ]);
+                } else {
+                    Log::warning('[voice_command] Download failed', [
+                        'status' => $response->status(),
+                        'url' => $mediaUrl,
+                        'attempt' => $attempt,
+                    ]);
                 }
-                return $body;
+            } catch (\Exception $e) {
+                Log::warning('[voice_command] Download exception: ' . $e->getMessage(), [
+                    'url' => $mediaUrl,
+                    'attempt' => $attempt,
+                ]);
             }
 
-            Log::warning('[voice_command] Download failed', [
-                'status' => $response->status(),
-                'url' => $mediaUrl,
-            ]);
-        } catch (\Exception $e) {
-            Log::warning('[voice_command] Download exception: ' . $e->getMessage(), [
-                'url' => $mediaUrl,
-            ]);
+            if ($attempt < self::MAX_DOWNLOAD_ATTEMPTS) {
+                sleep(2);
+            }
         }
 
         return null;
+    }
+
+    /**
+     * Returns true if the transcript appears to be silence or noise (too short to be meaningful).
+     * Strips all punctuation and whitespace before checking length.
+     */
+    private function isSilenceOrNoise(string $transcript): bool
+    {
+        $stripped = preg_replace('/[\s\p{P}]+/u', '', $transcript);
+        return mb_strlen($stripped ?? '') < self::MIN_TRANSCRIPT_CHARS;
+    }
+
+    /**
+     * Build a language note with flag emoji for non-default languages.
+     * Returns empty string for the default language.
+     */
+    private function buildLanguageNote(string $language): string
+    {
+        $defaultLang = config('voice_command.default_language', 'fr');
+        if (!$language || $language === $defaultLang) {
+            return '';
+        }
+
+        $flag = self::LANGUAGE_FLAGS[$language] ?? '';
+        $flagStr = $flag ? "{$flag} " : '';
+        return "\n_{$flagStr}Langue detectee : {$language}_";
     }
 
     /**

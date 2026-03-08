@@ -199,4 +199,151 @@ class VoiceCommandAgentTest extends TestCase
             );
         }
     }
+
+    public function test_handle_detects_silence_and_returns_error(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => '.',
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('silence', $result->reply);
+    }
+
+    public function test_handle_detects_very_short_transcript_as_noise(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => 'mm',
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('silence', $result->reply);
+    }
+
+    public function test_handle_pending_context_confirms_transcript(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('{}', 200),
+        ]);
+
+        $context = $this->makeContext(body: 'oui');
+        $pendingContext = [
+            'type' => 'low_confidence_confirm',
+            'data' => [
+                'transcript' => 'Rappelle-moi d\'acheter du pain',
+                'confidence' => 0.65,
+                'language' => 'fr',
+            ],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('acheter du pain', $result->reply);
+        $this->assertTrue($result->metadata['user_confirmed'] ?? false);
+        $this->assertEquals('voice', $result->metadata['source'] ?? null);
+    }
+
+    public function test_handle_pending_context_cancels_transcript(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('{}', 200),
+        ]);
+
+        $context = $this->makeContext(body: 'non');
+        $pendingContext = [
+            'type' => 'low_confidence_confirm',
+            'data' => [
+                'transcript' => 'Rappelle-moi d\'acheter du pain',
+                'confidence' => 0.65,
+                'language' => 'fr',
+            ],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('annulee', $result->reply);
+    }
+
+    public function test_handle_pending_context_re_asks_on_ambiguous_reply(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('{}', 200),
+        ]);
+
+        $context = $this->makeContext(body: 'peut-etre');
+        $pendingContext = [
+            'type' => 'low_confidence_confirm',
+            'data' => [
+                'transcript' => 'Rappelle-moi d\'acheter du pain',
+                'confidence' => 0.65,
+                'language' => 'fr',
+            ],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('oui', $result->reply);
+        $this->assertStringContainsString('non', $result->reply);
+    }
+
+    public function test_handle_pending_context_ignores_unknown_type(): void
+    {
+        $context = $this->makeContext(body: 'oui');
+        $pendingContext = [
+            'type' => 'some_other_type',
+            'data' => [],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNull($result);
+    }
+
+    public function test_version_is_at_least_1_2(): void
+    {
+        $version = $this->agent->version();
+        [$major, $minor] = explode('.', $version);
+        $this->assertEquals('1', $major);
+        $this->assertGreaterThanOrEqual(2, (int) $minor);
+    }
 }
