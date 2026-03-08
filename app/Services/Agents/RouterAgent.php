@@ -246,8 +246,8 @@ PROMPT;
 ■ "screenshot" — OCR & traitement d'images
   Mots-cles: screenshot, OCR, extract text, annoter
 
-■ "content_summarizer" — Resume de liens/articles
-  Mots-cles: resume, article, lien, URL, video
+■ "content_summarizer" — Resume de contenu web (articles, pages, videos YouTube avec transcription). Resumes courts, standards ou detailles
+  Mots-cles: resume, résumé, resumer, summarize, summary, synthese, tldr, article, lien, URL, video, youtube, contenu, de quoi parle, lire pour moi
 
 ■ "habit" — Suivi d'habitudes
   Mots-cles: habitude, streak, tracker, challenge

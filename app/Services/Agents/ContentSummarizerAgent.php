@@ -10,6 +10,12 @@ class ContentSummarizerAgent extends BaseAgent
 {
     private const URL_PATTERN = '#https?://[^\s<>\[\]"\']+#i';
     private const YOUTUBE_PATTERN = '#(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})#i';
+    private const KEYWORD_PATTERN = '/\b(resum[eé]|summarize|summary|synth[eè]se|synthetiser|tldr|tl;?dr|de\s+quoi\s+parle|lire\s+pour\s+moi|read\s+for\s+me)\b/iu';
+
+    public function __construct()
+    {
+        parent::__construct();
+    }
 
     public function name(): string
     {
@@ -46,7 +52,9 @@ class ContentSummarizerAgent extends BaseAgent
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
-        return (bool) preg_match(self::URL_PATTERN, $context->body);
+        // Match URLs or summarize-related keywords
+        return (bool) preg_match(self::URL_PATTERN, $context->body)
+            || (bool) preg_match(self::KEYWORD_PATTERN, $context->body);
     }
 
     public function handle(AgentContext $context): AgentResult
