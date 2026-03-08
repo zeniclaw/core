@@ -43,6 +43,12 @@ class ConversationMemoryService
         Storage::disk('local')->put($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
+    public function clear(int $agentId, string $peerId): void
+    {
+        $path = $this->path($agentId, $peerId);
+        Storage::disk('local')->delete($path);
+    }
+
     public function formatForPrompt(int $agentId, string $peerId, int $maxEntries = 20): string
     {
         $data = $this->read($agentId, $peerId);

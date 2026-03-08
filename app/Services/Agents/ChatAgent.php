@@ -10,6 +10,7 @@ use App\Services\AgenticLoop;
 use App\Services\AgentTools;
 use App\Services\WhisperService;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class ChatAgent extends BaseAgent
 {
@@ -19,7 +20,7 @@ class ChatAgent extends BaseAgent
     private const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
     /** Quick commands resolved without agentic loop. */
-    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities'];
+    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer'];
 
     private ?string $lastVoiceTranscript = null;
 
@@ -48,7 +49,7 @@ class ChatAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -89,9 +90,9 @@ class ChatAgent extends BaseAgent
 
         $reply = $result->reply;
 
-        // Fallback to simple chat if agentic loop fails
+        // Fallback to simple chat if agentic loop fails (use same resolved model)
         if (!$reply) {
-            $reply = $this->claude->chat($claudeMessage, 'claude-haiku-4-5-20251001', $systemPrompt);
+            $reply = $this->claude->chat($claudeMessage, $model, $systemPrompt);
         }
 
         if (!$reply) {
@@ -120,6 +121,39 @@ class ChatAgent extends BaseAgent
         ]);
     }
 
+    /**
+     * Handle follow-up confirmation for /effacer command.
+     */
+    public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
+    {
+        if (($pendingContext['type'] ?? '') !== 'confirm_clear_memory') {
+            return null;
+        }
+
+        $this->clearPendingContext($context);
+        $userReply = mb_strtolower(trim($context->body ?? ''));
+
+        if (preg_match("/\b(oui|yes|ok|ouais|yep|affirm|correct|exact|c'est ?ca|confirme)\b/iu", $userReply)) {
+            $this->memory->clear($context->agent->id, $context->from);
+            $reply = "Memoire de conversation effacee. On repart de zero ! Dis-moi ce dont tu as besoin.";
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Conversation memory cleared by user');
+            return AgentResult::reply($reply, ['memory_cleared' => true]);
+        }
+
+        if (preg_match('/\b(non|no|nope|annuler|cancel|garde|stop)\b/iu', $userReply)) {
+            $reply = "OK, je garde ta memoire de conversation intacte.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['memory_cleared' => false]);
+        }
+
+        // Ambiguous — re-ask
+        $this->setPendingContext($context, 'confirm_clear_memory', [], ttlMinutes: 2, expectRawInput: true);
+        $reply = "Reponds *oui* pour effacer ou *non* pour annuler.";
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
     private function buildSystemPrompt(AgentContext $context): string
     {
         $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
@@ -131,6 +165,8 @@ class ChatAgent extends BaseAgent
             . "Par exemple, si l'utilisateur dit 'rappelle-moi d'appeler Jean demain a 10h', "
             . "utilise directement l'outil create_reminder sans demander confirmation. "
             . "Si l'utilisateur parle de sa todo list, utilise les outils todo directement. "
+            . "Si l'utilisateur partage une info importante (email, numero, preference, donnee cle), "
+            . "stocke-la avec store_knowledge pour ne pas l'oublier. "
             . "Tu es proactif : si tu peux resoudre le probleme avec un outil, fais-le. "
             . "\n\n"
             . "MEMOIRE PERSISTANTE (CRITIQUE):\n"
@@ -147,8 +183,9 @@ class ChatAgent extends BaseAgent
             . $this->buildLengthDirective($context->complexity)
             . "\n\nFORMATAGE WHATSAPP: "
             . "Utilise *texte* pour le gras, _texte_ pour l'italique, ~texte~ pour le barre. "
-            . "Pour les listes, utilise des tirets ou des numeros. "
-            . "Evite le Markdown classique (##, **, etc.) — utilise le formatage WhatsApp natif. "
+            . "Pour les listes, utilise des tirets (-) ou des numeros (1. 2. 3.). "
+            . "Evite le Markdown classique (##, **, etc.) — utilise exclusivement le formatage WhatsApp natif. "
+            . "Pour les separateurs visuels, utilise ---. "
             . "Si tu affiches du code, encadre-le avec des backticks (`) ou triple backticks (```)."
             . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
             . "\nLe message vient de {$context->senderName}.";
@@ -301,6 +338,11 @@ class ChatAgent extends BaseAgent
                 if ($base64Data) {
                     return $this->buildMediaContentBlocks($mimetype, $base64Data, $context->body);
                 }
+                // Download failed — inform clearly rather than silently ignoring
+                $mediaLabel = $mimetype === 'application/pdf' ? 'PDF' : 'image';
+                $message = ($context->body ? "{$context->body}\n\n" : '')
+                    . "[Impossible de telecharger le {$mediaLabel}. "
+                    . "Informe l'utilisateur et invite-le a reessayer.]";
             } elseif (str_starts_with($mimetype, 'audio/')) {
                 $voiceContent = $this->handleVoiceMessage($context);
                 if ($voiceContent) {
@@ -336,7 +378,7 @@ class ChatAgent extends BaseAgent
                 $contentLength = (int) ($headResponse->header('Content-Length') ?? 0);
                 if ($contentLength > 0 && $contentLength > self::MAX_MEDIA_BYTES) {
                     $sizeMb = round($contentLength / 1024 / 1024, 1);
-                    \Illuminate\Support\Facades\Log::warning("[chat] Media too large to download: {$sizeMb} MB ({$mediaUrl})");
+                    Log::warning("[chat] Media too large to download: {$sizeMb} MB ({$mediaUrl})");
                     return null;
                 }
             }
@@ -345,13 +387,15 @@ class ChatAgent extends BaseAgent
             if ($response->successful()) {
                 $body = $response->body();
                 if (strlen($body) > self::MAX_MEDIA_BYTES) {
-                    \Illuminate\Support\Facades\Log::warning('[chat] Downloaded media exceeds size limit, discarding.');
+                    Log::warning('[chat] Downloaded media exceeds size limit, discarding.');
                     return null;
                 }
                 return base64_encode($body);
             }
+
+            Log::warning('[chat] Media download failed: HTTP ' . $response->status());
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('[chat] Failed to download media: ' . $e->getMessage());
+            Log::warning('[chat] Failed to download media: ' . $e->getMessage());
         }
         return null;
     }
@@ -365,10 +409,16 @@ class ChatAgent extends BaseAgent
         try {
             $response = $this->waha(30)->get($context->mediaUrl);
             if (!$response->successful()) {
+                Log::warning('[chat] Voice message download failed: HTTP ' . $response->status());
                 return null;
             }
 
             $audioBytes = $response->body();
+            if (empty($audioBytes)) {
+                Log::warning('[chat] Voice message download returned empty body');
+                return null;
+            }
+
             $whisper = new WhisperService();
             $transcript = $whisper->transcribe($audioBytes, $context->mimetype ?? 'audio/ogg');
 
@@ -381,7 +431,7 @@ class ChatAgent extends BaseAgent
             $caption = $context->body ? "\n{$context->body}" : '';
             return "[Message vocal de {$context->senderName}]\nTranscription : \"{$transcript}\"{$caption}";
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('[chat] Voice message handling failed: ' . $e->getMessage());
+            Log::warning('[chat] Voice message handling failed: ' . $e->getMessage());
             return null;
         }
     }
@@ -413,10 +463,14 @@ class ChatAgent extends BaseAgent
         if ($mimetype === 'application/pdf') {
             $text = $caption
                 ? $caption
-                : 'Analyse ce document PDF : resume le contenu, les points cles et toute information importante.';
+                : "Analyse ce document PDF. Commence par un resume concis (3-5 points cles), "
+                . "puis demande a l'utilisateur s'il veut plus de details sur une section specifique.";
         } else {
-            $imageHint = "Si l'image contient du texte, lis-le integralement. "
-                . "Decris precisement ce que tu vois : personnes, objets, lieux, couleurs, texte visible, contexte.";
+            // Smart image analysis: read text + describe content + handle screenshots/documents
+            $imageHint = "Analyse cette image avec attention : "
+                . "1) Si elle contient du texte (screenshot, document, photo d'affiche), lis-le integralement et cite-le. "
+                . "2) Decris ce que tu vois : personnes, objets, lieux, couleurs, mise en page. "
+                . "3) Si c'est un graphique, code ou tableau, analyse son contenu specifiquement.";
             $text = $caption ? "{$caption}\n\n({$imageHint})" : $imageHint;
         }
 
@@ -427,14 +481,18 @@ class ChatAgent extends BaseAgent
 
     private function buildKnowledgeSummary(AgentContext $context): string
     {
-        $entries = UserKnowledge::allFor($context->from);
+        $allEntries = UserKnowledge::allFor($context->from);
 
-        if ($entries->isEmpty()) {
+        if ($allEntries->isEmpty()) {
             return '';
         }
 
-        $lines = ["DONNEES STOCKEES POUR CET UTILISATEUR (utilise recall_knowledge pour acceder aux details):"];
-        foreach ($entries->take(20) as $entry) {
+        $total = $allEntries->count();
+        $entries = $allEntries->take(20);
+        $suffix = $total > 20 ? " ({$total} entrees au total, 20 affichees)" : '';
+
+        $lines = ["DONNEES STOCKEES POUR CET UTILISATEUR{$suffix} (utilise recall_knowledge pour acceder aux details):"];
+        foreach ($entries as $entry) {
             $label = $entry->label ?? $entry->topic_key;
             $age = $entry->updated_at->diffForHumans();
             $lines[] = "- [{$entry->topic_key}] {$label} (source: {$entry->source}, {$age})";
@@ -444,8 +502,7 @@ class ChatAgent extends BaseAgent
     }
 
     /**
-     * New Feature 1: Quick command handler.
-     * Resolves /aide, /help, /capacites instantly without LLM call.
+     * Dispatch quick commands — resolves instantly without LLM call.
      */
     private function handleQuickCommand(AgentContext $context): ?AgentResult
     {
@@ -455,6 +512,18 @@ class ChatAgent extends BaseAgent
             return null;
         }
 
+        return match ($body) {
+            '/status'  => $this->handleStatusCommand($context),
+            '/effacer' => $this->handleEffacerCommand($context),
+            default    => $this->handleHelpCommand($context),
+        };
+    }
+
+    /**
+     * Quick command: /aide — Comprehensive help text with all supported commands.
+     */
+    private function handleHelpCommand(AgentContext $context): AgentResult
+    {
         $senderName = $context->senderName;
         $reply = "*Bonjour {$senderName} ! Voici ce que je sais faire :*\n\n"
             . "*Messages & conversation*\n"
@@ -477,16 +546,114 @@ class ChatAgent extends BaseAgent
             . "- \"Recommande-moi de la musique chill\"\n\n"
             . "*Memoire*\n"
             . "- Je me souviens de tes preferences et donnees entre conversations\n\n"
+            . "*Commandes rapides*\n"
+            . "- /aide ou /help → cette aide\n"
+            . "- /status → ton tableau de bord (todos, rappels, memoire)\n"
+            . "- /effacer → effacer ta memoire de conversation\n\n"
             . "_Tape simplement ce que tu veux faire, je comprends le langage naturel !_";
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Quick command /aide handled');
 
-        return AgentResult::reply($reply, ['quick_command' => $body]);
+        return AgentResult::reply($reply, ['quick_command' => '/aide']);
     }
 
     /**
-     * New Feature 2: Contextual empty-message guard.
+     * New Feature 1: /status — User dashboard with todos, reminders, memory and project stats.
+     */
+    private function handleStatusCommand(AgentContext $context): AgentResult
+    {
+        $parts = ["*Ton tableau de bord ZeniClaw*\n"];
+
+        // Todos
+        $todos = \App\Models\Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->get();
+        $todoDone = $todos->where('is_done', true)->count();
+        $todoPending = $todos->where('is_done', false)->count();
+
+        if ($todos->isNotEmpty()) {
+            $parts[] = "*Todos :* {$todoPending} a faire, {$todoDone} termines";
+        } else {
+            $parts[] = "*Todos :* aucun";
+        }
+
+        // Reminders
+        $reminders = \App\Models\Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->get();
+
+        if ($reminders->isNotEmpty()) {
+            $nextReminder = $reminders->first();
+            $at = $nextReminder->scheduled_at->setTimezone(AppSetting::timezone())->format('d/m H:i');
+            $parts[] = "*Rappels :* {$reminders->count()} en attente (prochain : {$at})";
+        } else {
+            $parts[] = "*Rappels :* aucun en attente";
+        }
+
+        // Persistent knowledge
+        $knowledge = UserKnowledge::allFor($context->from);
+        if ($knowledge->isNotEmpty()) {
+            $parts[] = "*Memoire persistante :* {$knowledge->count()} entrees stockees";
+        } else {
+            $parts[] = "*Memoire persistante :* vide";
+        }
+
+        // Conversation memory
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $memoryCount = count($memoryData['entries'] ?? []);
+        $parts[] = "*Historique de conversation :* {$memoryCount} echanges";
+
+        // Active project
+        $activeProjectId = $context->session->active_project_id ?? null;
+        if ($activeProjectId) {
+            $project = Project::find($activeProjectId);
+            if ($project) {
+                $parts[] = "*Projet actif :* {$project->name}";
+            } else {
+                $parts[] = "*Projet actif :* aucun";
+            }
+        } else {
+            $parts[] = "*Projet actif :* aucun";
+        }
+
+        $parts[] = "\n_/effacer pour reinitialiser l'historique de conversation_";
+
+        $reply = implode("\n", $parts);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /status handled', ['memory_entries' => $memoryCount]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/status']);
+    }
+
+    /**
+     * New Feature 2: /effacer — Clears conversation memory with user confirmation.
+     */
+    private function handleEffacerCommand(AgentContext $context): AgentResult
+    {
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $count = count($memoryData['entries'] ?? []);
+
+        if ($count === 0) {
+            $reply = "Ta memoire de conversation est deja vide. Rien a effacer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/effacer', 'memory_cleared' => false]);
+        }
+
+        $this->setPendingContext($context, 'confirm_clear_memory', [], ttlMinutes: 2, expectRawInput: true);
+        $reply = "Ta memoire de conversation contient *{$count} echanges*. "
+            . "Veux-tu vraiment tout effacer ?\n\n"
+            . "Reponds *oui* pour confirmer ou *non* pour annuler.";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /effacer — confirmation requested', ['entries' => $count]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/effacer']);
+    }
+
+    /**
+     * Contextual empty-message guard.
      * Returns a friendly nudge if the message body and media are both absent.
      */
     private function buildEmptyMessageFallback(AgentContext $context): ?AgentResult
