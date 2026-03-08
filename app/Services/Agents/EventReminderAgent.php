@@ -6,6 +6,7 @@ use App\Models\AppSetting;
 use App\Models\EventReminder;
 use App\Services\AgentContext;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class EventReminderAgent extends BaseAgent
 {
@@ -21,7 +22,7 @@ class EventReminderAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion d\'evenements et calendrier. Permet de creer, lister, modifier et supprimer des evenements avec date, heure, lieu, participants et rappels automatiques configurables (30min, 1h, 1 jour avant).';
+        return 'Agent de gestion d\'evenements et calendrier. Permet de creer, lister, rechercher, modifier et supprimer des evenements avec date, heure, lieu, participants et rappels automatiques configurables (30min, 1h, 1 jour avant). Supporte la vue du jour et la recherche par mot-cle.';
     }
 
     public function keywords(): array
@@ -39,18 +40,20 @@ class EventReminderAgent extends BaseAgent
             'rdv', 'rendez-vous', 'rendez vous', 'appointment',
             'conference', 'séminaire', 'seminaire', 'workshop',
             'planning', 'planifier', 'plan',
+            'search event', 'chercher evenement', 'trouver evenement', 'find event',
+            'today events', 'evenements aujourd\'hui', 'evenements du jour',
         ];
     }
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
-        return (bool) preg_match('/\b(event|evenement|calendrier|calendar|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|event\s+on)\b/iu', $context->body);
+        return (bool) preg_match('/\b(event|evenement|événement|calendrier|calendar|agenda|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|event\s+on|rdv|rendez-vous|rendez\s+vous|appointment|planifier|search\s+event|chercher\s+evenement)\b/iu', $context->body);
     }
 
     public function handle(AgentContext $context): AgentResult
@@ -60,17 +63,29 @@ class EventReminderAgent extends BaseAgent
 
         $this->log($context, 'Event reminder command received', ['body' => mb_substr($body, 0, 100)]);
 
-        // Parse commands
-        if (preg_match('/\b(list|lister|voir|mes)\s*(events?|evenements?|calendrier)\b/iu', $lower)) {
+        // List events
+        if (preg_match('/\b(list|lister|voir|mes)\s*(events?|evenements?|calendrier|agenda)\b/iu', $lower)) {
             return $this->listEvents($context);
         }
 
+        // Today's events
+        if (preg_match('/\b(today|aujourd\'?hui|ce\s+jour|du\s+jour)\b.*\b(event|evenement|rdv|agenda)\b|\b(event|evenement|rdv|agenda)\b.*\b(today|aujourd\'?hui|ce\s+jour|du\s+jour)\b/iu', $lower)) {
+            return $this->todayEvents($context);
+        }
+
+        // Remove event
         if (preg_match('/\b(remove|supprimer|annuler|cancel)\s*event\s*#?(\d+)/iu', $lower, $m)) {
             return $this->removeEvent($context, (int) $m[2]);
         }
 
-        if (preg_match('/\bupdate\s*event\s*#?(\d+)\s+(\w+)\s+(.+)/iu', $lower, $m)) {
+        // Update event — supports multi-word values
+        if (preg_match('/\bupdate\s*event\s*#?(\d+)\s+(\w+)\s+(.+)/iu', $body, $m)) {
             return $this->updateEvent($context, (int) $m[1], $m[2], trim($m[3]));
+        }
+
+        // Search events by keyword
+        if (preg_match('/\b(search|chercher|trouver|find)\s*(?:event|evenement)?\s+(.+)/iu', $lower, $m)) {
+            return $this->searchEvents($context, trim($m[2]));
         }
 
         // Natural language: use Claude to parse event details
@@ -83,32 +98,90 @@ class EventReminderAgent extends BaseAgent
         $now = Carbon::now(AppSetting::timezone());
 
         $response = $this->claude->chat(
-            "Message utilisateur: \"{$body}\"\nDate/heure actuelle: {$now->format('Y-m-d H:i')} (" . AppSetting::timezone() . ")\nJour: {$now->translatedFormat('l')}",
+            "Message utilisateur: \"{$body}\"\n"
+            . "Date/heure actuelle: {$now->format('Y-m-d H:i')} (" . AppSetting::timezone() . ")\n"
+            . "Jour: {$now->translatedFormat('l')} {$now->format('d/m/Y')}",
             $model,
-            "Tu es un assistant de gestion d'evenements. Analyse le message et reponds UNIQUEMENT en JSON.\n\n"
-            . "Format JSON attendu:\n"
-            . "{\"action\": \"create|list|remove|help\", \"event_name\": \"...\", \"event_date\": \"YYYY-MM-DD\", \"event_time\": \"HH:MM\", \"location\": \"...\", \"participants\": [\"...\"], \"description\": \"...\", \"reminder_minutes\": [30, 60, 1440]}\n\n"
-            . "Regles:\n"
-            . "- 'remind me about X on DATE at TIME' → create\n"
-            . "- 'add event X DATE TIME' → create\n"
-            . "- 'demain' = date de demain, 'lundi prochain' = date du prochain lundi, etc.\n"
-            . "- Si pas de time precise, utilise null\n"
-            . "- Si pas de reminder_minutes, utilise [30, 60, 1440] par defaut (30min, 1h, 1 jour avant)\n"
-            . "- Reponds UNIQUEMENT avec le JSON, rien d'autre."
+            $this->buildSystemPrompt()
         );
 
-        $parsed = json_decode(trim($response ?? ''), true);
+        $parsed = $this->parseJson($response);
 
         if (!$parsed || empty($parsed['action'])) {
-            return $this->showHelp();
+            return $this->showHelp($context);
         }
 
         return match ($parsed['action']) {
             'create' => $this->createEvent($context, $parsed),
             'list' => $this->listEvents($context),
-            'remove' => isset($parsed['event_id']) ? $this->removeEvent($context, (int) $parsed['event_id']) : $this->listEvents($context),
-            default => $this->showHelp(),
+            'today' => $this->todayEvents($context),
+            'remove' => isset($parsed['event_id'])
+                ? $this->removeEvent($context, (int) $parsed['event_id'])
+                : $this->listEvents($context),
+            'update' => isset($parsed['event_id'])
+                ? $this->updateEventFromNl($context, (int) $parsed['event_id'], $parsed)
+                : $this->showHelp($context),
+            'search' => isset($parsed['keyword'])
+                ? $this->searchEvents($context, $parsed['keyword'])
+                : $this->showHelp($context),
+            'help' => $this->showHelp($context),
+            default => $this->showHelp($context),
         };
+    }
+
+    private function buildSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un assistant de gestion d'evenements. Analyse le message et reponds UNIQUEMENT en JSON valide, sans markdown.
+
+FORMAT JSON:
+{"action": "create|list|today|remove|update|search|help", ...champs selon action}
+
+ACTIONS:
+
+1. CREER un evenement:
+{"action": "create", "event_name": "nom", "event_date": "YYYY-MM-DD", "event_time": "HH:MM", "location": "lieu", "participants": ["nom1"], "description": "details", "reminder_minutes": [30, 60, 1440]}
+
+2. LISTER les evenements:
+{"action": "list"}
+
+3. VOIR les evenements DU JOUR:
+{"action": "today"}
+
+4. SUPPRIMER un evenement:
+{"action": "remove", "event_id": 5}
+
+5. MODIFIER un evenement:
+{"action": "update", "event_id": 5, "field": "event_name|event_date|event_time|location|description", "value": "nouvelle valeur"}
+
+6. RECHERCHER par mot-cle:
+{"action": "search", "keyword": "mot cle"}
+
+7. AIDE:
+{"action": "help"}
+
+REGLES:
+- 'remind me about X on DATE at TIME' → create
+- 'add event X DATE TIME' → create
+- 'demain' = date de demain, 'lundi prochain' = prochaine occurrence du lundi, etc.
+- Convertis les heures informelles: '14h' → '14:00', '9h30' → '09:30', 'midi' → '12:00'
+- Si pas de time precise, utilise null
+- Si pas de reminder_minutes, utilise [30, 60, 1440] par defaut (30min, 1h, 1 jour avant)
+- Pour supprimer: detecte l'ID dans 'supprime l'evenement #3', 'annule event 5', etc.
+- Pour modifier: detecte l'ID et le champ a modifier
+- Ne mets que les champs pertinents pour l'action
+
+EXEMPLES:
+- "remind me about Reunion equipe on 2026-03-10 at 14:00" → {"action":"create","event_name":"Reunion equipe","event_date":"2026-03-10","event_time":"14:00","reminder_minutes":[30,60,1440]}
+- "add event Dentiste demain a 10h" → {"action":"create","event_name":"Dentiste","event_date":"2026-03-09","event_time":"10:00","reminder_minutes":[30,60,1440]}
+- "mes evenements" → {"action":"list"}
+- "evenements aujourd'hui" → {"action":"today"}
+- "supprime evenement #3" → {"action":"remove","event_id":3}
+- "change le lieu de l'event #5 a Paris" → {"action":"update","event_id":5,"field":"location","value":"Paris"}
+- "cherche dentiste" → {"action":"search","keyword":"dentiste"}
+
+Reponds UNIQUEMENT avec le JSON.
+PROMPT;
     }
 
     private function createEvent(AgentContext $context, array $data): AgentResult
@@ -117,16 +190,43 @@ class EventReminderAgent extends BaseAgent
         $eventDate = $data['event_date'] ?? null;
 
         if (!$eventName || !$eventDate) {
-            return AgentResult::reply(
-                "Je n'ai pas pu comprendre l'evenement. Precise au moins un nom et une date.\n\n"
-                . "Exemple : *remind me about Reunion equipe on 2026-03-10 at 14:00*"
-            );
+            $reply = "Je n'ai pas pu comprendre l'evenement. Precise au moins un nom et une date.\n\n"
+                . "Exemple : *remind me about Reunion equipe on 2026-03-10 at 14:00*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Validate date format
+        try {
+            $parsedDate = Carbon::parse($eventDate, AppSetting::timezone());
+        } catch (\Exception $e) {
+            $reply = "La date *{$eventDate}* n'est pas valide. Utilise le format YYYY-MM-DD ou une expression naturelle (demain, lundi prochain...).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Warn if date is in the past
+        $now = Carbon::now(AppSetting::timezone());
+        $eventDatetime = $parsedDate->copy();
+        if (!empty($data['event_time'])) {
+            try {
+                $timeParts = explode(':', $data['event_time']);
+                $eventDatetime->setTime((int) $timeParts[0], (int) ($timeParts[1] ?? 0));
+            } catch (\Exception $e) {
+                // keep date-only comparison
+            }
+        }
+
+        if ($eventDatetime->isPast()) {
+            $reply = "La date *{$parsedDate->format('d/m/Y')}* est dans le passe. Verifie la date et reessaie.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
         }
 
         $event = EventReminder::create([
             'user_phone' => $context->from,
             'event_name' => $eventName,
-            'event_date' => $eventDate,
+            'event_date' => $parsedDate->format('Y-m-d'),
             'event_time' => $data['event_time'] ?? null,
             'location' => $data['location'] ?? null,
             'participants' => $data['participants'] ?? null,
@@ -138,7 +238,10 @@ class EventReminderAgent extends BaseAgent
 
         $this->log($context, 'Event created', ['event_id' => $event->id, 'name' => $eventName]);
 
-        return AgentResult::reply($this->enrichResponse($event, 'create'));
+        $reply = $this->enrichResponse($event, 'create');
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, ['event_id' => $event->id]);
     }
 
     private function listEvents(AgentContext $context): AgentResult
@@ -151,23 +254,93 @@ class EventReminderAgent extends BaseAgent
             ->get();
 
         if ($events->isEmpty()) {
-            return AgentResult::reply(
-                "Aucun evenement a venir !\n\n"
+            $reply = "Aucun evenement a venir !\n\n"
                 . "Ajoute-en un avec :\n"
-                . "*remind me about [evenement] on [date] at [heure]*"
-            );
+                . "*remind me about [evenement] on [date] at [heure]*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
         }
 
-        $response = "*Tes evenements a venir :*\n\n";
+        $reply = "*Tes evenements a venir :*\n\n";
         foreach ($events as $event) {
-            $response .= $this->formatEventLine($event) . "\n";
+            $reply .= $this->formatEventLine($event) . "\n";
         }
 
-        $response .= "\nCommandes :\n"
+        $reply .= "\nCommandes :\n"
             . "- *remove event #ID* — Supprimer\n"
-            . "- *update event #ID field value* — Modifier";
+            . "- *update event #ID champ valeur* — Modifier\n"
+            . "- *search event [mot-cle]* — Rechercher";
 
-        return AgentResult::reply($response);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Events listed', ['count' => $events->count()]);
+
+        return AgentResult::reply($reply, ['count' => $events->count()]);
+    }
+
+    private function todayEvents(AgentContext $context): AgentResult
+    {
+        $today = Carbon::today(AppSetting::timezone());
+
+        $events = EventReminder::where('user_phone', $context->from)
+            ->where('status', 'active')
+            ->whereDate('event_date', $today->format('Y-m-d'))
+            ->orderBy('event_time')
+            ->get();
+
+        if ($events->isEmpty()) {
+            $reply = "Aucun evenement prevu aujourd'hui (" . $today->translatedFormat('l j F') . ").\n\n"
+                . "Tape *list events* pour voir tous tes evenements a venir.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $reply = "*Evenements du " . $today->translatedFormat('l j F Y') . " :*\n\n";
+        foreach ($events as $event) {
+            $reply .= $this->formatEventLine($event) . "\n";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Today events listed', ['count' => $events->count()]);
+
+        return AgentResult::reply($reply, ['count' => $events->count()]);
+    }
+
+    private function searchEvents(AgentContext $context, string $keyword): AgentResult
+    {
+        $keyword = trim($keyword);
+
+        if (mb_strlen($keyword) < 2) {
+            $reply = "Le mot-cle est trop court. Essaie avec au moins 2 caracteres.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $events = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->where(function ($q) use ($keyword) {
+                $q->where('event_name', 'like', "%{$keyword}%")
+                  ->orWhere('description', 'like', "%{$keyword}%")
+                  ->orWhere('location', 'like', "%{$keyword}%");
+            })
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->get();
+
+        if ($events->isEmpty()) {
+            $reply = "Aucun evenement trouve pour *{$keyword}*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $reply = "*Resultats pour \"{$keyword}\" :*\n\n";
+        foreach ($events as $event) {
+            $reply .= $this->formatEventLine($event) . "\n";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Events searched', ['keyword' => $keyword, 'count' => $events->count()]);
+
+        return AgentResult::reply($reply, ['keyword' => $keyword, 'count' => $events->count()]);
     }
 
     private function removeEvent(AgentContext $context, int $eventId): AgentResult
@@ -177,7 +350,9 @@ class EventReminderAgent extends BaseAgent
             ->first();
 
         if (!$event) {
-            return AgentResult::reply("Evenement #{$eventId} introuvable.");
+            $reply = "Evenement #{$eventId} introuvable. Tape *list events* pour voir tes evenements.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
         }
 
         $name = $event->event_name;
@@ -185,7 +360,10 @@ class EventReminderAgent extends BaseAgent
 
         $this->log($context, 'Event cancelled', ['event_id' => $eventId]);
 
-        return AgentResult::reply("Evenement #{$eventId} annule : _{$name}_");
+        $reply = "Evenement #{$eventId} annule : _{$name}_";
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply);
     }
 
     private function updateEvent(AgentContext $context, int $eventId, string $field, string $value): AgentResult
@@ -195,7 +373,9 @@ class EventReminderAgent extends BaseAgent
             ->first();
 
         if (!$event) {
-            return AgentResult::reply("Evenement #{$eventId} introuvable.");
+            $reply = "Evenement #{$eventId} introuvable. Tape *list events* pour voir tes evenements.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
         }
 
         $allowedFields = ['event_name', 'event_date', 'event_time', 'location', 'description'];
@@ -212,21 +392,50 @@ class EventReminderAgent extends BaseAgent
 
         $dbField = $fieldMap[mb_strtolower($field)] ?? null;
         if (!$dbField || !in_array($dbField, $allowedFields)) {
-            return AgentResult::reply(
-                "Champ *{$field}* non reconnu.\n"
-                . "Champs modifiables : name, date, time, location, description"
-            );
+            $reply = "Champ *{$field}* non reconnu.\n"
+                . "Champs modifiables : name, date, time, location, description";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Validate date if updating event_date
+        if ($dbField === 'event_date') {
+            try {
+                $value = Carbon::parse($value, AppSetting::timezone())->format('Y-m-d');
+            } catch (\Exception $e) {
+                $reply = "Date invalide : *{$value}*. Utilise le format YYYY-MM-DD.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply);
+            }
         }
 
         $event->update([$dbField => $value]);
 
         $this->log($context, 'Event updated', ['event_id' => $eventId, 'field' => $dbField, 'value' => $value]);
 
-        return AgentResult::reply(
-            "Evenement #{$eventId} mis a jour !\n"
+        $fresh = $event->fresh();
+        $reply = "Evenement #{$eventId} mis a jour !\n"
             . "*{$field}* → {$value}\n\n"
-            . $this->formatEventLine($event->fresh())
-        );
+            . ($fresh ? $this->formatEventLine($fresh) : '');
+
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply);
+    }
+
+    private function updateEventFromNl(AgentContext $context, int $eventId, array $data): AgentResult
+    {
+        $field = $data['field'] ?? null;
+        $value = $data['value'] ?? null;
+
+        if (!$field || $value === null) {
+            $reply = "Precise le champ et la valeur a modifier.\n"
+                . "Exemple : *update event #5 location Salle B*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        return $this->updateEvent($context, $eventId, $field, (string) $value);
     }
 
     private function enrichResponse(EventReminder $event, string $action): string
@@ -259,7 +468,6 @@ class EventReminderAgent extends BaseAgent
 
         $response .= "\nDans : *{$timeUntil}*\n";
 
-        // Reminder schedule
         $reminderTimes = $event->reminder_times ?? [30, 60, 1440];
         $reminderLabels = array_map(fn ($m) => $this->minutesToLabel($m), $reminderTimes);
         $response .= "Rappels : " . implode(', ', $reminderLabels);
@@ -290,22 +498,53 @@ class EventReminderAgent extends BaseAgent
         return "{$minutes}min avant";
     }
 
-    private function showHelp(): AgentResult
+    private function parseJson(?string $response): ?array
     {
-        return AgentResult::reply(
-            "*Event Reminder — Gestion d'evenements :*\n\n"
+        if (!$response) return null;
+
+        $clean = trim($response);
+
+        // Strip markdown code fences
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        // Extract JSON object if surrounded by extra text
+        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        $decoded = json_decode($clean, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::warning('[EventReminderAgent] JSON parse failed', ['raw' => mb_substr($clean, 0, 200)]);
+            return null;
+        }
+
+        return $decoded;
+    }
+
+    private function showHelp(AgentContext $context): AgentResult
+    {
+        $reply = "*Event Reminder — Gestion d'evenements :*\n\n"
             . "*Creer :*\n"
             . "remind me about [evenement] on [date] at [heure]\n"
             . "add event [nom] [date] [heure]\n\n"
             . "*Gerer :*\n"
             . "list events — Voir les evenements a venir\n"
+            . "today events — Evenements du jour\n"
             . "remove event #ID — Annuler un evenement\n"
-            . "update event #ID [champ] [valeur] — Modifier\n\n"
+            . "update event #ID [champ] [valeur] — Modifier\n"
+            . "search event [mot-cle] — Rechercher\n\n"
             . "*Exemples :*\n"
             . "- remind me about Reunion equipe on 2026-03-10 at 14:00\n"
             . "- add event Dentiste demain a 10h\n"
-            . "- list events\n"
-            . "- remove event #3"
-        );
+            . "- evenements aujourd'hui\n"
+            . "- cherche dentiste\n"
+            . "- remove event #3\n"
+            . "- update event #3 location Salle A";
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
     }
 }
