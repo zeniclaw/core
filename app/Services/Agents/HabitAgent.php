@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 
 class HabitAgent extends BaseAgent
 {
+    private const MAX_HABITS = 20;
+
     public function name(): string
     {
         return 'habit';
@@ -19,7 +21,7 @@ class HabitAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui, et annuler un log accidentel.';
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, voir l\'historique des 7 derniers jours, et annuler un log accidentel.';
     }
 
     public function keywords(): array
@@ -36,6 +38,8 @@ class HabitAgent extends BaseAgent
             'streak', 'streaks', 'serie', 'mon streak', 'my streak',
             'supprimer habitude', 'delete habit', 'enlever habitude',
             'reset habitude', 'reinitialiser habitude',
+            'renommer habitude', 'rename habit', 'changer nom habitude',
+            'historique habitude', 'habit history', 'derniers jours habitude',
             'meditation', 'sport', 'lecture', 'exercice', 'marche',
             'routine', 'routines', 'routine quotidienne', 'daily routine',
             'discipline', 'regularity', 'regularite',
@@ -48,7 +52,7 @@ class HabitAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -80,6 +84,7 @@ class HabitAgent extends BaseAgent
                 . "- \"J'ai medite\" / \"Cocher meditation\"\n"
                 . "- \"Mes habitudes\" / \"Stats habitudes\"\n"
                 . "- \"Aujourd'hui\" pour voir ce qu'il reste\n"
+                . "- \"Historique habitude 1\" pour les 7 derniers jours\n"
                 . "- \"Aide habitudes\" pour le guide complet";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'habit_parse_failed']);
@@ -88,16 +93,18 @@ class HabitAgent extends BaseAgent
         $action = $parsed['action'];
 
         return match ($action) {
-            'add'    => $this->handleAdd($context, $parsed),
-            'log'    => $this->handleLog($context, $habits, $parsed),
-            'unlog'  => $this->handleUnlog($context, $habits, $parsed),
-            'list'   => $this->handleList($context, $habits),
-            'today'  => $this->handleToday($context, $habits),
-            'stats'  => $this->handleStats($context, $habits),
-            'delete' => $this->handleDelete($context, $habits, $parsed),
-            'reset'  => $this->handleReset($context, $habits, $parsed),
-            'help'   => $this->handleHelp($context),
-            default  => $this->handleUnknown($context),
+            'add'     => $this->handleAdd($context, $parsed),
+            'log'     => $this->handleLog($context, $habits, $parsed),
+            'unlog'   => $this->handleUnlog($context, $habits, $parsed),
+            'list'    => $this->handleList($context, $habits),
+            'today'   => $this->handleToday($context, $habits),
+            'stats'   => $this->handleStats($context, $habits),
+            'delete'  => $this->handleDelete($context, $habits, $parsed),
+            'reset'   => $this->handleReset($context, $habits, $parsed),
+            'rename'  => $this->handleRename($context, $habits, $parsed),
+            'history' => $this->handleHistory($context, $habits, $parsed),
+            'help'    => $this->handleHelp($context),
+            default   => $this->handleUnknown($context),
         };
     }
 
@@ -135,7 +142,14 @@ ACTIONS POSSIBLES:
 8. REINITIALISER les streaks et logs d'une habitude:
 {"action": "reset", "item": 1}
 
-9. AIDE / GUIDE d'utilisation:
+9. RENOMMER une habitude existante:
+{"action": "rename", "item": 1, "name": "nouveau nom"}
+
+10. HISTORIQUE des 7 derniers jours pour une habitude:
+{"action": "history", "item": 1}
+Si l'utilisateur veut voir toutes les habitudes, item = null.
+
+11. AIDE / GUIDE d'utilisation:
 {"action": "help"}
 
 REGLES:
@@ -159,6 +173,9 @@ EXEMPLES:
 - "Stats habitudes" ou "Mon streak" ou "Mes stats" -> {"action": "stats"}
 - "Supprimer habitude 2" -> {"action": "delete", "item": 2}
 - "Reset habitude 1" -> {"action": "reset", "item": 1}
+- "Renommer habitude 2 en Course a pied" -> {"action": "rename", "item": 2, "name": "Course a pied"}
+- "Historique meditation" ou "Derniers jours meditation" -> {"action": "history", "item": X}
+- "Historique de toutes mes habitudes" -> {"action": "history", "item": null}
 - "Aide" ou "Comment ca marche" -> {"action": "help"}
 
 Reponds UNIQUEMENT avec le JSON.
@@ -172,6 +189,17 @@ PROMPT;
             $reply = "Donne-moi le nom de l'habitude a ajouter.\nEx: \"Ajouter habitude Meditation\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'habit_add_no_name']);
+        }
+
+        // Check max habits limit
+        $count = Habit::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->count();
+
+        if ($count >= self::MAX_HABITS) {
+            $reply = "Tu as atteint la limite de " . self::MAX_HABITS . " habitudes. Supprime-en une avant d'en ajouter une nouvelle.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_add_limit_reached']);
         }
 
         // Check for duplicate name (case-insensitive)
@@ -243,8 +271,8 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_already_logged']);
         }
 
-        $streak    = $this->calculateStreak($habit->id);
-        $newStreak = $streak + 1;
+        $streak     = $this->calculateStreak($habit->id);
+        $newStreak  = $streak + 1;
         $bestStreak = max($this->getBestStreak($habit->id), $newStreak);
 
         HabitLog::create([
@@ -266,8 +294,8 @@ PROMPT;
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Habit logged', [
-            'habit_id'   => $habit->id,
-            'streak'     => $newStreak,
+            'habit_id'    => $habit->id,
+            'streak'      => $newStreak,
             'best_streak' => $bestStreak,
         ]);
 
@@ -323,10 +351,10 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_list_empty']);
         }
 
-        $today = now(AppSetting::timezone())->toDateString();
+        $today    = now(AppSetting::timezone())->toDateString();
+        $habitIds = $habits->pluck('id')->toArray();
 
         // Batch-load today's logs for all habits in one query
-        $habitIds    = $habits->pluck('id')->toArray();
         $doneTodayIds = HabitLog::whereIn('habit_id', $habitIds)
             ->where('completed_date', $today)
             ->pluck('habit_id')
@@ -360,6 +388,11 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'habit_list']);
     }
 
+    /**
+     * Show today's status for all habits (daily AND weekly).
+     * Daily: done if logged today.
+     * Weekly: done if logged at any point this week (Monday–Sunday).
+     */
     private function handleToday(AgentContext $context, $habits): AgentResult
     {
         if ($habits->isEmpty()) {
@@ -368,46 +401,71 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_today_empty']);
         }
 
-        $today = now(AppSetting::timezone())->toDateString();
+        $tz       = AppSetting::timezone();
+        $now      = now($tz);
+        $today    = $now->toDateString();
+        $habitIds = $habits->pluck('id')->toArray();
 
-        $habitIds     = $habits->pluck('id')->toArray();
+        // Daily: done if logged today
         $doneTodayIds = HabitLog::whereIn('habit_id', $habitIds)
             ->where('completed_date', $today)
             ->pluck('habit_id')
             ->toArray();
 
-        $dailyHabits = $habits->where('frequency', 'daily');
-        $pending     = $dailyHabits->filter(fn($h) => !in_array($h->id, $doneTodayIds));
-        $done        = $dailyHabits->filter(fn($h) => in_array($h->id, $doneTodayIds));
+        // Weekly: done if logged any day since the start of this week
+        $weekStart       = $now->copy()->startOfWeek()->toDateString();
+        $doneThisWeekIds = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$weekStart, $today])
+            ->pluck('habit_id')
+            ->unique()
+            ->toArray();
+
+        $dailyHabits  = $habits->where('frequency', 'daily');
+        $weeklyHabits = $habits->where('frequency', 'weekly');
+
+        $doneDaily     = $dailyHabits->filter(fn($h) => in_array($h->id, $doneTodayIds));
+        $pendingDaily  = $dailyHabits->filter(fn($h) => !in_array($h->id, $doneTodayIds));
+        $doneWeekly    = $weeklyHabits->filter(fn($h) => in_array($h->id, $doneThisWeekIds));
+        $pendingWeekly = $weeklyHabits->filter(fn($h) => !in_array($h->id, $doneThisWeekIds));
 
         $lines = ["Aujourd'hui :"];
 
-        if ($done->isNotEmpty()) {
+        if ($doneDaily->isNotEmpty() || $doneWeekly->isNotEmpty()) {
             $lines[] = "\nFaites :";
-            foreach ($done->values() as $i => $habit) {
-                $num    = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
-                $streak = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
+            foreach ($doneDaily->values() as $habit) {
+                $num     = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+                $streak  = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
                 $lines[] = "  {$num}. {$habit->name} (streak: {$streak}j)";
+            }
+            foreach ($doneWeekly->values() as $habit) {
+                $num     = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+                $streak  = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
+                $lines[] = "  {$num}. {$habit->name} [hebdo, fait cette semaine] (streak: {$streak}j)";
             }
         }
 
-        if ($pending->isNotEmpty()) {
+        if ($pendingDaily->isNotEmpty() || $pendingWeekly->isNotEmpty()) {
             $lines[] = "\nA faire :";
-            foreach ($pending->values() as $habit) {
-                $num    = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
-                $streak = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
+            foreach ($pendingDaily->values() as $habit) {
+                $num     = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+                $streak  = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
                 $lines[] = "  {$num}. {$habit->name} (streak: {$streak}j)";
+            }
+            foreach ($pendingWeekly->values() as $habit) {
+                $num     = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+                $streak  = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id);
+                $lines[] = "  {$num}. {$habit->name} [hebdo, pas encore fait cette semaine] (streak: {$streak}j)";
             }
         }
 
-        $doneCount    = $done->count();
-        $pendingCount = $pending->count();
-        $total        = $dailyHabits->count();
+        $doneCount    = $doneDaily->count() + $doneWeekly->count();
+        $pendingCount = $pendingDaily->count() + $pendingWeekly->count();
+        $total        = $habits->count();
 
-        $lines[] = "\n{$doneCount}/{$total} habitudes quotidiennes completees.";
+        $lines[] = "\n{$doneCount}/{$total} habitudes completees.";
 
         if ($pendingCount === 0 && $total > 0) {
-            $lines[] = "Bravo, toutes les habitudes du jour sont faites !";
+            $lines[] = "Bravo, toutes les habitudes sont a jour !";
         }
 
         $reply = implode("\n", $lines);
@@ -425,10 +483,10 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'habit_stats_empty']);
         }
 
-        $today     = now(AppSetting::timezone());
-        $todayStr  = $today->toDateString();
-        $since30   = $today->copy()->subDays(30)->toDateString();
-        $habitIds  = $habits->pluck('id')->toArray();
+        $today    = now(AppSetting::timezone());
+        $todayStr = $today->toDateString();
+        $since30  = $today->copy()->subDays(30)->toDateString();
+        $habitIds = $habits->pluck('id')->toArray();
 
         // Batch queries to avoid N+1
         $doneTodayIds = HabitLog::whereIn('habit_id', $habitIds)
@@ -468,10 +526,11 @@ PROMPT;
             $denominator = $habit->frequency === 'daily' ? 30 : round(30 / 7, 1);
             $rate        = $denominator > 0 ? min(100, round(($last30 / $denominator) * 100)) : 0;
 
-            $status  = $doneToday ? ' [FAIT]' : '';
-            $lines[] = "\n{$num}. {$habit->name}{$status}";
-            $lines[] = "   Streak: {$streak}j | Record: {$bestStreak}j | Total: {$totalLogs}";
-            $lines[] = "   Taux 30j: {$rate}%";
+            $freqLabel = $habit->frequency === 'daily' ? 'quotidien' : 'hebdo';
+            $status    = $doneToday ? ' [FAIT]' : '';
+            $lines[]   = "\n{$num}. {$habit->name}{$status} [{$freqLabel}]";
+            $lines[]   = "   Streak: {$streak}j | Record: {$bestStreak}j | Total: {$totalLogs}";
+            $lines[]   = "   Taux 30j: {$rate}%";
         }
 
         $lines[] = "\n---";
@@ -545,6 +604,134 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'habit_reset']);
     }
 
+    /**
+     * Rename an existing habit (checks for duplicates, preserves all logs and streaks).
+     */
+    private function handleRename(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $item    = $parsed['item'] ?? null;
+        $newName = trim($parsed['name'] ?? '');
+
+        if (!$item || $habits->isEmpty()) {
+            $reply = "Quelle habitude veux-tu renommer ? Ex: \"Renommer habitude 2 en Course a pied\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_rename_no_item']);
+        }
+
+        if (!$newName) {
+            $reply = "Donne-moi le nouveau nom. Ex: \"Renommer habitude 2 en Course a pied\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_rename_no_name']);
+        }
+
+        $habit = $habits->values()[(int) $item - 1] ?? null;
+
+        if (!$habit) {
+            $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_rename_not_found']);
+        }
+
+        // Check duplicate name (excluding current habit)
+        $exists = Habit::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('id', '!=', $habit->id)
+            ->whereRaw('LOWER(name) = ?', [strtolower($newName)])
+            ->exists();
+
+        if ($exists) {
+            $reply = "Tu as deja une habitude nommee \"{$newName}\".";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_rename_duplicate']);
+        }
+
+        $oldName = $habit->name;
+        $habit->update(['name' => $newName]);
+
+        $reply = "Habitude renommee : \"{$oldName}\" -> \"{$newName}\"";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit renamed', [
+            'habit_id' => $habit->id,
+            'old_name' => $oldName,
+            'new_name' => $newName,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_rename', 'habit_id' => $habit->id]);
+    }
+
+    /**
+     * Show 7-day completion history for one or all habits.
+     * Displays a simple day-by-day grid: "01/03:X | 02/03:_ | ..."
+     */
+    private function handleHistory(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_history_empty']);
+        }
+
+        $item = $parsed['item'] ?? null;
+        $tz   = AppSetting::timezone();
+        $now  = now($tz);
+
+        // Build last 7 days (oldest first for display)
+        $days = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $days[] = $now->copy()->subDays($i)->toDateString();
+        }
+
+        // Filter to specific habit or all
+        if ($item !== null) {
+            $targetHabit = $habits->values()[(int) $item - 1] ?? null;
+            if (!$targetHabit) {
+                $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'habit_history_not_found']);
+            }
+            $targetHabits = collect([$targetHabit]);
+        } else {
+            $targetHabits = $habits;
+        }
+
+        $habitIds = $targetHabits->pluck('id')->toArray();
+
+        // Batch load all logs for the 7-day window
+        $logsByHabit = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$days[0], $days[6]])
+            ->get()
+            ->groupBy('habit_id');
+
+        $lines = ["Historique (7 derniers jours) :"];
+
+        foreach ($targetHabits->values() as $habit) {
+            $num       = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+            $habitLogs = $logsByHabit->get($habit->id, collect());
+            $logDates  = $habitLogs->pluck('completed_date')
+                ->map(fn($d) => $d instanceof Carbon ? $d->toDateString() : Carbon::parse($d)->toDateString())
+                ->toArray();
+
+            $cells    = [];
+            $doneCount = 0;
+            foreach ($days as $day) {
+                $dayLabel = Carbon::parse($day, $tz)->format('d/m');
+                $done     = in_array($day, $logDates);
+                if ($done) $doneCount++;
+                $cells[] = "{$dayLabel}:" . ($done ? 'X' : '_');
+            }
+
+            $lines[] = "\n{$num}. {$habit->name}";
+            $lines[] = "   " . implode(' | ', $cells);
+            $lines[] = "   Total: {$doneCount}/7 jours";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit history viewed', ['count' => $targetHabits->count()]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_history']);
+    }
+
     private function handleHelp(AgentContext $context): AgentResult
     {
         $reply = "Guide Habit Tracker :\n\n"
@@ -559,9 +746,11 @@ PROMPT;
             . "  \"J'ai pas fait meditation finalement\"\n\n"
             . "VOIR\n"
             . "  \"Mes habitudes\" — liste avec streaks\n"
-            . "  \"Aujourd'hui\" — ce qu'il reste a faire\n"
-            . "  \"Stats habitudes\" — statistiques completes\n\n"
+            . "  \"Aujourd'hui\" — ce qu'il reste a faire (daily + hebdo)\n"
+            . "  \"Stats habitudes\" — statistiques completes\n"
+            . "  \"Historique habitude 2\" — 7 derniers jours\n\n"
             . "GERER\n"
+            . "  \"Renommer habitude 2 en Course a pied\"\n"
             . "  \"Supprimer habitude 2\"\n"
             . "  \"Reset habitude 1\" — remet a zero\n\n"
             . "Les habitudes sont numerotees dans ta liste.";
@@ -660,9 +849,9 @@ PROMPT;
             return "(aucune habitude enregistree)";
         }
 
-        $today = now(AppSetting::timezone())->toDateString();
+        $today    = now(AppSetting::timezone())->toDateString();
+        $habitIds = $habits->pluck('id')->toArray();
 
-        $habitIds     = $habits->pluck('id')->toArray();
         $doneTodayIds = HabitLog::whereIn('habit_id', $habitIds)
             ->where('completed_date', $today)
             ->pluck('habit_id')
@@ -720,7 +909,7 @@ PROMPT;
             $clean = $m[1];
         }
 
-        Log::info("HabitAgent parse - cleaned: {$clean}");
+        Log::debug("HabitAgent parse - cleaned: {$clean}");
 
         return json_decode($clean, true);
     }
