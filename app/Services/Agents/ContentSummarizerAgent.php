@@ -10,7 +10,11 @@ class ContentSummarizerAgent extends BaseAgent
 {
     private const URL_PATTERN = '#https?://[^\s<>\[\]"\']+#i';
     private const YOUTUBE_PATTERN = '#(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})#i';
-    private const KEYWORD_PATTERN = '/\b(resum[eé]|summarize|summary|synth[eè]se|synthetiser|tldr|tl;?dr|de\s+quoi\s+parle|lire\s+pour\s+moi|read\s+for\s+me)\b/iu';
+    private const KEYWORD_PATTERN = '/\b(r[eé]sum[eé]r?|summarize|summary|synth[eè]se|synthetiser|tldr|tl;?dr|de\s+quoi\s+parle|lire\s+pour\s+moi|read\s+for\s+me|compare[rz]?|comparaison|vs\.?)\b/iu';
+    private const COMPARE_PATTERN = '/\b(compar[eé]r?|compare|vs\.?|versus|diff[eé]rence|entre\s+ces|between\s+these)\b/iu';
+
+    // Private IP ranges to block for URL security
+    private const PRIVATE_IP_PATTERN = '/^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i';
 
     public function __construct()
     {
@@ -24,7 +28,7 @@ class ContentSummarizerAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de resume de contenu web. Resume automatiquement les articles, pages web et videos YouTube (avec transcription). Supporte les resumes courts, standards et detailles.';
+        return 'Agent de resume de contenu web. Resume automatiquement les articles, pages web et videos YouTube (avec transcription). Supporte les resumes courts, standards et detailles. Peut comparer deux contenus et estimer le temps de lecture.';
     }
 
     public function keywords(): array
@@ -41,12 +45,13 @@ class ContentSummarizerAgent extends BaseAgent
             'lire pour moi', 'read for me',
             'contenu', 'content', 'article', 'lien', 'link', 'url',
             'youtube', 'video', 'vidéo',
+            'compare', 'comparer', 'comparaison', 'vs',
         ];
     }
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -75,10 +80,18 @@ class ContentSummarizerAgent extends BaseAgent
         // Detect summary length preference
         $length = $this->detectSummaryLength($body);
 
+        // Detect comparison mode (2 URLs + compare keyword)
+        $compareMode = count($urls) === 2 && (bool) preg_match(self::COMPARE_PATTERN, $body);
+
         $this->log($context, 'Content summarization requested', [
             'urls' => $urls,
             'length' => $length,
+            'compare_mode' => $compareMode,
         ]);
+
+        if ($compareMode) {
+            return $this->handleComparison($context, $urls, $length);
+        }
 
         $results = [];
 
@@ -91,7 +104,7 @@ class ContentSummarizerAgent extends BaseAgent
                 }
 
                 if (!$content || mb_strlen($content) < 50) {
-                    $results[] = $this->formatErrorResult($url, 'Contenu insuffisant ou inaccessible.');
+                    $results[] = $this->formatErrorResult($url, 'Contenu insuffisant ou inaccessible. Le site est peut-etre protege ou necessite une authentification.');
                     continue;
                 }
 
@@ -113,11 +126,111 @@ class ContentSummarizerAgent extends BaseAgent
         return AgentResult::reply($output);
     }
 
+    private function handleComparison(AgentContext $context, array $urls, string $length): AgentResult
+    {
+        $contents = [];
+
+        foreach ($urls as $i => $url) {
+            try {
+                if ($this->isYouTubeUrl($url)) {
+                    $content = $this->extractYouTubeContent($url);
+                } else {
+                    $content = $this->extractWebContent($url);
+                }
+
+                if (!$content || mb_strlen($content) < 50) {
+                    return AgentResult::reply(
+                        "⚠ Impossible de comparer : contenu inaccessible pour l'URL " . ($i + 1) . ".\n{$url}"
+                    );
+                }
+
+                $contents[$url] = $content;
+            } catch (\Throwable $e) {
+                Log::warning("[content_summarizer] Comparison fetch failed for {$url}", ['error' => $e->getMessage()]);
+                return AgentResult::reply(
+                    "⚠ Impossible de comparer : " . $this->friendlyError($e) . "\n{$url}"
+                );
+            }
+        }
+
+        $urlList = array_keys($contents);
+        $combinedContent = "=== SOURCE 1 ===\n{$contents[$urlList[0]]}\n\n=== SOURCE 2 ===\n{$contents[$urlList[1]]}";
+
+        $model = $this->resolveModel($context);
+        $memoryPrompt = $this->formatContextMemoryForPrompt($context->from);
+
+        $systemPrompt = <<<PROMPT
+Tu es un expert en analyse comparative de contenus. Compare deux sources de maniere objective et structuree.
+
+FORMAT DE REPONSE (pour WhatsApp):
+*🔍 COMPARAISON DE CONTENUS*
+
+*Source 1 :* [titre/nom bref]
+*Source 2 :* [titre/nom bref]
+
+*Points communs :*
+- [point commun 1]
+- [point commun 2]
+
+*Differences cles :*
+- [Source 1] vs [Source 2]: [difference]
+
+*Quelle source privilegier ?*
+[Recommandation courte et objective selon le contexte]
+
+REGLES:
+- Sois factuel et neutre
+- Mets en avant les differences les plus importantes
+- Reponds en francais sauf si l'utilisateur semble anglophone
+- N'invente rien, base-toi uniquement sur les contenus fournis
+PROMPT;
+
+        if ($memoryPrompt) {
+            $systemPrompt .= "\n\n" . $memoryPrompt;
+        }
+
+        $response = $this->claude->chat($combinedContent, $model, $systemPrompt);
+
+        if (!$response) {
+            return AgentResult::reply("⚠ Impossible de generer la comparaison. Reessaie dans quelques instants.");
+        }
+
+        $output = trim($response)
+            . "\n\n🔗 Source 1: {$urlList[0]}"
+            . "\n🔗 Source 2: {$urlList[1]}";
+
+        $this->log($context, 'Content comparison completed', ['urls' => $urlList]);
+
+        return AgentResult::reply($output);
+    }
+
     private function extractUrls(string $body): array
     {
         preg_match_all(self::URL_PATTERN, $body, $matches);
+        $urls = $matches[0] ?? [];
+
+        // Filter out insecure/private URLs
+        $urls = array_filter($urls, fn($url) => $this->isSecureUrl($url));
+
         // Deduplicate and limit to 3 URLs
-        return array_slice(array_unique($matches[0] ?? []), 0, 3);
+        return array_slice(array_unique(array_values($urls)), 0, 3);
+    }
+
+    private function isSecureUrl(string $url): bool
+    {
+        // Block private IPs and localhost
+        if (preg_match(self::PRIVATE_IP_PATTERN, $url)) {
+            Log::info("[content_summarizer] Blocked private/local URL: {$url}");
+            return false;
+        }
+
+        // Must have a valid TLD-like structure
+        $parsed = parse_url($url);
+        if (!isset($parsed['host']) || empty($parsed['host'])) {
+            return false;
+        }
+
+        return true;
     }
 
     private function isYouTubeUrl(string $url): bool
@@ -137,15 +250,43 @@ class ContentSummarizerAgent extends BaseAgent
     {
         $bodyLower = mb_strtolower($body);
 
-        if (preg_match('/\b(detaille|detailed|complet|full|long|approfondi|in[- ]?depth)\b/iu', $bodyLower)) {
+        if (preg_match('/\b(detaille|detailed|complet|full|long|approfondi|in[- ]?depth|exhaustif|complet)\b/iu', $bodyLower)) {
             return 'detailed';
         }
 
-        if (preg_match('/\b(court|short|bref|brief|rapide|quick|tldr|tl;?dr|resume\s+court)\b/iu', $bodyLower)) {
+        if (preg_match('/\b(court|short|bref|brief|rapide|quick|tldr|tl;?dr|resume\s+court|en\s+bref|en\s+quelques\s+mots)\b/iu', $bodyLower)) {
             return 'short';
         }
 
         return 'medium';
+    }
+
+    private function estimateReadingTime(string $content): int
+    {
+        // Average reading speed: 200 words/min in French/English
+        $wordCount = str_word_count(strip_tags($content));
+        return (int) ceil($wordCount / 200);
+    }
+
+    private function detectContentLanguage(string $content): string
+    {
+        // Simple heuristic: count French vs English common words
+        $frenchWords = ['le', 'la', 'les', 'de', 'du', 'des', 'est', 'une', 'pour', 'dans', 'que', 'qui', 'sur', 'avec', 'par', 'pas', 'plus', 'mais'];
+        $englishWords = ['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him'];
+
+        $contentLower = mb_strtolower($content);
+        $words = preg_split('/\s+/', $contentLower, -1, PREG_SPLIT_NO_EMPTY);
+
+        $frenchScore = 0;
+        $englishScore = 0;
+
+        foreach ($words as $word) {
+            $word = trim($word, '.,;:!?');
+            if (in_array($word, $frenchWords)) $frenchScore++;
+            if (in_array($word, $englishWords)) $englishScore++;
+        }
+
+        return $englishScore > $frenchScore ? 'en' : 'fr';
     }
 
     private function extractYouTubeContent(string $url): ?string
@@ -180,9 +321,9 @@ class ContentSummarizerAgent extends BaseAgent
 
         $outputFile = "{$outputDir}/{$videoId}";
 
-        // Try yt-dlp to extract subtitles
+        // Try yt-dlp to extract subtitles with timeout
         $command = sprintf(
-            'yt-dlp --skip-download --write-auto-sub --sub-lang fr,en --sub-format vtt --convert-subs srt -o %s %s 2>&1',
+            'timeout 30 yt-dlp --skip-download --write-auto-sub --sub-lang fr,en --sub-format vtt --convert-subs srt -o %s %s 2>&1',
             escapeshellarg($outputFile),
             escapeshellarg($url)
         );
@@ -223,9 +364,14 @@ class ContentSummarizerAgent extends BaseAgent
             if (empty($line) || is_numeric($line) || preg_match('/^\d{2}:\d{2}/', $line)) {
                 continue;
             }
-            // Remove HTML-like tags from subtitles
+            // Remove HTML-like tags and VTT positioning tags from subtitles
             $line = strip_tags($line);
             $line = preg_replace('/<[^>]+>/', '', $line);
+            $line = preg_replace('/\{[^}]+\}/', '', $line); // Remove VTT style blocks
+            $line = trim($line);
+
+            if (empty($line)) continue;
+
             // Skip duplicate consecutive lines
             if ($line !== $previousLine) {
                 $text[] = $line;
@@ -234,8 +380,8 @@ class ContentSummarizerAgent extends BaseAgent
         }
 
         $transcript = implode(' ', $text);
-        // Limit to ~8000 chars to stay within context
-        return mb_substr($transcript, 0, 8000);
+        // Limit to ~10000 chars to stay within context
+        return mb_substr($transcript, 0, 10000);
     }
 
     private function getYouTubeMetadata(string $videoId): ?string
@@ -250,7 +396,7 @@ class ContentSummarizerAgent extends BaseAgent
                 $data = $response->json();
                 $title = $data['title'] ?? 'Titre inconnu';
                 $author = $data['author_name'] ?? 'Auteur inconnu';
-                return "[VIDEO YOUTUBE] Titre: {$title} | Auteur: {$author}\n(Transcription non disponible, resume base sur les metadonnees)";
+                return "[VIDEO YOUTUBE] Titre: {$title} | Auteur/Chaine: {$author}\n(Transcription non disponible - resume base sur le titre et les metadonnees)";
             }
         } catch (\Throwable $e) {
             Log::debug("[content_summarizer] YouTube oEmbed failed: " . $e->getMessage());
@@ -262,15 +408,27 @@ class ContentSummarizerAgent extends BaseAgent
     private function extractWebContent(string $url): ?string
     {
         try {
-            $response = Http::timeout(15)
+            $response = Http::timeout(20)
                 ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0 (compatible; ContentSummarizer/1.0)',
+                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language' => 'fr,en;q=0.8',
+                    'Accept-Language' => 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Encoding' => 'gzip, deflate',
+                    'Connection' => 'keep-alive',
+                    'Upgrade-Insecure-Requests' => '1',
                 ])
                 ->get($url);
 
+            if ($response->status() === 403 || $response->status() === 401) {
+                return "[ACCES REFUSE] URL: {$url}\n(Le site requiert une authentification ou bloque les bots)";
+            }
+
+            if ($response->status() === 404) {
+                return null;
+            }
+
             if (!$response->successful()) {
+                Log::warning("[content_summarizer] HTTP {$response->status()} for {$url}");
                 return null;
             }
 
@@ -287,7 +445,7 @@ class ContentSummarizerAgent extends BaseAgent
         // Extract title
         $title = '';
         if (preg_match('/<title[^>]*>(.*?)<\/title>/si', $html, $m)) {
-            $title = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            $title = html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES, 'UTF-8');
         }
 
         // Extract meta description
@@ -301,17 +459,31 @@ class ContentSummarizerAgent extends BaseAgent
             $metaDesc = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
         }
 
-        // Remove script, style, nav, footer, header tags
-        $cleanHtml = preg_replace('/<(script|style|nav|footer|header|aside|iframe|noscript)[^>]*>.*?<\/\1>/si', '', $html);
+        // Extract og:title as fallback title
+        if (!$title && preg_match('/<meta[^>]*property=["\']og:title["\'][^>]*content=["\'](.*?)["\']/si', $html, $m)) {
+            $title = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+        }
 
-        // Try to find article content
+        // Remove non-content tags
+        $cleanHtml = preg_replace('/<(script|style|nav|footer|header|aside|iframe|noscript|form|button|select|input|textarea|svg|canvas)[^>]*>.*?<\/\1>/si', '', $html);
+        // Remove comments
+        $cleanHtml = preg_replace('/<!--.*?-->/si', '', $cleanHtml);
+
+        // Try to find article content — ordered by specificity
         $articleContent = '';
-        if (preg_match('/<article[^>]*>(.*?)<\/article>/si', $cleanHtml, $m)) {
-            $articleContent = $m[1];
-        } elseif (preg_match('/<main[^>]*>(.*?)<\/main>/si', $cleanHtml, $m)) {
-            $articleContent = $m[1];
-        } elseif (preg_match('/<div[^>]*class="[^"]*(?:content|article|post|entry)[^"]*"[^>]*>(.*?)<\/div>/si', $cleanHtml, $m)) {
-            $articleContent = $m[1];
+        $selectors = [
+            '/<article[^>]*>(.*?)<\/article>/si',
+            '/<main[^>]*>(.*?)<\/main>/si',
+            '/<div[^>]*\b(?:id|class)=["\'][^"\']*\b(?:article|post|entry|content|story|text)[^"\']*["\'][^>]*>(.*?)<\/div>/si',
+            '/<section[^>]*\b(?:id|class)=["\'][^"\']*\b(?:content|article|post)[^"\']*["\'][^>]*>(.*?)<\/section>/si',
+            '/<div[^>]*\b(?:id|class)=["\'][^"\']*\b(?:body|prose|reader)[^"\']*["\'][^>]*>(.*?)<\/div>/si',
+        ];
+
+        foreach ($selectors as $selector) {
+            if (preg_match($selector, $cleanHtml, $m)) {
+                $articleContent = $m[1];
+                break;
+            }
         }
 
         // Fallback to body
@@ -324,7 +496,8 @@ class ContentSummarizerAgent extends BaseAgent
         // Strip remaining HTML tags and clean up whitespace
         $text = strip_tags($articleContent);
         $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-        $text = preg_replace('/\s+/', ' ', $text);
+        $text = preg_replace('/[ \t]+/', ' ', $text);
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
         $text = trim($text);
 
         if (mb_strlen($text) < 50 && $metaDesc) {
@@ -332,7 +505,7 @@ class ContentSummarizerAgent extends BaseAgent
         }
 
         // Limit content length
-        $text = mb_substr($text, 0, 8000);
+        $text = mb_substr($text, 0, 10000);
 
         $header = "[PAGE WEB] URL: {$url}";
         if ($title) $header .= "\nTitre: {$title}";
@@ -346,40 +519,63 @@ class ContentSummarizerAgent extends BaseAgent
         $model = $this->resolveModel($context);
         $memoryPrompt = $this->formatContextMemoryForPrompt($context->from);
 
+        // Detect content language for response language guidance
+        $contentLang = $this->detectContentLanguage($content);
+        $langInstruction = $contentLang === 'en'
+            ? "Le contenu est en anglais. Reponds en francais sauf si l'utilisateur a ecrit en anglais, dans ce cas reponds en anglais."
+            : "Reponds en francais.";
+
+        // Estimate reading time from raw content (before truncation)
+        $readingMinutes = $this->estimateReadingTime($content);
+        $readingTimeStr = $readingMinutes <= 1 ? '< 1 min de lecture' : "{$readingMinutes} min de lecture";
+
         $lengthInstructions = match ($length) {
-            'short' => "RESUME COURT: 2-3 phrases maximum. Va droit a l'essentiel.",
-            'detailed' => "RESUME DETAILLE: Resume complet de 10-15 lignes avec tous les points importants, arguments, et details cles.",
-            default => "RESUME STANDARD: 3-5 lignes de resume + 3-5 points cles.",
+            'short' => "RESUME COURT: 2-3 phrases maximum. Va droit a l'essentiel. Pas de liste de points.",
+            'detailed' => "RESUME DETAILLE: Resume complet de 10-15 lignes couvrant tous les arguments, points importants, exemples cles et conclusions. Inclus une liste de 5-8 points cles.",
+            default => "RESUME STANDARD: 3-5 lignes de resume concis + liste de 3-5 points cles essentiels.",
         };
 
         $systemPrompt = <<<PROMPT
-Tu es un expert en synthese de contenu. Resume le contenu fourni de maniere claire et structuree.
+Tu es un expert en synthese de contenu pour WhatsApp. Resume le contenu fourni de maniere claire et structuree.
 
 {$lengthInstructions}
 
-FORMAT DE REPONSE:
-1. Titre/Source en gras (*titre*)
-2. Resume
-3. Points cles (avec des puces -)
-4. Lien source original
+FORMAT DE REPONSE (optimise WhatsApp):
+*[Titre ou source]* — [type: Article / Video / Page web]
+[Ton resume ici]
+
+*Points cles :*
+- [point 1]
+- [point 2]
+- [point 3]
 
 REGLES:
-- Reponds en francais (sauf si le contenu est en anglais et l'utilisateur semble anglophone)
-- Sois factuel et objectif
-- Si c'est une video YouTube, mentionne l'auteur/chaine
-- Si le contenu est un article technique, mets en avant les concepts cles
-- N'invente RIEN, base-toi uniquement sur le contenu fourni
-- Si le contenu est insuffisant, dis-le clairement
+- {$langInstruction}
+- Sois factuel et objectif — n'invente RIEN
+- Base-toi uniquement sur le contenu fourni
+- Si c'est une video YouTube, mentionne la chaine/auteur
+- Si le contenu est insuffisant (metadonnees seulement), precise-le
+- Pour les articles techniques, mets en avant les concepts cles
+- Utilise *gras* pour mettre en valeur les elements importants
+- Pas de #hashtags, pas de mentions @
 PROMPT;
 
         if ($memoryPrompt) {
             $systemPrompt .= "\n\n" . $memoryPrompt;
         }
 
-        $response = $this->claude->chat($content, $model, $systemPrompt);
+        // Use higher max_tokens for detailed summaries via chatWithMessages
+        $maxTokens = match ($length) {
+            'detailed' => 2048,
+            'short' => 512,
+            default => 1024,
+        };
+
+        $messages = [['role' => 'user', 'content' => $content]];
+        $response = $this->claude->chatWithMessages($messages, $model, $systemPrompt, $maxTokens);
 
         if (!$response) {
-            return $this->formatErrorResult($url, 'Impossible de generer le resume.');
+            return $this->formatErrorResult($url, 'Impossible de generer le resume. Verifie ta connexion et reessaie.');
         }
 
         $icon = $this->isYouTubeUrl($url) ? '🎬' : '📰';
@@ -389,35 +585,54 @@ PROMPT;
             default => 'standard',
         };
 
-        return "{$icon} *RESUME ({$lengthLabel})*\n\n" . trim($response) . "\n\n🔗 {$url}";
+        return "{$icon} *RESUME ({$lengthLabel})* — _{$readingTimeStr}_\n\n"
+            . trim($response)
+            . "\n\n🔗 {$url}";
     }
 
     private function formatErrorResult(string $url, string $error): string
     {
-        return "⚠ *Erreur pour :* {$url}\n{$error}";
+        $shortUrl = mb_strlen($url) > 60 ? mb_substr($url, 0, 57) . '...' : $url;
+        return "⚠ *Erreur :* {$error}\n_{$shortUrl}_";
     }
 
     private function friendlyError(\Throwable $e): string
     {
         $message = $e->getMessage();
 
-        if (str_contains($message, 'timed out') || str_contains($message, 'timeout')) {
-            return 'Le site met trop de temps a repondre. Reessaie plus tard.';
+        if (str_contains($message, 'timed out') || str_contains($message, 'timeout') || str_contains($message, 'cURL error 28')) {
+            return 'Le site met trop de temps a repondre (timeout). Reessaie plus tard ou verifie ta connexion.';
         }
 
         if (str_contains($message, '403') || str_contains($message, 'Forbidden')) {
-            return 'Acces refuse par le site. Le contenu est peut-etre protege.';
+            return 'Acces refuse (403). Le contenu est peut-etre protege ou reserve aux abonnes.';
         }
 
         if (str_contains($message, '404') || str_contains($message, 'Not Found')) {
-            return 'Page introuvable. Verifie que le lien est correct.';
+            return 'Page introuvable (404). Verifie que le lien est correct.';
+        }
+
+        if (str_contains($message, '429') || str_contains($message, 'Too Many Requests')) {
+            return 'Le site limite les acces automatiques (rate limit). Reessaie dans quelques minutes.';
+        }
+
+        if (str_contains($message, '500') || str_contains($message, '502') || str_contains($message, '503')) {
+            return 'Le site rencontre une erreur interne. Reessaie plus tard.';
         }
 
         if (str_contains($message, 'SSL') || str_contains($message, 'certificate')) {
             return 'Erreur de certificat SSL. Le site pourrait avoir un probleme de securite.';
         }
 
-        return 'Impossible de recuperer le contenu. Verifie que le lien est valide et accessible.';
+        if (str_contains($message, 'Could not resolve host') || str_contains($message, 'cURL error 6')) {
+            return 'Impossible de resoudre le nom de domaine. Verifie que le lien est valide.';
+        }
+
+        if (str_contains($message, 'Connection refused') || str_contains($message, 'cURL error 7')) {
+            return 'Connexion refusee par le serveur. Le site est peut-etre hors ligne.';
+        }
+
+        return 'Impossible de recuperer le contenu. Verifie que le lien est valide et accessible publiquement.';
     }
 
     private function showHelp(): AgentResult
@@ -429,16 +644,21 @@ PROMPT;
             . "*Exemples :*\n"
             . "- https://example.com/article\n"
             . "- https://youtube.com/watch?v=xxx\n"
-            . "- resume court https://example.com/article\n"
-            . "- resume detaille https://youtube.com/watch?v=xxx\n\n"
+            . "- _resume court_ https://example.com/article\n"
+            . "- _resume detaille_ https://youtube.com/watch?v=xxx\n"
+            . "- _compare_ https://site1.com https://site2.com\n\n"
             . "*Options de longueur :*\n"
             . "- _court/bref/rapide_ → 2-3 phrases\n"
-            . "- _standard_ (par defaut) → resume + points cles\n"
+            . "- _standard_ (defaut) → resume + points cles\n"
             . "- _detaille/complet_ → resume approfondi\n\n"
             . "*Contenus supportes :*\n"
             . "🌐 Articles web & blogs\n"
-            . "🎬 Videos YouTube (avec transcription)\n"
-            . "📄 Pages web generales"
+            . "🎬 Videos YouTube (avec transcription si disponible)\n"
+            . "📄 Pages web generales\n\n"
+            . "*Nouvelles fonctionnalites :*\n"
+            . "⏱ Estimation du temps de lecture\n"
+            . "🔍 Comparaison de 2 liens (_compare_ + 2 URLs)\n"
+            . "🌍 Detection automatique de la langue"
         );
     }
 }
