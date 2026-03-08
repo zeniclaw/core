@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Services\AgentContext;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class FinanceAgent extends BaseAgent
 {
@@ -17,7 +18,7 @@ class FinanceAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition de budgets mensuels, alertes de depassement, rapports et statistiques, detection d\'anomalies de depenses.';
+        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition de budgets mensuels, alertes de depassement, historique, rapports, projections de fin de mois et detection d\'anomalies de depenses.';
     }
 
     public function keywords(): array
@@ -38,12 +39,16 @@ class FinanceAgent extends BaseAgent
             'categorie depense', 'expense category',
             'alimentation', 'transport', 'loisirs', 'restaurant', 'shopping',
             'abonnement', 'abonnements', 'subscription',
+            'historique', 'history', 'dernieres depenses', 'recent expenses',
+            'supprimer depense', 'annuler depense', 'delete expense',
+            'aide finance', 'help finance', 'commandes finance',
+            'projection', 'prevision', 'fin de mois',
         ];
     }
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -60,7 +65,11 @@ class FinanceAgent extends BaseAgent
             '/\b(alerte|alert)\b/i',
             '/\bajout\s+depense\b/iu',
             '/\b\d+[\.,]?\d*\s*€?\s*(euro|eur)?\b/i',
-            '/\bfinance|financier|financiere\b/i',
+            '/\b(finance|financier|financiere)\b/i',
+            '/\b(historique|history)\b/i',
+            '/\b(supprimer|annuler)\s+(depense|derniere)\b/iu',
+            '/\b(aide|help)\s+finance\b/iu',
+            '/\bprojection\b/i',
         ];
 
         foreach ($patterns as $pattern) {
@@ -89,6 +98,25 @@ class FinanceAgent extends BaseAgent
     private function parseCommand(string $body): ?array
     {
         $lower = mb_strtolower($body);
+
+        // aide / help
+        if (preg_match('/\b(aide|help)\b/iu', $lower) && preg_match('/\bfinance\b/iu', $lower)) {
+            return ['action' => 'help'];
+        }
+
+        // supprimer / annuler la derniere depense
+        if (preg_match('/\b(supprimer|annuler|delete|undo)\b.*(depense|expense|derniere|last)/iu', $lower)) {
+            return ['action' => 'delete_last'];
+        }
+
+        // historique [n]
+        if (preg_match('/\b(historique|history|dernieres?)\b/iu', $lower)) {
+            $limit = 10;
+            if (preg_match('/(\d+)\s*(?:dernieres?|last|depenses?)?/i', $lower, $m)) {
+                $limit = min((int) $m[1], 20);
+            }
+            return ['action' => 'history', 'limit' => $limit];
+        }
 
         // ajout depense [montant] [categorie] [description]
         if (preg_match('/(?:ajout(?:e|er)?|add|log)\s*(?:depense|expense)?\s*(\d+[\.,]?\d*)\s*€?\s+(\S+)\s*(.*)/iu', $lower, $m)) {
@@ -124,7 +152,7 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'balance'];
         }
 
-        // statistiques / stats
+        // statistiques / stats / rapport
         if (preg_match('/\b(statistiques?|stats?|rapport|report)\b/iu', $lower)) {
             return ['action' => 'stats'];
         }
@@ -146,11 +174,14 @@ class FinanceAgent extends BaseAgent
                 $command['category'],
                 $command['description'] ?? null
             ),
-            'set_budget' => $this->setBudget($context->from, $command['category'], $command['amount']),
-            'balance' => $this->getBalance($context->from),
-            'stats' => $this->generateMonthlyReport($context->from),
-            'alerts' => $this->getAlerts($context->from),
-            default => null,
+            'set_budget'  => $this->setBudget($context->from, $command['category'], $command['amount']),
+            'balance'     => $this->getBalance($context->from),
+            'stats'       => $this->generateMonthlyReport($context->from),
+            'alerts'      => $this->getAlerts($context->from),
+            'history'     => $this->getHistory($context->from, $command['limit'] ?? 10),
+            'delete_last' => $this->deleteLastExpense($context->from),
+            'help'        => $this->getHelp(),
+            default       => null,
         };
 
         if ($response) {
@@ -159,7 +190,9 @@ class FinanceAgent extends BaseAgent
             return AgentResult::reply($response);
         }
 
-        return AgentResult::reply('Commande non reconnue. Essaie: depense [montant] [categorie], budget [categorie] [montant], solde, stats, alertes');
+        $help = $this->getHelp();
+        $this->sendText($context->from, $help);
+        return AgentResult::reply($help);
     }
 
     private function handleWithClaude(string $body, AgentContext $context, string $contextMemory): AgentResult
@@ -182,7 +215,7 @@ class FinanceAgent extends BaseAgent
             $message .= "\n{$contextMemory}\n";
         }
 
-        $message .= "\nAnalyse la demande et reponds de facon utile. Si l'utilisateur veut ajouter une depense, extrais le montant, la categorie et la description.";
+        $message .= "\nAnalyse la demande et reponds de facon utile. Si l'utilisateur veut ajouter une depense, extrais le montant, la categorie et la description, puis inclus sur une ligne separee: EXPENSE_LOG:montant|categorie|description";
 
         $response = $this->claude->chat(
             $message,
@@ -191,22 +224,25 @@ class FinanceAgent extends BaseAgent
         );
 
         if (!$response) {
-            $response = "Je n'ai pas pu traiter ta demande financiere. Essaie avec:\n"
-                . "- *depense [montant] [categorie] [description]*\n"
-                . "- *budget [categorie] [montant]*\n"
-                . "- *solde* / *stats* / *alertes*";
+            $response = $this->getHelp();
         }
 
         // Try to extract expense from Claude's response if it identified one
-        if (preg_match('/EXPENSE_LOG:\s*(\d+[\.,]?\d*)\|([^|]+)\|(.+)/i', $response, $m)) {
-            $logResult = $this->logExpense(
-                $context->from,
-                (float) str_replace(',', '.', $m[1]),
-                trim($m[2]),
-                trim($m[3])
-            );
-            $response = preg_replace('/EXPENSE_LOG:.*$/m', '', $response);
-            $response = trim($response) . "\n\n" . $logResult;
+        if (preg_match('/EXPENSE_LOG:\s*(\d+[\.,]?\d*)\|([^|\n]+)\|([^\n]*)/i', $response, $m)) {
+            $expenseAmount = (float) str_replace(',', '.', $m[1]);
+            $expenseCategory = trim($m[2]);
+            $expenseDescription = trim($m[3]) ?: null;
+
+            if ($expenseAmount > 0 && $expenseCategory !== '') {
+                $logResult = $this->logExpense(
+                    $context->from,
+                    $expenseAmount,
+                    $expenseCategory,
+                    $expenseDescription
+                );
+                $response = preg_replace('/EXPENSE_LOG:[^\n]*/m', '', $response);
+                $response = trim($response) . "\n\n" . $logResult;
+            }
         }
 
         $this->sendText($context->from, $response);
@@ -218,68 +254,86 @@ class FinanceAgent extends BaseAgent
     private function buildSystemPrompt(): string
     {
         return <<<'PROMPT'
-Tu es un assistant financier intelligent et bienveillant.
+Tu es un assistant financier intelligent et bienveillant integre a WhatsApp.
 
 ROLE:
-- Aider l'utilisateur a suivre ses depenses et budgets
-- Donner des conseils financiers personnalises
-- Detecter les anomalies de depenses
-- Presenter les informations de facon claire et visuelle
+- Aider l'utilisateur a suivre ses depenses et budgets mensuels
+- Donner des conseils financiers personnalises et actionables
+- Detecter les anomalies de depenses (depenses inhabituellement elevees)
+- Presenter les informations de facon claire et visuelle pour WhatsApp
 
 FORMAT DE REPONSE:
-- Utilise des emojis pour rendre les infos visuelles (💰 💳 📊 ⚠️ ✅)
-- Sois concis et actionnable
-- Si l'utilisateur decrit une depense sans utiliser la syntaxe formelle, extrais les infos et ajoute sur une ligne separee: EXPENSE_LOG:montant|categorie|description
+- Utilise des emojis pertinents pour rendre les infos visuelles (💰 💳 📊 ⚠️ ✅ 🚨 📉 📈)
+- Sois concis et actionnable (max 200 mots)
+- Reponds TOUJOURS en francais
+
+DETECTION DE DEPENSE:
+Si l'utilisateur decrit une depense (ex: "j'ai achete des courses pour 45€", "taxi 12.50", "abonnement netflix 13.99"), extrais les infos et ajoute EXACTEMENT cette ligne (rien avant ni apres):
+EXPENSE_LOG:montant|categorie|description
+
+Exemples:
+- "j'ai pris un taxi pour 15€" → EXPENSE_LOG:15|transport|taxi
+- "courses au supermarche 87.50€" → EXPENSE_LOG:87.5|alimentation|courses supermarche
+- "cinema avec des amis 22€" → EXPENSE_LOG:22|loisirs|cinema
+- "loyer du mois 800€" → EXPENSE_LOG:800|logement|loyer mensuel
 
 CATEGORIES SUGGEREES:
 alimentation, transport, loisirs, sante, logement, shopping, restaurant, abonnements, education, autres
 
-REGLES:
-- Reponds en francais
-- Max 200 mots
-- Si tu detectes une depense anormale (bien au-dessus de la moyenne), signale-le avec ⚠️
-- Propose des economies si le budget est serre
+CONSEILS:
+- Si le budget est serre (>80%), propose des pistes d'economies concretes
+- Si une depense semble anormalement elevee, signale-le avec ⚠️
+- Si aucune depense ce mois, encourage l'utilisateur a commencer le suivi
 PROMPT;
     }
 
     private function logExpense(string $userPhone, float $amount, string $category, ?string $description): string
     {
+        if ($amount <= 0) {
+            return "❌ Le montant doit etre positif.";
+        }
+
         $category = mb_strtolower(trim($category));
 
-        $expense = Expense::create([
-            'user_phone' => $userPhone,
-            'amount' => $amount,
-            'category' => $category,
-            'description' => $description,
-            'date' => Carbon::now()->toDateString(),
-        ]);
+        try {
+            Expense::create([
+                'user_phone'  => $userPhone,
+                'amount'      => $amount,
+                'category'    => $category,
+                'description' => $description,
+                'date'        => Carbon::now()->toDateString(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] logExpense failed: " . $e->getMessage());
+            return "❌ Erreur lors de l'enregistrement de la depense. Reessaie.";
+        }
 
         $monthlySpent = Expense::calculateMonthlySpent($userPhone, $category);
-        $average = Expense::getAverageForCategory($userPhone, $category);
+        $average      = Expense::getAverageForCategory($userPhone, $category);
 
-        $response = "✅ Depense enregistree !\n";
-        $response .= "💳 {$amount}€ en *{$category}*";
+        $response  = "✅ Depense enregistree !\n";
+        $response .= "💳 *{$amount}€* en *{$category}*";
         if ($description) {
             $response .= " ({$description})";
         }
-        $response .= "\n📅 Total {$category} ce mois: {$monthlySpent}€";
+        $response .= "\n📅 Total {$category} ce mois: *{$monthlySpent}€*";
 
-        // Check anomaly
-        if ($average > 0 && $amount > ($average * 0.5)) {
+        // Anomaly check: only flag if single expense > 2x monthly average
+        if ($average > 0 && $amount > ($average * 2)) {
             $anomaly = $this->detectAnomalies($userPhone, $category, $amount, $average);
             if ($anomaly) {
                 $response .= "\n\n{$anomaly}";
             }
         }
 
-        // Check budget threshold
+        // Budget threshold check
         $budget = Budget::where('user_phone', $userPhone)->where('category', $category)->first();
         if ($budget) {
             $check = $budget->checkBudgetThreshold();
             if ($check['exceeded']) {
                 $response .= "\n\n🚨 *Budget depasse !* {$check['spent']}€ / {$check['limit']}€ ({$check['percentage']}%)";
             } elseif ($check['threshold_reached']) {
-                $response .= "\n\n⚠️ Attention: {$check['percentage']}% du budget {$category} utilise ({$check['remaining']}€ restants)";
+                $response .= "\n\n⚠️ Attention: {$check['percentage']}% du budget *{$category}* utilise ({$check['remaining']}€ restants)";
             }
         }
 
@@ -288,24 +342,33 @@ PROMPT;
 
     private function setBudget(string $userPhone, string $category, float $amount): string
     {
+        if ($amount <= 0) {
+            return "❌ Le montant du budget doit etre positif.";
+        }
+
         $category = mb_strtolower(trim($category));
 
-        Budget::updateOrCreate(
-            ['user_phone' => $userPhone, 'category' => $category],
-            ['monthly_limit' => $amount]
-        );
+        try {
+            Budget::updateOrCreate(
+                ['user_phone' => $userPhone, 'category' => $category],
+                ['monthly_limit' => $amount]
+            );
 
-        // Auto-create alert at 80%
-        DB::table('finances_alerts')->updateOrInsert(
-            ['user_phone' => $userPhone, 'category' => $category],
-            ['threshold_percentage' => 80, 'enabled' => true, 'created_at' => now(), 'updated_at' => now()]
-        );
+            // Auto-create alert at 80%
+            DB::table('finances_alerts')->updateOrInsert(
+                ['user_phone' => $userPhone, 'category' => $category],
+                ['threshold_percentage' => 80, 'enabled' => true, 'created_at' => now(), 'updated_at' => now()]
+            );
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] setBudget failed: " . $e->getMessage());
+            return "❌ Erreur lors de la definition du budget. Reessaie.";
+        }
 
-        $spent = Expense::calculateMonthlySpent($userPhone, $category);
-        $remaining = round($amount - $spent, 2);
+        $spent      = Expense::calculateMonthlySpent($userPhone, $category);
+        $remaining  = round($amount - $spent, 2);
         $percentage = $amount > 0 ? round(($spent / $amount) * 100, 1) : 0;
 
-        $response = "✅ Budget defini !\n";
+        $response  = "✅ Budget defini !\n";
         $response .= "📊 *{$category}*: {$amount}€/mois\n";
         $response .= "💰 Depense ce mois: {$spent}€ ({$percentage}%)\n";
         $response .= "💵 Restant: {$remaining}€\n";
@@ -317,22 +380,22 @@ PROMPT;
     private function getBalance(string $userPhone): string
     {
         $totalSpent = Expense::calculateTotalMonthlySpent($userPhone);
-        $budgets = Budget::where('user_phone', $userPhone)->get();
-        $month = Carbon::now()->translatedFormat('F Y');
+        $budgets    = Budget::where('user_phone', $userPhone)->get();
+        $month      = Carbon::now()->translatedFormat('F Y');
 
-        $response = "💰 *Solde financier - {$month}*\n\n";
-        $response .= "📉 Total depenses: {$totalSpent}€\n";
+        $response  = "💰 *Solde financier - {$month}*\n\n";
+        $response .= "📉 Total depenses: *{$totalSpent}€*\n";
 
         if ($budgets->isNotEmpty()) {
-            $totalBudget = $budgets->sum('monthly_limit');
+            $totalBudget    = $budgets->sum('monthly_limit');
             $totalRemaining = round($totalBudget - $totalSpent, 2);
             $response .= "📊 Budget total: {$totalBudget}€\n";
-            $response .= "💵 Restant global: {$totalRemaining}€\n\n";
+            $response .= "💵 Restant global: *{$totalRemaining}€*\n\n";
 
             foreach ($budgets as $budget) {
                 $check = $budget->checkBudgetThreshold();
-                $bar = $this->buildProgressBar($check['percentage']);
-                $icon = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
+                $bar   = $this->buildProgressBar($check['percentage']);
+                $icon  = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
                 $response .= "{$icon} *{$check['category']}*: {$check['spent']}€/{$check['limit']}€ {$bar}\n";
             }
         } else {
@@ -344,24 +407,24 @@ PROMPT;
 
     private function generateMonthlyReport(string $userPhone): string
     {
-        $month = Carbon::now();
-        $totalSpent = Expense::calculateTotalMonthlySpent($userPhone, $month);
+        $month         = Carbon::now();
+        $totalSpent    = Expense::calculateTotalMonthlySpent($userPhone, $month);
         $topCategories = Expense::getTopCategories($userPhone, 5, $month);
 
-        $response = "📊 *Rapport mensuel - " . $month->translatedFormat('F Y') . "*\n\n";
-        $response .= "💳 Total depenses: {$totalSpent}€\n\n";
+        $response  = "📊 *Rapport mensuel - " . $month->translatedFormat('F Y') . "*\n\n";
+        $response .= "💳 Total depenses: *{$totalSpent}€*\n";
 
         if (empty($topCategories)) {
-            $response .= "_Aucune depense ce mois._\n";
+            $response .= "\n_Aucune depense ce mois._\n";
             $response .= "Commence avec: *depense [montant] [categorie]*";
             return $response;
         }
 
-        $response .= "📈 *Top categories:*\n";
+        $response .= "\n📈 *Top categories:*\n";
         foreach ($topCategories as $i => $cat) {
             $percentage = $totalSpent > 0 ? round(($cat['total'] / $totalSpent) * 100, 1) : 0;
-            $bar = $this->buildProgressBar($percentage);
-            $response .= ($i + 1) . ". *{$cat['category']}*: {$cat['total']}€ ({$percentage}%) {$bar}\n";
+            $bar        = $this->buildProgressBar($percentage);
+            $response  .= ($i + 1) . ". *{$cat['category']}*: {$cat['total']}€ ({$percentage}%) {$bar}\n";
         }
 
         // Budget comparison
@@ -369,21 +432,110 @@ PROMPT;
         if ($budgets->isNotEmpty()) {
             $response .= "\n📋 *Budgets:*\n";
             foreach ($budgets as $budget) {
-                $check = $budget->checkBudgetThreshold();
-                $icon = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
+                $check  = $budget->checkBudgetThreshold();
+                $icon   = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
                 $response .= "{$icon} {$check['category']}: {$check['spent']}€/{$check['limit']}€ ({$check['percentage']}%)\n";
             }
         }
 
         // Month-over-month comparison
-        $lastMonth = Carbon::now()->subMonth();
+        $lastMonth      = Carbon::now()->subMonth();
         $lastMonthSpent = Expense::calculateTotalMonthlySpent($userPhone, $lastMonth);
         if ($lastMonthSpent > 0) {
-            $diff = round($totalSpent - $lastMonthSpent, 2);
+            $diff        = round($totalSpent - $lastMonthSpent, 2);
             $diffPercent = round(($diff / $lastMonthSpent) * 100, 1);
-            $trend = $diff > 0 ? "📈 +{$diff}€ (+{$diffPercent}%)" : "📉 {$diff}€ ({$diffPercent}%)";
-            $response .= "\n🔄 vs mois dernier: {$trend}";
+            $trend       = $diff > 0 ? "📈 +{$diff}€ (+{$diffPercent}%)" : "📉 {$diff}€ ({$diffPercent}%)";
+            $response   .= "\n🔄 vs mois dernier: {$trend}";
         }
+
+        // End-of-month projection
+        $projection = $this->getMonthlyProjection($totalSpent);
+        if ($projection !== null) {
+            $response .= "\n🔮 Projection fin de mois: *~{$projection}€*";
+        }
+
+        return $response;
+    }
+
+    private function getMonthlyProjection(float $spentSoFar): ?float
+    {
+        $today          = Carbon::now();
+        $daysInMonth    = $today->daysInMonth;
+        $dayOfMonth     = $today->day;
+
+        // Need at least 3 days of data to project
+        if ($dayOfMonth < 3 || $spentSoFar <= 0) {
+            return null;
+        }
+
+        $dailyAverage = $spentSoFar / $dayOfMonth;
+        return round($dailyAverage * $daysInMonth, 2);
+    }
+
+    private function getHistory(string $userPhone, int $limit = 10): string
+    {
+        $expenses = Expense::where('user_phone', $userPhone)
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+
+        if ($expenses->isEmpty()) {
+            return "📋 *Historique des depenses*\n\n_Aucune depense enregistree._\n"
+                . "Commence avec: *depense [montant] [categorie]*";
+        }
+
+        $response = "📋 *{$limit} dernieres depenses*\n\n";
+
+        $currentDate = null;
+        foreach ($expenses as $expense) {
+            $date = Carbon::parse($expense->date);
+            $dateStr = $date->isToday()
+                ? "Aujourd'hui"
+                : ($date->isYesterday() ? 'Hier' : $date->translatedFormat('d M'));
+
+            if ($currentDate !== $dateStr) {
+                $response   .= "\n📅 *{$dateStr}*\n";
+                $currentDate = $dateStr;
+            }
+
+            $desc = $expense->description ? " — {$expense->description}" : '';
+            $response .= "  💳 {$expense->amount}€ {$expense->category}{$desc}\n";
+        }
+
+        $monthTotal = Expense::calculateTotalMonthlySpent($userPhone);
+        $response  .= "\n💰 Total ce mois: *{$monthTotal}€*";
+
+        return $response;
+    }
+
+    private function deleteLastExpense(string $userPhone): string
+    {
+        $last = Expense::where('user_phone', $userPhone)
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$last) {
+            return "❌ Aucune depense a supprimer.";
+        }
+
+        $amount      = $last->amount;
+        $category    = $last->category;
+        $description = $last->description ? " ({$last->description})" : '';
+        $date        = Carbon::parse($last->date)->translatedFormat('d M Y');
+
+        try {
+            $last->delete();
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] deleteLastExpense failed: " . $e->getMessage());
+            return "❌ Erreur lors de la suppression. Reessaie.";
+        }
+
+        $response  = "🗑️ Depense supprimee !\n";
+        $response .= "💳 {$amount}€ en *{$category}*{$description}\n";
+        $response .= "📅 Date: {$date}\n\n";
+        $response .= "💰 Total ce mois maintenant: *" . Expense::calculateTotalMonthlySpent($userPhone) . "€*";
 
         return $response;
     }
@@ -409,18 +561,18 @@ PROMPT;
                 . "Exemple: *budget alimentation 300*";
         }
 
-        $response = "🔔 *Alertes financieres*\n\n";
+        $response  = "🔔 *Alertes financieres*\n\n";
         $hasAlerts = false;
 
         foreach ($budgets as $budget) {
             $check = $budget->checkBudgetThreshold();
 
             if ($check['exceeded']) {
-                $response .= "🚨 *{$check['category']}*: DEPASSE ! {$check['spent']}€/{$check['limit']}€ ({$check['percentage']}%)\n";
-                $hasAlerts = true;
+                $response  .= "🚨 *{$check['category']}*: DEPASSE ! {$check['spent']}€/{$check['limit']}€ ({$check['percentage']}%)\n";
+                $hasAlerts  = true;
             } elseif ($check['threshold_reached']) {
-                $response .= "⚠️ *{$check['category']}*: {$check['percentage']}% utilise — {$check['remaining']}€ restants\n";
-                $hasAlerts = true;
+                $response  .= "⚠️ *{$check['category']}*: {$check['percentage']}% utilise — {$check['remaining']}€ restants\n";
+                $hasAlerts  = true;
             } else {
                 $response .= "✅ *{$check['category']}*: {$check['percentage']}% — {$check['remaining']}€ restants\n";
             }
@@ -433,10 +585,30 @@ PROMPT;
         return $response;
     }
 
+    private function getHelp(): string
+    {
+        return "💰 *Aide Finance*\n\n"
+            . "📥 *Enregistrer une depense:*\n"
+            . "  `depense 45 alimentation courses`\n"
+            . "  `ajouter depense 12.50 transport taxi`\n\n"
+            . "📊 *Definir un budget:*\n"
+            . "  `budget alimentation 300`\n"
+            . "  `budget transport 150`\n\n"
+            . "📋 *Consulter:*\n"
+            . "  `solde` — solde et budgets\n"
+            . "  `stats` — rapport mensuel + projection\n"
+            . "  `alertes` — alertes de depassement\n"
+            . "  `historique` — 10 dernieres depenses\n"
+            . "  `historique 5` — 5 dernieres depenses\n\n"
+            . "🗑️ *Annuler:*\n"
+            . "  `supprimer derniere depense`\n\n"
+            . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
+    }
+
     private function buildProgressBar(float $percentage): string
     {
         $filled = (int) round(min($percentage, 100) / 10);
-        $empty = 10 - $filled;
+        $empty  = 10 - $filled;
         return '[' . str_repeat('█', $filled) . str_repeat('░', $empty) . ']';
     }
 }
