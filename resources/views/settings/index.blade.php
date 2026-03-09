@@ -413,6 +413,41 @@
                 </script>
             </div>
 
+            {{-- Brave Search --}}
+            <div class="border border-gray-100 rounded-xl p-4 bg-gray-50" x-data="{ show: false }">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">🔍</span>
+                        <div>
+                            <p class="font-medium text-sm text-gray-900">Brave Search API</p>
+                            <p class="text-xs text-gray-500">Recherche web en temps reel — 2000 req/mois gratuit</p>
+                        </div>
+                    </div>
+                    @if($hasBraveKey)
+                        <span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">✓ Configuree</span>
+                    @else
+                        <span class="px-2 py-1 bg-gray-200 text-gray-500 rounded-full text-xs">— Non configuree</span>
+                    @endif
+                </div>
+                <div class="relative">
+                    <input :type="show ? 'text' : 'password'" name="brave_search_api_key"
+                           placeholder="{{ $hasBraveKey ? '••••••••••••••••••••••••' : 'BSA...' }}"
+                           class="w-full px-3 py-2 pr-20 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono bg-white">
+                    <button type="button" @@click="show = !show"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700 px-2 py-1">
+                        <span x-text="show ? '🙈 Hide' : '👁 Show'"></span>
+                    </button>
+                </div>
+                <div class="mt-2">
+                    <a href="https://api.search.brave.com/register" target="_blank" rel="noopener"
+                       class="inline-flex items-center gap-1 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-medium hover:bg-orange-200 transition-colors">
+                        🔗 Obtenir une cle gratuite (api.search.brave.com)
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                    </a>
+                    <p class="text-xs text-gray-400 mt-1">Utilise par le WebSearchAgent + outil web_search du ChatAgent.</p>
+                </div>
+            </div>
+
             <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
                 💾 Sauvegarder les cles
             </button>
