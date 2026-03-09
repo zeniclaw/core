@@ -21,7 +21,7 @@ class TodoAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes, la modification de titre, la recherche et le nettoyage des taches terminees.';
+        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes, la modification de titre, la recherche, le nettoyage des taches terminees, la visualisation des taches a venir (due_soon), le cochage en masse (check_all) et le changement de categorie (set_category).';
     }
 
     public function keywords(): array
@@ -51,12 +51,15 @@ class TodoAgent extends BaseAgent
             'changer priorite', 'change priorite', 'mettre urgent', 'mettre en urgent', 'set priority',
             'changer echeance', 'nouvelle echeance', 'modifier deadline', 'reporter', 'repousser echeance',
             'changer la deadline', 'modifier echeance', 'nouvelle deadline',
+            'a venir', 'prochains', 'cette semaine', 'echue', 'en retard', 'due soon',
+            'tout cocher', 'tout fait', 'tout termine', 'check all', 'j\'ai tout fait',
+            'changer categorie', 'set category', 'categorie de', 'modifier categorie',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -106,16 +109,18 @@ class TodoAgent extends BaseAgent
             return AgentResult::reply($reply, ['action' => 'todo_list']);
         }
 
-        $action     = $parsed['action'];
-        $items      = $parsed['items'] ?? [];
-        $recurrence = $parsed['recurrence'] ?? null;
-        $category   = $parsed['category'] ?? null;
-        $priority   = $parsed['priority'] ?? 'normal';
-        $dueAt      = $parsed['due_at'] ?? null;
-        $listName   = $parsed['list_name'] ?? null;
-        $targetList = $parsed['target_list'] ?? null;
-        $newTitle   = $parsed['new_title'] ?? null;
-        $query      = $parsed['query'] ?? null;
+        $action      = $parsed['action'];
+        $items       = $parsed['items'] ?? [];
+        $recurrence  = $parsed['recurrence'] ?? null;
+        $category    = $parsed['category'] ?? null;
+        $priority    = $parsed['priority'] ?? 'normal';
+        $dueAt       = $parsed['due_at'] ?? null;
+        $listName    = $parsed['list_name'] ?? null;
+        $targetList  = $parsed['target_list'] ?? null;
+        $newTitle    = $parsed['new_title'] ?? null;
+        $query       = $parsed['query'] ?? null;
+        $days        = isset($parsed['days']) ? max(1, (int) $parsed['days']) : 7;
+        $newCategory = $parsed['new_category'] ?? null;
 
         // Confirmation prefix (used by check / uncheck / delete on success)
         $confirmationPrefix = '';
@@ -262,6 +267,18 @@ class TodoAgent extends BaseAgent
 
             case 'set_due':
                 return $this->handleSetDue($context, $todos, $items, $listName, $dueAt);
+
+            case 'due_soon':
+                return $this->handleDueSoon($context, $days, $listName);
+
+            case 'check_all':
+                return $this->handleCheckAll($context, $listName, true);
+
+            case 'uncheck_all':
+                return $this->handleCheckAll($context, $listName, false);
+
+            case 'set_category':
+                return $this->handleSetCategory($context, $todos, $items, $listName, $newCategory);
 
             case 'list':
                 break;
@@ -617,6 +634,162 @@ class TodoAgent extends BaseAgent
     }
 
     /**
+     * Show tasks due within the next N days (default 7).
+     */
+    private function handleDueSoon(AgentContext $context, int $days, ?string $listName): AgentResult
+    {
+        $now    = now(AppSetting::timezone());
+        $cutoff = $now->copy()->addDays($days)->endOfDay();
+
+        $dbQuery = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->whereNotNull('due_at')
+            ->where('due_at', '<=', $cutoff->utc())
+            ->orderBy('due_at')
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END");
+
+        if ($listName) {
+            $dbQuery->where('list_name', $listName);
+        }
+
+        $results = $dbQuery->get();
+
+        $scopeLabel = $listName ? " dans *{$listName}*" : '';
+
+        if ($results->isEmpty()) {
+            $reply = "🗓️ Aucune tâche à venir dans les {$days} prochains jours{$scopeLabel}. Tout est à jour !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_due_soon_empty']);
+        }
+
+        // Split: overdue vs upcoming
+        $overdue  = $results->filter(fn ($t) => $t->due_at->lt($now));
+        $upcoming = $results->filter(fn ($t) => $t->due_at->gte($now));
+
+        $lines = ["🗓️ *Tâches à venir ({$days}j){$scopeLabel} :*", ''];
+
+        if ($overdue->isNotEmpty()) {
+            $lines[] = "⚠️ *En retard ({$overdue->count()}) :*";
+            foreach ($overdue->values() as $i => $todo) {
+                $listHint = (!$listName && $todo->list_name) ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+            $lines[] = '';
+        }
+
+        if ($upcoming->isNotEmpty()) {
+            $lines[] = "⏰ *À venir ({$upcoming->count()}) :*";
+            $offset  = $overdue->count();
+            foreach ($upcoming->values() as $i => $todo) {
+                $listHint = (!$listName && $todo->list_name) ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($offset + $i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = "_{$results->count()} tâche(s) au total._";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: due_soon", [
+            'days'     => $days,
+            'overdue'  => $overdue->count(),
+            'upcoming' => $upcoming->count(),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_due_soon', 'count' => $results->count()]);
+    }
+
+    /**
+     * Mark all pending tasks in a list (or globally) as done/undone.
+     */
+    private function handleCheckAll(AgentContext $context, ?string $listName, bool $isDone): AgentResult
+    {
+        $query = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', !$isDone);
+
+        if ($listName) {
+            $query->where('list_name', $listName);
+        }
+
+        $todos = $query->get();
+
+        if ($todos->isEmpty()) {
+            $scope = $listName ? " dans la liste *{$listName}*" : '';
+            $msg   = $isDone
+                ? "Toutes les tâches sont déjà cochées{$scope} !"
+                : "Toutes les tâches sont déjà décochées{$scope} !";
+            $this->sendText($context->from, $msg);
+            return AgentResult::reply($msg, ['action' => 'todo_check_all_empty']);
+        }
+
+        foreach ($todos as $todo) {
+            $todo->update(['is_done' => $isDone]);
+        }
+
+        $count = $todos->count();
+        $scope = $listName ? " dans *{$listName}*" : '';
+
+        if ($isDone) {
+            $msg = "✅ {$count} tâche(s) cochées{$scope} ! Beau travail 🎉";
+        } else {
+            $msg = "🔄 {$count} tâche(s) décochées{$scope}.";
+        }
+
+        $this->sendText($context->from, $msg);
+        $this->log($context, "Todo action: " . ($isDone ? 'check_all' : 'uncheck_all'), [
+            'list_name' => $listName,
+            'count'     => $count,
+        ]);
+
+        return AgentResult::reply($msg, ['action' => $isDone ? 'todo_check_all' : 'todo_uncheck_all', 'count' => $count]);
+    }
+
+    /**
+     * Change the category of a single task.
+     */
+    private function handleSetCategory(AgentContext $context, $todos, array $items, ?string $listName, ?string $newCategory): AgentResult
+    {
+        if (empty($items)) {
+            $reply = "Précise le numéro de la tâche.\nEx: \"change catégorie du 2 en travail\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_category_missing_params']);
+        }
+
+        $filteredTodos = $this->filterByList($todos, $listName);
+        $num           = (int) $items[0];
+        $index         = $num - 1;
+        $todo          = $filteredTodos->values()[$index] ?? null;
+
+        if (!$todo) {
+            $reply = "⚠️ Tâche #{$num} introuvable. Tape \"ma liste\" pour voir les numéros.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_category_not_found']);
+        }
+
+        $oldCategory = $todo->category;
+        $todo->update(['category' => $newCategory ?: null]);
+
+        if ($newCategory) {
+            $emoji = $this->getCategoryEmoji($newCategory);
+            $reply = "{$emoji} Catégorie de *{$todo->title}* → *{$newCategory}*.";
+        } else {
+            $reply = "🏷️ Catégorie de *{$todo->title}* supprimée.";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: set_category", [
+            'num'          => $num,
+            'old_category' => $oldCategory,
+            'new_category' => $newCategory,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_set_category']);
+    }
+
+    /**
      * Display usage help.
      */
     private function handleHelp(AgentContext $context): AgentResult
@@ -631,7 +804,8 @@ class TodoAgent extends BaseAgent
             . "\"mes listes\"\n\n"
             . "*Cocher / décocher :*\n"
             . "\"coche le 2\" / \"coche 1 et 3\"\n"
-            . "\"décoche le 1\"\n\n"
+            . "\"décoche le 1\"\n"
+            . "\"tout cocher\" / \"tout cocher dans courses\"\n\n"
             . "*Modifier une tâche :*\n"
             . "\"modifie le 2 : nouveau titre\"\n\n"
             . "*Changer la priorité :*\n"
@@ -640,6 +814,12 @@ class TodoAgent extends BaseAgent
             . "*Changer l'échéance :*\n"
             . "\"change l'échéance du 1 pour vendredi\"\n"
             . "\"supprime la deadline du 2\"\n\n"
+            . "*Changer la catégorie :*\n"
+            . "\"change catégorie du 2 en travail\"\n"
+            . "\"supprime catégorie du 3\"\n\n"
+            . "*Tâches à venir :*\n"
+            . "\"mes tâches de la semaine\"\n"
+            . "\"tâches dues dans 3 jours\" / \"en retard\"\n\n"
             . "*Rechercher :*\n"
             . "\"cherche pain\" / \"cherche lait dans courses\"\n\n"
             . "*Supprimer :*\n"
@@ -670,7 +850,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|due_soon|check_all|uncheck_all|set_category|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "new_category": "categorie" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null, "days": 7}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
@@ -688,6 +868,10 @@ ACTIONS:
 - "search": rechercher des taches par mot cle dans le titre. items = []. query = mot cle (string). list_name = null (global) ou nom de liste.
 - "set_priority": changer la priorite d'une tache existante. items = [numero]. priority = "high|normal|low". list_name = la liste concernee.
 - "set_due": changer ou supprimer l'echeance d'une tache existante. items = [numero]. due_at = "YYYY-MM-DD HH:MM" ou null pour supprimer l'echeance. list_name = la liste concernee.
+- "due_soon": voir les taches a venir ou en retard. items = []. days = nombre de jours (defaut: 7). list_name = null (global) ou nom de liste. Utilise pour "cette semaine", "en retard", "taches urgentes a venir", "quoi de prevu".
+- "check_all": cocher TOUTES les taches en attente d'une liste (ou globalement). items = []. list_name = la liste (null = global). Utilise pour "j'ai tout fait", "tout cocher", "tout termine dans courses".
+- "uncheck_all": decocher TOUTES les taches d'une liste (ou globalement). items = []. list_name = la liste (null = global). Utilise pour "recommencer la liste", "tout remettre a zero".
+- "set_category": changer la categorie d'une tache existante. items = [numero]. new_category = nouvelle categorie (string) ou null pour supprimer. list_name = la liste concernee.
 - "help": afficher l'aide des commandes disponibles. items = []. list_name = null.
 
 GESTION DES LISTES:
@@ -728,6 +912,27 @@ CHANGEMENT D'ECHEANCE (set_due):
 - "change echeance tache 1 dans courses a lundi" → set_due, items: [1], due_at: "YYYY-MM-DD 23:59", list_name: "courses"
 - IMPORTANT: set_due ne modifie PAS le titre, seulement due_at
 
+TACHES A VENIR (due_soon):
+- "taches de la semaine" → due_soon, days: 7, list_name: null
+- "quoi de prevu cette semaine" → due_soon, days: 7, list_name: null
+- "taches dues demain" → due_soon, days: 1, list_name: null
+- "quelles taches sont en retard" → due_soon, days: 0, list_name: null
+- "taches urgentes a venir dans courses" → due_soon, days: 7, list_name: "courses"
+- "taches dues dans 3 jours" → due_soon, days: 3, list_name: null
+
+COCHAGE EN MASSE (check_all / uncheck_all):
+- "j'ai tout fait dans courses" → check_all, list_name: "courses"
+- "tout cocher" → check_all, list_name: null
+- "j'ai tout fait" → check_all, list_name: null
+- "recommencer la liste courses" → uncheck_all, list_name: "courses"
+- "tout remettre a zero" → uncheck_all, list_name: null
+
+CHANGEMENT DE CATEGORIE (set_category):
+- "change categorie du 2 en travail" → set_category, items: [2], new_category: "travail", list_name: null
+- "met la tache 3 dans la categorie sante" → set_category, items: [3], new_category: "sante", list_name: null
+- "supprime categorie du 1" → set_category, items: [1], new_category: null, list_name: null
+- "change categorie tache 2 dans courses en alimentation" → set_category, items: [2], new_category: "alimentation", list_name: "courses"
+
 FORMAT RECURRENCE (uniquement pour "add"):
 - "daily:HH:MM" — chaque jour a HH:MM
 - "weekly:DAYNAME:HH:MM" — chaque semaine le jour donne (monday, tuesday, wednesday, thursday, friday, saturday, sunday)
@@ -767,7 +972,15 @@ EXEMPLES:
 - "mets le 2 en urgent" → {"action": "set_priority", "items": [2], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "high", "due_at": null}
 - "change priorite du 1 en normal" → {"action": "set_priority", "items": [1], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 - "repousse le 3 au 20 mars" → {"action": "set_due", "items": [3], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": "2026-03-20 23:59"}
-- "supprime la deadline du 2" → {"action": "set_due", "items": [2], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "supprime la deadline du 2" → {"action": "set_due", "items": [2], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "taches de la semaine" → {"action": "due_soon", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "taches dues dans 3 jours" → {"action": "due_soon", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 3}
+- "quelles taches sont en retard" → {"action": "due_soon", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 0}
+- "j'ai tout fait dans courses" → {"action": "check_all", "items": [], "list_name": "courses", "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "tout cocher" → {"action": "check_all", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "recommencer la liste courses" → {"action": "uncheck_all", "items": [], "list_name": "courses", "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "change categorie du 2 en travail" → {"action": "set_category", "items": [2], "list_name": null, "target_list": null, "new_title": null, "new_category": "travail", "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "supprime categorie du 3" → {"action": "set_category", "items": [3], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -859,11 +1072,16 @@ PROMPT;
 
         $hasCategories = $todos->whereNotNull('category')->isNotEmpty();
 
-        if ($hasCategories) {
-            return $this->buildGroupedReply($todos, $header);
+        $body = $hasCategories
+            ? $this->buildGroupedReply($todos, $header)
+            : $this->buildFlatReply($todos, $header);
+
+        // Warn user if list is capped (there may be more tasks not shown)
+        if ($total >= self::MAX_TODOS) {
+            $body .= "\n\n_⚠️ Liste tronquée à " . self::MAX_TODOS . " tâches. Vide les tâches terminées pour en voir plus._";
         }
 
-        return $this->buildFlatReply($todos, $header);
+        return $body;
     }
 
     private function buildAllListsOverview(AgentContext $context): string
@@ -888,27 +1106,31 @@ PROMPT;
             $lines[] = "📌 *Liste par défaut* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} restantes)" : '');
         }
 
-        // Named lists
+        // Named lists (sorted alphabetically)
         $namedTodos = $todos->whereNotNull('list_name');
-        $grouped    = $namedTodos->groupBy('list_name');
+        $grouped    = $namedTodos->groupBy('list_name')->sortKeys();
 
         foreach ($grouped as $name => $listTodos) {
-            $done    = $listTodos->where('is_done', true)->count();
-            $total   = $listTodos->count();
-            $pending = $total - $done;
+            $done      = $listTodos->where('is_done', true)->count();
+            $total     = $listTodos->count();
+            $pending   = $total - $done;
+            $highCount = $listTodos->where('is_done', false)->where('priority', 'high')->count();
 
             // Highlight lists with overdue tasks
             $hasOverdue = $listTodos->where('is_done', false)
                 ->filter(fn ($t) => $t->due_at && $t->due_at->lt(now()))
                 ->isNotEmpty();
 
-            $overdueHint = $hasOverdue ? ' ⚠️' : '';
-            $lines[]     = "📝 *{$name}* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} restantes)" : '') . $overdueHint;
+            $overdueHint   = $hasOverdue ? ' ⚠️' : '';
+            $urgentHint    = $highCount > 0 ? " 🔴{$highCount}" : '';
+            $lines[]       = "📝 *{$name}* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} restantes)" : '') . $urgentHint . $overdueHint;
         }
 
+        $totalPending = $todos->where('is_done', false)->count();
         $lines[] = '';
+        $lines[] = "_{$todos->count()} tâche(s) au total, {$totalPending} à faire._";
         $lines[] = "_Dis \"ma liste X\" pour voir une liste en détail._";
-        $lines[] = "_\"cherche X\" pour rechercher une tâche._";
+        $lines[] = "_\"tâches de la semaine\" pour voir les échéances._";
         $lines[] = "_\"aide\" pour voir toutes les commandes._";
 
         return implode("\n", $lines);
@@ -1112,13 +1334,27 @@ PROMPT;
             }
         }
 
+        // Next due task
+        $nextDue = $allTodos->where('is_done', false)
+            ->filter(fn ($t) => $t->due_at && $t->due_at->gte($now))
+            ->sortBy('due_at')
+            ->first();
+
+        if ($nextDue) {
+            $dueLocal  = $nextDue->due_at->copy()->timezone(AppSetting::timezone());
+            $daysUntil = (int) $now->diffInDays($dueLocal, false);
+            $dateLabel = $daysUntil === 0 ? "aujourd'hui" : ($daysUntil === 1 ? "demain" : "dans {$daysUntil}j");
+            $lines[]   = '';
+            $lines[]   = "📌 *Prochaine échéance :* _{$nextDue->title}_ ({$dateLabel})";
+        }
+
         // List breakdown (only when not scoped to a single list)
         if (!$listName) {
             $namedLists = $allTodos->whereNotNull('list_name')->groupBy('list_name');
             if ($namedLists->isNotEmpty()) {
                 $lines[] = '';
                 $lines[] = '*Par liste :*';
-                foreach ($namedLists as $name => $listTodos) {
+                foreach ($namedLists->sortKeys() as $name => $listTodos) {
                     $listDone  = $listTodos->where('is_done', true)->count();
                     $listTotal = $listTodos->count();
                     $lines[]   = "📝 {$name} : {$listDone}/{$listTotal}";
