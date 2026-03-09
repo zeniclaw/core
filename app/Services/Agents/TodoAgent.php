@@ -21,7 +21,7 @@ class TodoAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes et le nettoyage des taches terminees.';
+        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes, la modification de titre, la recherche et le nettoyage des taches terminees.';
     }
 
     public function keywords(): array
@@ -45,13 +45,15 @@ class TodoAgent extends BaseAgent
             'a faire', 'il faut', 'je dois', 'faut que',
             'vider', 'nettoyer', 'clear', 'efface les faits', 'supprimer les terminees',
             'deplace', 'deplacer', 'move', 'transfere',
+            'modifie', 'modifier', 'renomme', 'renommer', 'edite', 'editer', 'changer le titre',
+            'cherche', 'recherche', 'trouve', 'find', 'search',
             'aide todo', 'help todo', 'aide taches',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -85,7 +87,7 @@ class TodoAgent extends BaseAgent
 
         // Inject user context memory for smarter categorization
         $contextMemory = $this->formatContextMemoryForPrompt($context->from);
-        $contextHint = $contextMemory ? "\n\n{$contextMemory}" : '';
+        $contextHint   = $contextMemory ? "\n\n{$contextMemory}" : '';
 
         $response = $this->claude->chat(
             "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now(AppSetting::timezone())->format('Y-m-d H:i (l)') . $contextHint,
@@ -101,14 +103,19 @@ class TodoAgent extends BaseAgent
             return AgentResult::reply($reply, ['action' => 'todo_list']);
         }
 
-        $action    = $parsed['action'];
-        $items     = $parsed['items'] ?? [];
+        $action     = $parsed['action'];
+        $items      = $parsed['items'] ?? [];
         $recurrence = $parsed['recurrence'] ?? null;
-        $category  = $parsed['category'] ?? null;
-        $priority  = $parsed['priority'] ?? 'normal';
-        $dueAt     = $parsed['due_at'] ?? null;
-        $listName  = $parsed['list_name'] ?? null;
+        $category   = $parsed['category'] ?? null;
+        $priority   = $parsed['priority'] ?? 'normal';
+        $dueAt      = $parsed['due_at'] ?? null;
+        $listName   = $parsed['list_name'] ?? null;
         $targetList = $parsed['target_list'] ?? null;
+        $newTitle   = $parsed['new_title'] ?? null;
+        $query      = $parsed['query'] ?? null;
+
+        // Confirmation prefix (used by check / uncheck / delete on success)
+        $confirmationPrefix = '';
 
         switch ($action) {
             case 'add':
@@ -140,33 +147,57 @@ class TodoAgent extends BaseAgent
                 return AgentResult::reply($reply, ['action' => 'todo_show_lists']);
 
             case 'check':
+                if (empty($items)) {
+                    $reply = "Quel numéro veux-tu cocher ? Ex: \"coche le 2\"";
+                    $this->sendText($context->from, $reply);
+                    return AgentResult::reply($reply, ['action' => 'todo_check_missing_items']);
+                }
                 $filteredTodos = $this->filterByList($todos, $listName);
-                $result = $this->updateTodoStatus($filteredTodos, $items, true);
+                $result        = $this->updateTodoStatus($filteredTodos, $items, true);
                 if (!empty($result['not_found'])) {
                     $reply = "⚠️ Numéro(s) introuvable(s) : " . implode(', ', $result['not_found']) . ". Tape \"ma liste\" pour voir les numéros.";
                     $this->sendText($context->from, $reply);
                     return AgentResult::reply($reply, ['action' => 'todo_check_not_found']);
                 }
+                $confirmationPrefix = count($items) === 1
+                    ? "✅ Tâche cochée !\n\n"
+                    : "✅ " . count($items) . " tâches cochées !\n\n";
                 break;
 
             case 'uncheck':
+                if (empty($items)) {
+                    $reply = "Quel numéro veux-tu décocher ? Ex: \"décoche le 1\"";
+                    $this->sendText($context->from, $reply);
+                    return AgentResult::reply($reply, ['action' => 'todo_uncheck_missing_items']);
+                }
                 $filteredTodos = $this->filterByList($todos, $listName);
-                $result = $this->updateTodoStatus($filteredTodos, $items, false);
+                $result        = $this->updateTodoStatus($filteredTodos, $items, false);
                 if (!empty($result['not_found'])) {
                     $reply = "⚠️ Numéro(s) introuvable(s) : " . implode(', ', $result['not_found']) . ". Tape \"ma liste\" pour voir les numéros.";
                     $this->sendText($context->from, $reply);
                     return AgentResult::reply($reply, ['action' => 'todo_uncheck_not_found']);
                 }
+                $confirmationPrefix = count($items) === 1
+                    ? "🔄 Tâche décochée !\n\n"
+                    : "🔄 " . count($items) . " tâches décochées !\n\n";
                 break;
 
             case 'delete':
+                if (empty($items)) {
+                    $reply = "Quel numéro veux-tu supprimer ? Ex: \"supprime le 3\"";
+                    $this->sendText($context->from, $reply);
+                    return AgentResult::reply($reply, ['action' => 'todo_delete_missing_items']);
+                }
                 $filteredTodos = $this->filterByList($todos, $listName);
-                $result = $this->deleteTodos($filteredTodos, $items);
+                $result        = $this->deleteTodos($filteredTodos, $items);
                 if (!empty($result['not_found'])) {
                     $reply = "⚠️ Numéro(s) introuvable(s) : " . implode(', ', $result['not_found']) . ". Tape \"ma liste\" pour voir les numéros.";
                     $this->sendText($context->from, $reply);
                     return AgentResult::reply($reply, ['action' => 'todo_delete_not_found']);
                 }
+                $confirmationPrefix = count($items) === 1
+                    ? "🗑️ Tâche supprimée !\n\n"
+                    : "🗑️ " . count($items) . " tâches supprimées !\n\n";
                 break;
 
             case 'delete_list':
@@ -201,6 +232,12 @@ class TodoAgent extends BaseAgent
             case 'move':
                 return $this->handleMove($context, $todos, $items, $listName, $targetList);
 
+            case 'edit':
+                return $this->handleEdit($context, $todos, $items, $listName, $newTitle);
+
+            case 'search':
+                return $this->handleSearch($context, $query, $listName);
+
             case 'help':
                 return $this->handleHelp($context);
 
@@ -221,10 +258,10 @@ class TodoAgent extends BaseAgent
             ->orderBy('id')
             ->limit(self::MAX_TODOS);
 
-        $todos = $reloadQuery->get();
+        $todos        = $reloadQuery->get();
         $displayTodos = $this->filterByList($todos, $listName);
 
-        $reply = $this->buildReply($displayTodos, $listName);
+        $reply = $confirmationPrefix . $this->buildReply($displayTodos, $listName);
         $this->sendText($context->from, $reply);
 
         $this->log($context, "Todo action: {$action}", [
@@ -285,6 +322,88 @@ class TodoAgent extends BaseAgent
     }
 
     /**
+     * Edit (rename) a single task title.
+     */
+    private function handleEdit(AgentContext $context, $todos, array $items, ?string $listName, ?string $newTitle): AgentResult
+    {
+        if (empty($items) || $newTitle === null || trim($newTitle) === '') {
+            $reply = "Précise le numéro de la tâche et le nouveau titre.\nEx: \"modifie le 2 : acheter du lait\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_edit_missing_params']);
+        }
+
+        $filteredTodos = $this->filterByList($todos, $listName);
+        $num           = (int) $items[0];
+        $index         = $num - 1;
+        $todo          = $filteredTodos->values()[$index] ?? null;
+
+        if (!$todo) {
+            $reply = "⚠️ Tâche #{$num} introuvable. Tape \"ma liste\" pour voir les numéros.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_edit_not_found']);
+        }
+
+        $oldTitle = $todo->title;
+        $todo->update(['title' => trim($newTitle)]);
+
+        $reply = "✏️ Tâche #{$num} modifiée :\n_{$oldTitle}_ → *{$newTitle}*";
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: edit", ['num' => $num, 'old' => $oldTitle, 'new' => $newTitle]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_edit']);
+    }
+
+    /**
+     * Search todos by keyword across title (and optionally scoped to a list).
+     */
+    private function handleSearch(AgentContext $context, ?string $query, ?string $listName): AgentResult
+    {
+        if (!$query || trim($query) === '') {
+            $reply = "Que veux-tu chercher ? Ex: \"cherche pain\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_search_missing_query']);
+        }
+
+        $dbQuery = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('title', 'like', '%' . $query . '%')
+            ->orderBy('is_done')
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->orderBy('id');
+
+        if ($listName) {
+            $dbQuery->where('list_name', $listName);
+        }
+
+        $results = $dbQuery->get();
+
+        if ($results->isEmpty()) {
+            $scope = $listName ? " dans la liste *{$listName}*" : '';
+            $reply = "🔍 Aucune tâche trouvée pour \"*{$query}*\"{$scope}.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_search_empty']);
+        }
+
+        $scope   = $listName ? " dans *{$listName}*" : '';
+        $lines   = ["🔍 *Résultats pour \"{$query}\"{$scope} :*"];
+
+        foreach ($results->values() as $i => $todo) {
+            $listHint = (!$listName && $todo->list_name) ? " _({$todo->list_name})_" : '';
+            $lines[]  = ($i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+        }
+
+        $count = $results->count();
+        $lines[] = '';
+        $lines[] = "_{$count} résultat(s) trouvé(s)._";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: search", ['query' => $query, 'count' => $count]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_search', 'count' => $count]);
+    }
+
+    /**
      * Clear all completed tasks (globally or from a specific list).
      */
     private function handleClearDone(AgentContext $context, ?string $listName): AgentResult
@@ -315,7 +434,7 @@ class TodoAgent extends BaseAgent
         }
 
         $count = $done->count();
-        $msg = $listName
+        $msg   = $listName
             ? "🧹 {$count} tâche(s) terminée(s) supprimée(s) de la liste *{$listName}*."
             : "🧹 {$count} tâche(s) terminée(s) supprimée(s).";
 
@@ -337,8 +456,8 @@ class TodoAgent extends BaseAgent
         }
 
         $filteredTodos = $this->filterByList($todos, $listName);
-        $moved = [];
-        $notFound = [];
+        $moved         = [];
+        $notFound      = [];
 
         foreach ($items as $num) {
             $index = (int) $num - 1;
@@ -358,7 +477,7 @@ class TodoAgent extends BaseAgent
         }
 
         $destLabel = $targetList ?: 'la liste par défaut';
-        $reply = count($moved) === 1
+        $reply     = count($moved) === 1
             ? "↪️ *{$moved[0]}* déplacé vers *{$destLabel}*."
             : "↪️ " . count($moved) . " tâche(s) déplacée(s) vers *{$destLabel}*.";
 
@@ -393,6 +512,10 @@ class TodoAgent extends BaseAgent
             . "*Cocher / décocher :*\n"
             . "\"coche le 2\" / \"coche 1 et 3\"\n"
             . "\"décoche le 1\"\n\n"
+            . "*Modifier une tâche :*\n"
+            . "\"modifie le 2 : nouveau titre\"\n\n"
+            . "*Rechercher :*\n"
+            . "\"cherche pain\" / \"cherche lait dans courses\"\n\n"
             . "*Supprimer :*\n"
             . "\"supprime le 3\" / \"supprime les 1 et 2\"\n"
             . "\"supprime la liste courses\"\n"
@@ -421,7 +544,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
@@ -435,6 +558,8 @@ ACTIONS:
 - "delete_list": supprimer une liste entiere et tous ses todos. items = []. list_name = nom de la liste.
 - "clear_done": supprimer toutes les taches cochees/terminees. items = []. list_name = null (global) ou nom de liste.
 - "move": deplacer une ou plusieurs taches vers une autre liste. items = [numeros]. list_name = liste source (null = default). target_list = liste destination (null = default).
+- "edit": modifier le titre d'une tache. items = [numero]. new_title = nouveau titre (string). list_name = la liste concernee (null = liste par defaut).
+- "search": rechercher des taches par mot cle dans le titre. items = []. query = mot cle (string). list_name = null (global) ou nom de liste.
 - "help": afficher l'aide des commandes disponibles. items = []. list_name = null.
 
 GESTION DES LISTES:
@@ -451,6 +576,14 @@ GESTION DES LISTES:
 - Si l'utilisateur mentionne une liste existante, utilise son nom exact.
 - Si l'utilisateur dit "dans X" ou "liste X", list_name = X (en minuscule).
 - Sans liste specifiee, list_name = null (liste par defaut).
+
+EDITION ET RECHERCHE:
+- "modifie le 2 : acheter du lait" → edit, items: [2], new_title: "Acheter du lait", list_name: null
+- "renomme la tache 3 en appeler le medecin" → edit, items: [3], new_title: "Appeler le médecin", list_name: null
+- "change le 1 dans courses par eau minerale" → edit, items: [1], new_title: "Eau minérale", list_name: "courses"
+- "cherche pain" → search, query: "pain", list_name: null
+- "recherche lait dans courses" → search, query: "lait", list_name: "courses"
+- "trouve les taches avec urgent" → search, query: "urgent", list_name: null
 
 FORMAT RECURRENCE (uniquement pour "add"):
 - "daily:HH:MM" — chaque jour a HH:MM
@@ -474,19 +607,20 @@ DUE_AT (uniquement pour "add"):
 - null si pas de deadline
 
 EXEMPLES:
-- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "cree moi une todo list poney" → {"action": "create_list", "items": [], "list_name": "poney", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ajoute carottes dans courses" → {"action": "add", "items": ["Carottes"], "list_name": "courses", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ma liste courses" → {"action": "list", "items": [], "list_name": "courses", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "mes listes" → {"action": "show_lists", "items": [], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "coche le 2 dans poney" → {"action": "check", "items": [2], "list_name": "poney", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "supprime la liste poney" → {"action": "delete_list", "items": [], "list_name": "poney", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "vide les taches terminees" → {"action": "clear_done", "items": [], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "nettoie les faites dans courses" → {"action": "clear_done", "items": [], "list_name": "courses", "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "deplace le 2 dans courses" → {"action": "move", "items": [2], "list_name": null, "target_list": "courses", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "ma liste" → {"action": "list", "items": [], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "mes stats" → {"action": "stats", "items": [], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
-- "aide" → {"action": "help", "items": [], "list_name": null, "target_list": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ajoute acheter du pain" → {"action": "add", "items": ["Acheter du pain"], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "cree moi une todo list poney" → {"action": "create_list", "items": [], "list_name": "poney", "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ajoute carottes dans courses" → {"action": "add", "items": ["Carottes"], "list_name": "courses", "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ma liste courses" → {"action": "list", "items": [], "list_name": "courses", "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mes listes" → {"action": "show_lists", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "coche le 2 dans poney" → {"action": "check", "items": [2], "list_name": "poney", "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "supprime la liste poney" → {"action": "delete_list", "items": [], "list_name": "poney", "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "vide les taches terminees" → {"action": "clear_done", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "deplace le 2 dans courses" → {"action": "move", "items": [2], "list_name": null, "target_list": "courses", "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "modifie le 2 : acheter du lait" → {"action": "edit", "items": [2], "list_name": null, "target_list": null, "new_title": "Acheter du lait", "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "cherche pain" → {"action": "search", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": "pain", "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "ma liste" → {"action": "list", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mes stats" → {"action": "stats", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "aide" → {"action": "help", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -564,9 +698,17 @@ PROMPT;
             return "📋 Ta liste de todos est vide !\n\n_Commence par : \"ajoute acheter du pain\"_";
         }
 
+        $done    = $todos->where('is_done', true)->count();
+        $total   = $todos->count();
+        $pending = $total - $done;
+
         $header = $listName
-            ? "📋 *Liste {$listName} :*"
-            : "📋 *Ta liste de todos :*";
+            ? "📋 *Liste {$listName}* — {$done}/{$total} ✅"
+            : "📋 *Tes todos* — {$done}/{$total} ✅";
+
+        if ($pending > 0) {
+            $header .= " ({$pending} à faire)";
+        }
 
         $hasCategories = $todos->whereNotNull('category')->isNotEmpty();
 
@@ -607,11 +749,19 @@ PROMPT;
             $done    = $listTodos->where('is_done', true)->count();
             $total   = $listTodos->count();
             $pending = $total - $done;
-            $lines[] = "📝 *{$name}* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} restantes)" : '');
+
+            // Highlight lists with overdue tasks
+            $hasOverdue = $listTodos->where('is_done', false)
+                ->filter(fn ($t) => $t->due_at && $t->due_at->lt(now()))
+                ->isNotEmpty();
+
+            $overdueHint = $hasOverdue ? ' ⚠️' : '';
+            $lines[]     = "📝 *{$name}* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} restantes)" : '') . $overdueHint;
         }
 
         $lines[] = '';
         $lines[] = "_Dis \"ma liste X\" pour voir une liste en détail._";
+        $lines[] = "_\"cherche X\" pour rechercher une tâche._";
         $lines[] = "_\"aide\" pour voir toutes les commandes._";
 
         return implode("\n", $lines);
@@ -703,6 +853,11 @@ PROMPT;
         $dayName = $dayNames[$due->format('l')] ?? $due->format('l');
         $dateStr = $dayName . ' ' . $due->format('d/m');
 
+        // Show time if it's not midnight/EOD
+        if ($due->format('H:i') !== '23:59' && $due->format('H:i') !== '00:00') {
+            $dateStr .= ' ' . $due->format('H:i');
+        }
+
         if (!$todo->is_done && $due->lt($now)) {
             return " (📅 {$dateStr} ⚠️ EN RETARD)";
         }
@@ -765,12 +920,22 @@ PROMPT;
         ];
 
         // Overdue count
+        $now     = now();
         $overdue = $allTodos->where('is_done', false)
-            ->filter(fn ($t) => $t->due_at && $t->due_at->lt(now()))
+            ->filter(fn ($t) => $t->due_at && $t->due_at->lt($now))
             ->count();
 
         if ($overdue > 0) {
             $lines[] = "⚠️ {$overdue} en retard";
+        }
+
+        // Upcoming tasks (due within next 3 days, not overdue)
+        $upcoming = $allTodos->where('is_done', false)
+            ->filter(fn ($t) => $t->due_at && $t->due_at->gte($now) && $t->due_at->lte($now->copy()->addDays(3)))
+            ->count();
+
+        if ($upcoming > 0) {
+            $lines[] = "⏰ {$upcoming} à faire dans les 3 prochains jours";
         }
 
         // Priority breakdown
@@ -890,7 +1055,7 @@ PROMPT;
 
     private function nextDaily(array $parts, Carbon $from): Carbon
     {
-        $time   = $parts[1] ?? '08:00';
+        $time    = $parts[1] ?? '08:00';
         [$h, $m] = explode(':', $time) + [0 => 8, 1 => 0];
 
         $next = $from->copy()->setTime((int) $h, (int) $m, 0);
@@ -903,8 +1068,8 @@ PROMPT;
 
     private function nextWeekly(array $parts, Carbon $from): Carbon
     {
-        $day    = strtolower($parts[1] ?? 'monday');
-        $time   = $parts[2] ?? '09:00';
+        $day     = strtolower($parts[1] ?? 'monday');
+        $time    = $parts[2] ?? '09:00';
         [$h, $m] = explode(':', $time) + [0 => 9, 1 => 0];
 
         return $from->copy()->next($day)->setTime((int) $h, (int) $m, 0);
