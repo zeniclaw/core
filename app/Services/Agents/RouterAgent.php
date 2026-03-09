@@ -244,6 +244,8 @@ DESAMBIGUATION (agents souvent confondus):
 - "resume cet article/URL" → content_summarizer (PAS analysis)
 - "mes projets" / "liste les projets" → dev (PAS project)
 - "switch sur projet X" / "bosser sur X" → project
+- Toute demande mentionnant "api", "endpoint", "appel", "requete", cle API, ou interaction avec un service externe du projet actif → dev (PAS docs, PAS chat, PAS analysis)
+- "liste les campagnes" / "cree une campagne" / "les utilisateurs" / tout CRUD sur des donnees du projet → dev (api_query)
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
