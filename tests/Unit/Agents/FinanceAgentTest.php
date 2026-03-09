@@ -26,9 +26,9 @@ class FinanceAgentTest extends TestCase
         $this->assertEquals('finance', (new FinanceAgent())->name());
     }
 
-    public function test_agent_version_is_1_3_0(): void
+    public function test_agent_version_is_1_4_0(): void
     {
-        $this->assertEquals('1.3.0', (new FinanceAgent())->version());
+        $this->assertEquals('1.4.0', (new FinanceAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -854,6 +854,253 @@ class FinanceAgentTest extends TestCase
 
         $this->assertStringContainsString('resume semaine', $help);
         $this->assertStringContainsString('top depenses', $help);
+    }
+
+    // ── keywords v1.4.0 ──────────────────────────────────────────────────────
+
+    public function test_keywords_include_comparer_mois(): void
+    {
+        $this->assertContains('comparer mois', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_chercher_depense(): void
+    {
+        $this->assertContains('chercher depense', (new FinanceAgent())->keywords());
+    }
+
+    // ── canHandle v1.4.0 ─────────────────────────────────────────────────────
+
+    public function test_can_handle_comparer_mois(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('comparer mois')));
+    }
+
+    public function test_can_handle_comparaison(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('comparaison')));
+    }
+
+    public function test_can_handle_chercher(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('chercher restaurant')));
+    }
+
+    public function test_can_handle_rechercher(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('rechercher taxi')));
+    }
+
+    // ── parseCommand v1.4.0 ──────────────────────────────────────────────────
+
+    public function test_parse_command_compare_months(): void
+    {
+        $cmd = $this->parseCommand('comparer mois');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('compare_months', $cmd['action']);
+    }
+
+    public function test_parse_command_compare_months_comparaison(): void
+    {
+        $cmd = $this->parseCommand('comparaison');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('compare_months', $cmd['action']);
+    }
+
+    public function test_parse_command_search_expenses(): void
+    {
+        $cmd = $this->parseCommand('chercher restaurant');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('search_expenses', $cmd['action']);
+        $this->assertEquals('restaurant', $cmd['query']);
+    }
+
+    public function test_parse_command_search_expenses_variant(): void
+    {
+        $cmd = $this->parseCommand('rechercher courses supermarche');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('search_expenses', $cmd['action']);
+        $this->assertEquals('courses supermarche', $cmd['query']);
+    }
+
+    // ── compareMonths (via reflection) ───────────────────────────────────────
+
+    private function callCompareMonths(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('compareMonths');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_compare_months_no_data(): void
+    {
+        $result = $this->callCompareMonths();
+        $this->assertStringContainsString('📊', $result);
+        $this->assertStringContainsString('Aucune donnee', $result);
+    }
+
+    public function test_compare_months_with_current_month_data(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 50.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callCompareMonths();
+        $this->assertStringContainsString('📊', $result);
+        $this->assertStringContainsString('50', $result);
+        $this->assertStringContainsString('alimentation', $result);
+    }
+
+    public function test_compare_months_with_both_months_data(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 100.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 80.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->subMonth()->toDateString(),
+        ]);
+
+        $result = $this->callCompareMonths();
+        $this->assertStringContainsString('100', $result);
+        $this->assertStringContainsString('80', $result);
+        $this->assertStringContainsString('transport', $result);
+    }
+
+    // ── searchExpenses (via reflection) ──────────────────────────────────────
+
+    private function callSearchExpenses(string $query): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('searchExpenses');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone, $query);
+    }
+
+    public function test_search_expenses_no_results(): void
+    {
+        $result = $this->callSearchExpenses('taxi');
+        $this->assertStringContainsString('🔍', $result);
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_search_expenses_finds_by_description(): void
+    {
+        Expense::create([
+            'user_phone'  => $this->testPhone,
+            'amount'      => 15.0,
+            'category'    => 'transport',
+            'description' => 'taxi gare',
+            'date'        => Carbon::today()->toDateString(),
+        ]);
+
+        $result = $this->callSearchExpenses('taxi');
+        $this->assertStringContainsString('15', $result);
+        $this->assertStringContainsString('transport', $result);
+    }
+
+    public function test_search_expenses_finds_by_category(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 45.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::today()->toDateString(),
+        ]);
+
+        $result = $this->callSearchExpenses('alimentation');
+        $this->assertStringContainsString('45', $result);
+        $this->assertStringContainsString('alimentation', $result);
+    }
+
+    public function test_search_expenses_rejects_short_query(): void
+    {
+        $result = $this->callSearchExpenses('a');
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_search_expenses_rejects_too_long_query(): void
+    {
+        $result = $this->callSearchExpenses(str_repeat('a', 51));
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_search_expenses_shows_total(): void
+    {
+        Expense::create([
+            'user_phone'  => $this->testPhone,
+            'amount'      => 12.5,
+            'category'    => 'transport',
+            'description' => 'bus',
+            'date'        => Carbon::today()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone'  => $this->testPhone,
+            'amount'      => 8.0,
+            'category'    => 'transport',
+            'description' => 'bus ligne 12',
+            'date'        => Carbon::today()->toDateString(),
+        ]);
+
+        $result = $this->callSearchExpenses('bus');
+        $this->assertStringContainsString('2 resultat', $result);
+        $this->assertStringContainsString('20.5', $result);
+    }
+
+    // ── logExpense v1.4.0 — category max length ───────────────────────────────
+
+    public function test_log_expense_rejects_too_long_category(): void
+    {
+        $result = $this->callLogExpense(10.0, str_repeat('a', 31));
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    // ── generateMonthlyReport v1.4.0 — daily average ─────────────────────────
+
+    public function test_monthly_report_shows_daily_average(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 90.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateMonthlyReport');
+        $method->setAccessible(true);
+        $result = $method->invoke($agent, $this->testPhone);
+
+        $this->assertStringContainsString('Moyenne journaliere', $result);
+    }
+
+    // ── getHelp v1.4.0 ────────────────────────────────────────────────────────
+
+    public function test_help_contains_comparer_mois_command(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getHelp');
+        $method->setAccessible(true);
+        $help = $method->invoke($agent);
+
+        $this->assertStringContainsString('comparer mois', $help);
+        $this->assertStringContainsString('chercher', $help);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

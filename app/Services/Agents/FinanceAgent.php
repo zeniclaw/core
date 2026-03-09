@@ -18,7 +18,7 @@ class FinanceAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition et suppression de budgets mensuels, alertes de depassement, historique, rapports, projections de fin de mois, detail par categorie et detection d\'anomalies de depenses.';
+        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition et suppression de budgets mensuels, alertes de depassement, historique, rapports, projections de fin de mois, detail par categorie, detection d\'anomalies, comparaison mensuelle et recherche dans les depenses.';
     }
 
     public function keywords(): array
@@ -47,12 +47,14 @@ class FinanceAgent extends BaseAgent
             'detail', 'details', 'analyse categorie', 'category detail',
             'semaine', 'hebdo', 'hebdomadaire', 'resume semaine', 'cette semaine', 'semaine en cours',
             'top depenses', 'grosses depenses', 'plus grosses depenses', 'grandes depenses', 'depenses importantes',
+            'comparer mois', 'comparaison mois', 'compare mois', 'bilan comparatif', 'evolution depenses',
+            'chercher depense', 'rechercher depense', 'trouver depense', 'search expense',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -78,6 +80,8 @@ class FinanceAgent extends BaseAgent
             '/\b(semaine|hebdo|hebdomadaire)\b/iu',
             '/\btop\s+depenses?\b/iu',
             '/\b(grosses?|grandes?)\s+depenses?\b/iu',
+            '/\b(comparer?\s+mois|comparaison|bilan\s+comparatif|evolution\s+depenses?)\b/iu',
+            '/\b(chercher?|rechercher?|trouver|search)\s+\S+/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -201,6 +205,16 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'top_expenses', 'limit' => $limit];
         }
 
+        // comparer mois / comparaison / evolution depenses
+        if (preg_match('/\b(comparer?\s+mois|comparaison|bilan\s+comparatif|evolution\s+depenses?|compare\s+months?)\b/iu', $lower)) {
+            return ['action' => 'compare_months'];
+        }
+
+        // chercher / rechercher [terme]
+        if (preg_match('/\b(?:chercher?|rechercher?|trouver|search)\s+(.+)/iu', $lower, $m)) {
+            return ['action' => 'search_expenses', 'query' => trim($m[1])];
+        }
+
         return null;
     }
 
@@ -224,6 +238,8 @@ class FinanceAgent extends BaseAgent
             'category_detail' => $this->getCategoryDetail($context->from, $command['category']),
             'weekly_summary'  => $this->getWeeklySummary($context->from),
             'top_expenses'    => $this->getTopExpenses($context->from, $command['limit'] ?? 5),
+            'compare_months'  => $this->compareMonths($context->from),
+            'search_expenses' => $this->searchExpenses($context->from, $command['query'] ?? ''),
             'help'            => $this->getHelp(),
             default           => null,
         };
@@ -351,12 +367,14 @@ COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
 - depense [montant] [categorie] [description] — enregistrer une depense
 - budget [categorie] [montant] — definir un budget mensuel
 - solde — voir solde et budgets
-- stats — rapport mensuel
+- stats — rapport mensuel avec moyenne journaliere
 - historique [n] — dernieres depenses
 - detail [categorie] — analyse d'une categorie
 - projection — prevision fin de mois
 - resume semaine — depenses de la semaine en cours
 - top depenses — top 5 depenses individuelles du mois
+- comparer mois — comparaison mois actuel vs mois precedent
+- chercher [terme] — rechercher dans les depenses
 - alertes — alertes de depassement
 - supprimer derniere depense — annuler la derniere depense
 
@@ -381,6 +399,10 @@ PROMPT;
         $category = mb_strtolower(trim($category));
         if ($category === '') {
             return "❌ La categorie ne peut pas etre vide.";
+        }
+
+        if (mb_strlen($category) > 30) {
+            return "❌ Le nom de categorie est trop long (max 30 caracteres).";
         }
 
         try {
@@ -544,8 +566,15 @@ PROMPT;
         $totalSpent    = Expense::calculateTotalMonthlySpent($userPhone, $month);
         $topCategories = Expense::getTopCategories($userPhone, 5, $month);
 
-        $response  = "📊 *Rapport mensuel - " . $month->translatedFormat('F Y') . "*\n\n";
+        $dayOfMonth   = $month->day;
+        $dailyAverage = $dayOfMonth > 0 && $totalSpent > 0 ? round($totalSpent / $dayOfMonth, 2) : 0;
+
+        $response  = "📊 *Rapport mensuel - " . $month->translatedFormat('F Y') . "*\n";
+        $response .= "📅 Jour {$dayOfMonth}/{$month->daysInMonth}\n\n";
         $response .= "💳 Total depenses: *{$totalSpent}€*\n";
+        if ($dailyAverage > 0) {
+            $response .= "📊 Moyenne journaliere: {$dailyAverage}€/jour\n";
+        }
 
         if (empty($topCategories)) {
             $response .= "\n_Aucune depense ce mois._\n";
@@ -852,7 +881,9 @@ PROMPT;
             . "  `detail alimentation` — analyse d'une categorie\n"
             . "  `projection` — prevision fin de mois\n"
             . "  `resume semaine` — depenses de la semaine\n"
-            . "  `top depenses` — top 5 depenses du mois\n\n"
+            . "  `top depenses` — top 5 depenses du mois\n"
+            . "  `comparer mois` — M vs M-1 par categorie\n"
+            . "  `chercher [terme]` — rechercher une depense\n\n"
             . "🗑️ *Annuler:*\n"
             . "  `supprimer derniere depense`\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
@@ -939,6 +970,126 @@ PROMPT;
         $topTotal   = round((float) $expenses->sum('amount'), 2);
         $pct        = $totalSpent > 0 ? round(($topTotal / $totalSpent) * 100, 1) : 0;
         $response  .= "\n_Ces {$expenses->count()} depenses = {$topTotal}€ ({$pct}% du total mois)_";
+
+        return $response;
+    }
+
+    private function compareMonths(string $userPhone): string
+    {
+        $currentMonth = Carbon::now();
+        $lastMonth    = Carbon::now()->subMonth();
+
+        $currentTotal = Expense::calculateTotalMonthlySpent($userPhone, $currentMonth);
+        $lastTotal    = Expense::calculateTotalMonthlySpent($userPhone, $lastMonth);
+
+        $currentLabel = $currentMonth->translatedFormat('F Y');
+        $lastLabel    = $lastMonth->translatedFormat('F Y');
+
+        $response  = "📊 *Comparaison mensuelle*\n";
+        $response .= "_{$lastLabel}_ → _{$currentLabel}_\n\n";
+
+        if ($lastTotal <= 0 && $currentTotal <= 0) {
+            $response .= "_Aucune donnee disponible pour la comparaison._\n";
+            $response .= "Commence par enregistrer des depenses avec: *depense [montant] [categorie]*";
+            return $response;
+        }
+
+        // Global comparison
+        $diff    = round($currentTotal - $lastTotal, 2);
+        $diffPct = $lastTotal > 0 ? round(($diff / $lastTotal) * 100, 1) : 0;
+        $icon    = $diff > 0 ? '📈' : ($diff < 0 ? '📉' : '➡️');
+        $sign    = $diff > 0 ? '+' : '';
+
+        $response .= "💳 *Total:* {$lastTotal}€ → *{$currentTotal}€*\n";
+        $response .= "{$icon} Evolution: {$sign}{$diff}€";
+        if ($lastTotal > 0) {
+            $response .= " ({$sign}{$diffPct}%)";
+        }
+        $response .= "\n";
+
+        // Per-category comparison
+        $currentCategories = collect(Expense::getTopCategories($userPhone, 10, $currentMonth))->keyBy('category');
+        $lastCategories    = collect(Expense::getTopCategories($userPhone, 10, $lastMonth))->keyBy('category');
+        $allCategories     = $currentCategories->keys()->merge($lastCategories->keys())->unique()->sort();
+
+        if ($allCategories->isNotEmpty()) {
+            $response .= "\n📋 *Par categorie:*\n";
+            foreach ($allCategories as $category) {
+                $current  = (float) ($currentCategories[$category]['total'] ?? 0);
+                $last     = (float) ($lastCategories[$category]['total'] ?? 0);
+                $catDiff  = round($current - $last, 2);
+                $catIcon  = $catDiff > 0 ? '📈' : ($catDiff < 0 ? '📉' : '➡️');
+                $catSign  = $catDiff > 0 ? '+' : '';
+                $response .= "  {$catIcon} *{$category}*: {$last}€ → {$current}€ ({$catSign}{$catDiff}€)\n";
+            }
+        }
+
+        // Tip
+        if ($currentTotal > 0 && $lastTotal > 0 && $diff > 0) {
+            $response .= "\n💡 _Tu depenses plus ce mois. Consulte 'detail [categorie]' pour analyser._";
+        } elseif ($diff < 0) {
+            $response .= "\n✨ _Bien joue ! Tu as reduit tes depenses ce mois._";
+        }
+
+        return $response;
+    }
+
+    private function searchExpenses(string $userPhone, string $query): string
+    {
+        $query = mb_strtolower(trim($query));
+
+        if (mb_strlen($query) < 2) {
+            return "❌ La recherche doit contenir au moins 2 caracteres.";
+        }
+
+        if (mb_strlen($query) > 50) {
+            return "❌ Le terme de recherche est trop long (max 50 caracteres).";
+        }
+
+        try {
+            $expenses = Expense::where('user_phone', $userPhone)
+                ->where(function ($q) use ($query) {
+                    $q->whereRaw('LOWER(category) LIKE ?', ["%{$query}%"])
+                      ->orWhereRaw('LOWER(description) LIKE ?', ["%{$query}%"]);
+                })
+                ->orderByDesc('date')
+                ->orderByDesc('id')
+                ->limit(10)
+                ->get();
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] searchExpenses failed: " . $e->getMessage());
+            return "❌ Erreur lors de la recherche. Reessaie.";
+        }
+
+        if ($expenses->isEmpty()) {
+            return "🔍 *Recherche: \"{$query}\"*\n\n_Aucune depense trouvee._\n"
+                . "_Essaie un autre terme ou consulte: *historique*_";
+        }
+
+        $total    = round((float) $expenses->sum('amount'), 2);
+        $count    = $expenses->count();
+        $response = "🔍 *Recherche: \"{$query}\"*\n";
+        $response .= "{$count} resultat(s) — Total: *{$total}€*\n\n";
+
+        $currentDate = null;
+        foreach ($expenses as $expense) {
+            $date    = Carbon::parse($expense->date);
+            $dateStr = $date->isToday()
+                ? "Aujourd'hui"
+                : ($date->isYesterday() ? 'Hier' : $date->translatedFormat('d M Y'));
+
+            if ($currentDate !== $dateStr) {
+                $response   .= "📅 *{$dateStr}*\n";
+                $currentDate = $dateStr;
+            }
+
+            $desc     = $expense->description ? " — {$expense->description}" : '';
+            $response .= "  💳 {$expense->amount}€ *{$expense->category}*{$desc}\n";
+        }
+
+        if ($count >= 10) {
+            $response .= "\n_Affichage limite a 10 resultats._";
+        }
 
         return $response;
     }
