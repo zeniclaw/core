@@ -151,7 +151,10 @@ Pour chaque capacite identifiee:
 - Cree un fichier `test_{$this->agentSlug}_v<nouvelle_version>_{$date}.md` dans le meme dossier que l'agent (app/Services/Agents/)
 - Le rapport doit contenir:
   - Resume des ameliorations apportees
-  - Liste des nouvelles capacites ajoutees
+  - Liste COMPLETE de toutes les capacites (existantes + nouvelles), chacune avec:
+    - Description courte de la fonctionnalite
+    - 1-2 exemples de messages WhatsApp que l'utilisateur peut envoyer pour declencher cette fonctionnalite
+    - Exemple: "**Ajouter une tache** — `ajoute acheter du pain`, `nouvelle tache: finir le rapport`"
   - Resultats des tests (pass/fail)
   - Version precedente -> nouvelle version
 
