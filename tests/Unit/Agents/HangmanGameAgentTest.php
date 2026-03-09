@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_5_0(): void
+    public function test_agent_version_is_1_6_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.5.0', $agent->version());
+        $this->assertEquals('1.6.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -1029,6 +1029,148 @@ class HangmanGameAgentTest extends TestCase
         $result = $agent->handle($context);
 
         $this->assertStringContainsString('alpha', strtolower($result->reply));
+    }
+
+    // ── Score command ─────────────────────────────────────────────────────────
+
+    public function test_score_command_shows_estimate_when_game_active(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman score');
+
+        $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('estime', $result->reply);
+        $this->assertStringContainsString('pts', $result->reply);
+        $this->assertStringContainsString('Base', $result->reply);
+    }
+
+    public function test_score_command_without_active_game_shows_no_game_message(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman score');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('hangman start', $result->reply);
+    }
+
+    public function test_score_command_shows_best_score_when_no_active_game_but_has_wins(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('A');
+
+        // Win a game first
+        $this->createActiveGame($context, 'A');
+        $agent->handle($context);
+
+        // Now ask for score (no active game)
+        $scoreContext = $this->makeContext('/hangman score', context: $context);
+        $result       = $agent->handle($scoreContext);
+
+        $this->assertStringContainsString('meilleur score', $result->reply);
+        $this->assertStringContainsString('pts', $result->reply);
+    }
+
+    // ── Replay command ────────────────────────────────────────────────────────
+
+    public function test_replay_starts_game_with_last_word(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman abandon');
+
+        // Create and abandon a game
+        $this->createActiveGame($context, 'LARAVEL');
+        $agent->handle($context);
+
+        // Now replay
+        $replayContext = $this->makeContext('/hangman replay', context: $context);
+        $result        = $agent->handle($replayContext);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Rejouer', $result->reply);
+        $this->assertDatabaseHas('hangman_games', [
+            'user_phone' => $context->from,
+            'agent_id'   => $context->agent->id,
+            'word'       => 'LARAVEL',
+            'status'     => 'playing',
+        ]);
+    }
+
+    public function test_replay_without_previous_game_informs_user(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman replay');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Aucune partie precedente', $result->reply);
+    }
+
+    public function test_replay_abandons_existing_active_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman replay');
+
+        // Create a completed game first
+        $completed = $this->createActiveGame($context, 'ANCIEN');
+        $completed->update(['status' => 'lost']);
+
+        // Create an active game
+        $active = $this->createActiveGame($context, 'ACTIF');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+
+        $active->refresh();
+        $this->assertEquals('lost', $active->status);
+    }
+
+    // ── Daily challenge already-played detection ───────────────────────────────
+
+    public function test_daily_challenge_shows_result_when_already_played_today(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman daily');
+
+        // Play the daily
+        $result1 = $agent->handle($context);
+        $this->assertStringContainsString('Defi du Jour', $result1->reply);
+
+        // Get the created game and mark it as won
+        $dailyGame = HangmanGame::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->first();
+        $this->assertNotNull($dailyGame);
+        $dailyGame->update(['status' => 'won', 'wrong_count' => 1]);
+
+        // Try to play daily again — should show "already played"
+        $context2 = $this->makeContext('/hangman daily', context: $context);
+        $result2  = $agent->handle($context2);
+
+        $this->assertStringContainsString('deja joue', $result2->reply);
+        $this->assertStringContainsString('Defi du Jour', $result2->reply);
+    }
+
+    // ── Help explicit routing ─────────────────────────────────────────────────
+
+    public function test_explicit_help_command_returns_help(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman help');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Commandes', $result->reply);
+        $this->assertStringContainsString('replay', strtolower($result->reply));
+        $this->assertStringContainsString('score', strtolower($result->reply));
     }
 
     private function makeContext(string $body, ?AgentContext $context = null): AgentContext

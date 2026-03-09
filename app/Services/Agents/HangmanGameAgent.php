@@ -118,7 +118,7 @@ class HangmanGameAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent jeu du Pendu (Hangman). Permet de jouer au pendu avec des mots aleatoires par categorie (tech, animaux, nature, vocab, sport, gastronomie) ou personnalises, avec niveaux de difficulte (easy/medium/hard), deviner le mot entier, obtenir des indices, voir les lettres restantes de l\'alphabet, abandonner une partie, consulter son historique, suivre ses statistiques avec meilleur score, voir les categories disponibles, reinitialiser ses stats, acceder au defi du jour (daily) et voir le classement des meilleurs joueurs (top).';
+        return 'Agent jeu du Pendu (Hangman). Permet de jouer au pendu avec des mots aleatoires par categorie (tech, animaux, nature, vocab, sport, gastronomie) ou personnalises, avec niveaux de difficulte (easy/medium/hard), deviner le mot entier, obtenir des indices, voir les lettres restantes de l\'alphabet, abandonner une partie, consulter son historique, suivre ses statistiques avec meilleur score, voir les categories disponibles, reinitialiser ses stats, acceder au defi du jour (daily, avec detection anti-rejeu), voir le classement des meilleurs joueurs (top), estimer son score en cours (score) et rejouer le dernier mot (replay).';
     }
 
     public function keywords(): array
@@ -142,12 +142,15 @@ class HangmanGameAgent extends BaseAgent
             'classement pendu', 'top pendu', 'hangman top', 'meilleurs joueurs pendu',
             'difficulte pendu', 'pendu facile', 'pendu difficile', 'pendu moyen',
             'alphabet pendu', 'lettres restantes', 'hangman alpha',
+            'score pendu', 'hangman score', 'score actuel pendu', 'mon score pendu',
+            'replay pendu', 'hangman replay', 'rejouer dernier mot', 'rejouer pendu',
+            'aide pendu', 'hangman help', 'commandes pendu', 'comment jouer pendu',
         ];
     }
 
     public function version(): string
     {
-        return '1.5.0';
+        return '1.6.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -254,6 +257,21 @@ class HangmanGameAgent extends BaseAgent
             if ($activeGame) {
                 return $this->guessWord($context, $m[1]);
             }
+        }
+
+        // Help
+        if (preg_match('/\/hangman\s+help/i', $lower) || preg_match('/\b(aide|help|commandes?|comment\s+jouer)\s*(pendu|hangman)?\b/iu', $lower)) {
+            return $this->showHelp($this->getActiveGame($context));
+        }
+
+        // Current game score estimate
+        if (preg_match('/\/hangman\s+score/i', $lower) || preg_match('/\b(score\s+(actuel|courant|maintenant|en\s+cours))\s*(pendu|hangman)?\b/iu', $lower) || preg_match('/\b(pendu|hangman)\s+score\b/iu', $lower)) {
+            return $this->showCurrentScore($context);
+        }
+
+        // Replay last game's word
+        if (preg_match('/\/hangman\s+replay/i', $lower) || preg_match('/\b(rejouer|replay)\s*(dernier|meme|last)?\s*(mot|partie|pendu|hangman)?\b/iu', $lower)) {
+            return $this->replayLastGame($context);
         }
 
         // Natural language handling via Claude
@@ -752,7 +770,35 @@ class HangmanGameAgent extends BaseAgent
         $index   = abs(crc32($dateStr)) % count($allWords);
         [$word, $category] = $allWords[$index];
 
-        $catLabel = self::CATEGORY_LABELS[$category];
+        $catLabel       = self::CATEGORY_LABELS[$category];
+        $todayFormatted = Carbon::today()->format('d/m/Y');
+
+        // Check if user already completed today's daily challenge
+        $existingDaily = HangmanGame::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('word', $word)
+            ->whereDate('created_at', $dateStr)
+            ->whereIn('status', ['won', 'lost'])
+            ->latest()
+            ->first();
+
+        if ($existingDaily) {
+            $icon     = $existingDaily->status === 'won' ? '🏆' : '💀';
+            $result   = $existingDaily->status === 'won' ? 'Victoire' : 'Defaite';
+            $scoreStr = $existingDaily->status === 'won'
+                ? "\n🏅 Score : *" . $this->computeScore($existingDaily) . " pts*"
+                : '';
+            $errCount = $existingDaily->wrong_count;
+            $maxWrong = self::MAX_WRONG;
+
+            return AgentResult::reply(
+                "📅 *Defi du Jour — {$todayFormatted}*\n\n"
+                . "{$icon} Tu as deja joue le defi d'aujourd'hui !\n"
+                . "Mot : *{$word}* — {$result} ({$errCount}/{$maxWrong} erreurs){$scoreStr}\n\n"
+                . "🌅 Reviens demain pour un nouveau defi !\n"
+                . "_/hangman start pour une partie normale | /hangman replay pour rejouer ce mot_"
+            );
+        }
 
         // Abandon existing game if any
         $abandonMsg = '';
@@ -771,9 +817,8 @@ class HangmanGameAgent extends BaseAgent
             'status'          => 'playing',
         ]);
 
-        $board        = $this->getDisplayBoard($game);
-        $wordLen      = mb_strlen($word);
-        $todayFormatted = Carbon::today()->format('d/m/Y');
+        $board   = $this->getDisplayBoard($game);
+        $wordLen = mb_strlen($word);
 
         $this->log($context, 'Daily challenge started', ['game_id' => $game->id, 'word_length' => $wordLen, 'category' => $category]);
 
@@ -1136,6 +1181,105 @@ class HangmanGameAgent extends BaseAgent
         return $count;
     }
 
+    private function showCurrentScore(AgentContext $context): AgentResult
+    {
+        $game = $this->getActiveGame($context);
+
+        if (!$game) {
+            $bestScore = $this->getBestScore($context);
+            if ($bestScore > 0) {
+                return AgentResult::reply(
+                    "Pas de partie en cours.\n\n🏅 Ton meilleur score : *{$bestScore} pts*\n\n"
+                    . "Envoie /hangman start pour jouer !"
+                );
+            }
+
+            return AgentResult::reply("Pas de partie en cours. Envoie /hangman start pour commencer !");
+        }
+
+        $wordLen      = mb_strlen($game->word);
+        $errors       = $game->wrong_count;
+        $base         = $wordLen * 10;
+        $errorPenalty = $errors * 5;
+        $bonus        = max(0, (self::MAX_WRONG - $errors) * 3);
+        $estimated    = $this->computeScore($game);
+        $livesLeft    = self::MAX_WRONG - $errors;
+
+        $speedHint = '';
+        if ($game->created_at) {
+            $seconds = $game->created_at->diffInSeconds(now());
+            if ($seconds < 60) {
+                $speedHint = "\n⚡ Vitesse en cours : *Eclair* (+20 si tu gagnes maintenant !)";
+            } elseif ($seconds < 120) {
+                $speedHint = "\n🚀 Vitesse en cours : *Rapide* (+10 si tu gagnes maintenant !)";
+            } elseif ($seconds < 300) {
+                $speedHint = "\n⏱️ Vitesse en cours : *Bonne* (+5 si tu gagnes maintenant !)";
+            }
+        }
+
+        $board = $this->getDisplayBoard($game);
+
+        return AgentResult::reply(
+            "📊 *Score estime si tu gagnes maintenant :*\n\n"
+            . "🔤 Base (longueur mot × 10) : +{$base} pts\n"
+            . "❌ Penalite erreurs (× 5) : -{$errorPenalty} pts\n"
+            . "⭐ Bonus vies restantes (× 3) : +{$bonus} pts{$speedHint}\n\n"
+            . "🏅 *Estimation : ~{$estimated} pts* | {$livesLeft} vie(s) restante(s)\n\n"
+            . "{$board}"
+        );
+    }
+
+    private function replayLastGame(AgentContext $context): AgentResult
+    {
+        $lastGame = HangmanGame::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereIn('status', ['won', 'lost'])
+            ->latest()
+            ->first();
+
+        if (!$lastGame) {
+            return AgentResult::reply(
+                "Aucune partie precedente trouvee.\n\nEnvoie /hangman start pour commencer !"
+            );
+        }
+
+        $icon    = $lastGame->status === 'won' ? '🏆 Gagne' : '💀 Perdu';
+        $errors  = $lastGame->wrong_count;
+        $maxWrong = self::MAX_WRONG;
+
+        $this->log($context, 'Replay requested', ['word' => $lastGame->word, 'last_status' => $lastGame->status]);
+
+        // Prepend a context message acknowledging the replay
+        $existingGame = $this->getActiveGame($context);
+        $abandonMsg   = '';
+        if ($existingGame) {
+            $this->abandonActiveGame($context, $existingGame);
+            $abandonMsg = "⚠️ Ancienne partie abandonnee (mot : *{$existingGame->word}*)\n\n";
+        }
+
+        $replayMsg = "{$abandonMsg}🔁 *Rejouer le dernier mot !* (precedemment : {$icon} — {$errors}/{$maxWrong} erreurs)\n\n";
+
+        $game  = HangmanGame::create([
+            'user_phone'      => $context->from,
+            'agent_id'        => $context->agent->id,
+            'word'            => $lastGame->word,
+            'guessed_letters' => [],
+            'wrong_count'     => 0,
+            'status'          => 'playing',
+        ]);
+
+        $board   = $this->getDisplayBoard($game);
+        $wordLen = mb_strlen($game->word);
+
+        return AgentResult::reply(
+            "{$replayMsg}🎮 *Nouvelle partie de Pendu !*\n"
+            . "📏 Mot de *{$wordLen}* lettre(s)\n\n"
+            . "{$board}\n\n"
+            . "Envoie une lettre pour deviner !\n"
+            . "💡 /hangman hint (indice, -1 vie) | /hangman score (score estime)"
+        );
+    }
+
     // ── Natural language / help ───────────────────────────────────────────────
 
     private function handleNaturalLanguage(string $body, AgentContext $context): AgentResult
@@ -1154,7 +1298,7 @@ class HangmanGameAgent extends BaseAgent
             "Message utilisateur: \"{$body}\"{$gameContext}",
             $model,
             "Tu es l'agent du jeu du Pendu ZeniClaw. Analyse l'intention de l'utilisateur et reponds en JSON strict:\n"
-            . "{\"action\": \"start|guess|guess_word|stats|hint|abandon|status|history|reset|categories|daily|leaderboard|alphabet|help\", \"letter\": \"X\", \"word\": \"MOT\", \"category\": \"tech|animaux|nature|vocab|sport|gastronomie\", \"difficulty\": \"easy|medium|hard\"}\n\n"
+            . "{\"action\": \"start|guess|guess_word|stats|hint|abandon|status|history|reset|categories|daily|leaderboard|alphabet|score|replay|help\", \"letter\": \"X\", \"word\": \"MOT\", \"category\": \"tech|animaux|nature|vocab|sport|gastronomie\", \"difficulty\": \"easy|medium|hard\"}\n\n"
             . "Actions disponibles:\n"
             . "- start       = nouvelle partie (\"category\": tech|animaux|nature|vocab|sport|gastronomie) (\"difficulty\": easy|medium|hard)\n"
             . "- guess       = deviner une lettre (inclure \"letter\": \"X\")\n"
@@ -1169,6 +1313,8 @@ class HangmanGameAgent extends BaseAgent
             . "- daily       = lancer le defi du jour (meme mot pour tous)\n"
             . "- leaderboard = voir le classement des meilleurs joueurs\n"
             . "- alphabet    = voir les lettres de l'alphabet pas encore essayees\n"
+            . "- score       = voir le score estime si on gagne maintenant\n"
+            . "- replay      = rejouer le dernier mot perdu\n"
             . "- help        = afficher l'aide et les commandes\n\n"
             . "Exemples:\n"
             . "  \"donne moi un indice\" -> {\"action\":\"hint\"}\n"
@@ -1183,6 +1329,9 @@ class HangmanGameAgent extends BaseAgent
             . "  \"defi du jour\" -> {\"action\":\"daily\"}\n"
             . "  \"classement\" -> {\"action\":\"leaderboard\"}\n"
             . "  \"quelles lettres restent\" -> {\"action\":\"alphabet\"}\n"
+            . "  \"quel est mon score actuel\" -> {\"action\":\"score\"}\n"
+            . "  \"rejouer le dernier mot\" -> {\"action\":\"replay\"}\n"
+            . "  \"aide moi\" -> {\"action\":\"help\"}\n"
             . "  \"je propose la lettre E\" -> {\"action\":\"guess\",\"letter\":\"E\"}\n"
             . "Reponds UNIQUEMENT avec le JSON, sans markdown."
         );
@@ -1214,6 +1363,9 @@ class HangmanGameAgent extends BaseAgent
             'daily'       => $this->dailyChallenge($context),
             'leaderboard' => $this->showLeaderboard($context),
             'alphabet'    => $this->showAlphabet($context),
+            'score'       => $this->showCurrentScore($context),
+            'replay'      => $this->replayLastGame($context),
+            'help'        => $this->showHelp($activeGame),
             default       => $this->showHelp($activeGame),
         };
     }
@@ -1227,10 +1379,12 @@ class HangmanGameAgent extends BaseAgent
             . "🎯 /hangman start [difficulte] → Choisir un niveau\n"
             . "   └ facile (2-6 lettres) | moyen (7-10) | difficile (11+)\n"
             . "📅 /hangman daily → Defi du jour (meme mot pour tous)\n"
+            . "🔄 /hangman replay → Rejouer le dernier mot\n"
             . "🔤 /hangman guess X → Proposer la lettre X\n"
             . "🎯 /hangman devine MOT → Deviner le mot entier (-2 vies si faux)\n"
             . "💡 /hangman hint → Indice (revele une lettre, -1 vie)\n"
             . "🔡 /hangman alpha → Lettres de l'alphabet non essayees\n"
+            . "📊 /hangman score → Score estime si tu gagnes maintenant\n"
             . "✏️ /hangman word MOT → Partie avec mot personnalise\n"
             . "📋 /hangman status → Voir la partie en cours\n"
             . "📜 /hangman history → Historique des parties\n"
@@ -1238,7 +1392,7 @@ class HangmanGameAgent extends BaseAgent
             . "📊 /hangman stats → Tes statistiques\n"
             . "🏆 /hangman top → Classement des meilleurs joueurs\n"
             . "🗂️ /hangman categories → Lister les categories\n"
-            . "🔄 /hangman reset → Reinitialiser les stats\n\n"
+            . "🔁 /hangman reset → Reinitialiser les stats\n\n"
             . "💡 Pendant une partie : envoie une lettre ou un mot directement !";
 
         if ($activeGame) {
