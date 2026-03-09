@@ -76,6 +76,7 @@ class CodeAnalyzer
             'sql'                  => $this->checkSqlPatterns($code),
             'go'                   => $this->checkGoPatterns($code),
             'java'                 => $this->checkJavaPatterns($code),
+            'rust'                 => $this->checkRustPatterns($code),
             default                => [],
         };
 
@@ -466,6 +467,60 @@ class CodeAnalyzer
                 'severity' => 'medium',
                 'type'     => 'performance',
                 'message'  => 'Goroutine sans WaitGroup ni context — risque de goroutine leak',
+            ];
+        }
+
+        return $issues;
+    }
+
+    // ── Rust Patterns ─────────────────────────────────────────────────────────
+
+    private function checkRustPatterns(string $code): array
+    {
+        $issues = [];
+
+        // unwrap() — can panic in production
+        if (preg_match('/\.unwrap\s*\(\)/', $code)) {
+            $issues[] = [
+                'severity' => 'high',
+                'type'     => 'quality',
+                'message'  => 'unwrap() peut causer un panic en production — utiliser match, if let, ou ? pour propager l\'erreur correctement',
+            ];
+        }
+
+        // unsafe block
+        if (preg_match('/\bunsafe\s*\{/', $code)) {
+            $issues[] = [
+                'severity' => 'high',
+                'type'     => 'security',
+                'message'  => 'Bloc unsafe detecte — verifier qu\'il est indispensable et correctement documente avec un commentaire SAFETY',
+            ];
+        }
+
+        // Hardcoded credentials
+        if (preg_match('/\b(password|secret|api_key|token)\s*=\s*"[^"]{3,}"/i', $code)) {
+            $issues[] = [
+                'severity' => 'high',
+                'type'     => 'security',
+                'message'  => 'Credentials hardcodes — utiliser des variables d\'environnement (std::env::var)',
+            ];
+        }
+
+        // clone() in a loop
+        if (preg_match('/\b(for|while|loop)\b[^{]*\{[^}]*\.clone\(\)/s', $code)) {
+            $issues[] = [
+                'severity' => 'medium',
+                'type'     => 'performance',
+                'message'  => 'clone() dans une boucle — verifier si des references (&) ou Cow<> suffiraient pour eviter les allocations inutiles',
+            ];
+        }
+
+        // lock().unwrap() — mutex poisoning risk
+        if (preg_match('/\.lock\(\)\.unwrap\(\)/', $code)) {
+            $issues[] = [
+                'severity' => 'medium',
+                'type'     => 'quality',
+                'message'  => 'lock().unwrap() — si le mutex est empoisonne (panic dans un thread), cela propage la panique ; utiliser match ou unwrap_or_else',
             ];
         }
 

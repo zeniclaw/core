@@ -12,6 +12,9 @@ class CodeReviewAgent extends BaseAgent
     /** Maximum total lines across all blocks before size warning */
     private const MAX_TOTAL_LINES = 400;
 
+    /** Maximum characters to store for follow-up mode-change reviews */
+    private const MAX_PENDING_CODE_CHARS = 8000;
+
     public function __construct()
     {
         parent::__construct();
@@ -25,7 +28,7 @@ class CodeReviewAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de revue de code automatique. Analyse du code source (PHP, JS, Python, SQL, TypeScript, Go, Java, Rust) pour detecter bugs, failles de securite, problemes de performance, violations des bonnes pratiques, et proposer des refactorings. Modes: quick (scan rapide), diff (comparaison), explain (explication), security (audit securite), full (analyse complete).';
+        return 'Agent de revue de code automatique. Analyse du code source (PHP, JS, Python, SQL, TypeScript, Go, Java, Rust) pour detecter bugs, failles de securite, problemes de performance, violations des bonnes pratiques, et proposer des refactorings. Modes: quick (scan rapide), diff (comparaison), explain (explication), security (audit securite), refactor (refactoring), complexity (complexite cyclomatique), full (analyse complete).';
     }
 
     public function keywords(): array
@@ -46,26 +49,31 @@ class CodeReviewAgent extends BaseAgent
             'quick review', 'revue rapide', 'scan rapide',
             'compare code', 'comparer code', 'diff code', 'avant apres',
             'complexite code', 'code complexity', 'score code',
-            // Nouveaux mots-clés v1.2.0
+            // v1.2.0
             'expliquer code', 'explain code', 'que fait ce code', 'what does this code do',
             'expliquer ce code', 'explain this code', 'describe this code', 'decrire ce code',
             'audit securite', 'security audit', 'audit de securite', 'scan securite',
             'audit code', 'code audit', 'vulnerabilites code', 'code vulnerabilities',
             'owasp', 'pentest code', 'security scan', 'scan de securite',
+            // v1.3.0
+            'refactor this code', 'refactorer ce code', 'nettoyer ce code', 'clean up code',
+            'restructurer', 'reorganiser le code', 'propose refactoring',
+            'complexite cyclomatique', 'cyclomatic complexity', 'simplifier', 'simplify code',
+            'trop complexe', 'code complexe', 'analyse complexite',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
 
-        // Explicit code review / audit / explain request
-        if (preg_match('/(?:\b|@)(code\s*review|review\s*(my|this|the)?\s*code|verifi(er|e)\s*(ce|mon|le)\s*code|check\s*(this|my)?\s*code|codereviewer|quick\s*review|revue\s*rapide|scan\s*rapide|compare\s*code|comparer\s*code|diff\s*code|explain\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|expliquer\s*(ce|le|mon)\s*code|que\s*fait\s*ce\s*code|security\s*audit|audit\s*(de\s*)?s[eé]curit[eé]|audit\s*code|code\s*audit|scan\s*(de\s*)?s[eé]curit[eé])\b/iu', $context->body)) {
+        // Explicit code review / audit / explain / refactor / complexity request
+        if (preg_match('/(?:\b|@)(code\s*review|review\s*(my|this|the)?\s*code|verifi(er|e)\s*(ce|mon|le)\s*code|check\s*(this|my)?\s*code|codereviewer|quick\s*review|revue\s*rapide|scan\s*rapide|compare\s*code|comparer\s*code|diff\s*code|explain\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|expliquer\s*(ce|le|mon)\s*code|que\s*fait\s*ce\s*code|security\s*audit|audit\s*(de\s*)?s[eé]curit[eé]|audit\s*code|code\s*audit|scan\s*(de\s*)?s[eé]curit[eé]|refactor\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|refactorer\s*(ce|le|mon)\s*code|nettoyer\s*(ce\s*|le\s*|mon\s*)?code|clean\s+up\s+code|restructurer|propose\s*refactoring|complexit[eé]\s*cyclomatique|cyclomatic\s*complexity|analyse\s*complexit[eé]|simplifi(er|y)\s*(ce\s*|this\s*)?code)\b/iu', $context->body)) {
             return true;
         }
 
@@ -84,10 +92,60 @@ class CodeReviewAgent extends BaseAgent
 
         $this->log($context, 'Code review requested', ['body_length' => mb_strlen($body)]);
 
-        // Detect review mode
+        return $this->runReview($body, $context);
+    }
+
+    /**
+     * Handle follow-up mode-change requests after a successful review.
+     * E.g. user sends "refactor code" or "security audit" after a review
+     * — no need to paste the code again.
+     */
+    public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
+    {
+        if (($pendingContext['type'] ?? '') !== 'code_reviewed') {
+            return null;
+        }
+
+        $body      = trim($context->body ?? '');
+        $savedCode = $pendingContext['data']['raw_code'] ?? null;
+
+        if (!$savedCode) {
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        // If message contains new code blocks → let normal handle() run
+        $newBlocks = $this->analyzer->extractCodeBlocks($body);
+        if (!empty($newBlocks)) {
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        // Detect if user is requesting a specific mode (without new code)
+        $newMode = $this->detectMode($body);
+        if ($newMode === 'full') {
+            // No recognizable mode keyword — not a mode-change follow-up
+            $this->clearPendingContext($context);
+            return null;
+        }
+
+        $this->log($context, 'Code review follow-up: mode change', [
+            'previous_mode' => $pendingContext['data']['mode'] ?? 'unknown',
+            'new_mode'      => $newMode,
+        ]);
+
+        $this->clearPendingContext($context);
+
+        // Re-run analysis using saved code + current mode keyword
+        return $this->runReview($savedCode . "\n" . $body, $context);
+    }
+
+    // ── Core Analysis ─────────────────────────────────────────────────────────
+
+    private function runReview(string $body, AgentContext $context): AgentResult
+    {
         $mode = $this->detectMode($body);
 
-        // Extract code blocks from the message
         $codeBlocks = $this->analyzer->extractCodeBlocks($body);
 
         if (empty($codeBlocks)) {
@@ -101,18 +159,20 @@ class CodeReviewAgent extends BaseAgent
                 . "• _compare code_ — comparer deux versions (2 blocs)\n"
                 . "• _explain code_ — comprendre ce que fait le code\n"
                 . "• _security audit_ — audit de securite OWASP\n"
+                . "• _refactor code_ — propositions de refactoring avec exemples\n"
+                . "• _analyse complexite_ — complexite cyclomatique et imbrication\n"
                 . "• _code review_ — analyse complete (defaut)"
             );
         }
 
         // Size guard
-        $totalLines = array_sum(array_column($codeBlocks, 'line_count'));
+        $totalLines  = array_sum(array_column($codeBlocks, 'line_count'));
         $sizeWarning = '';
         if ($totalLines > self::MAX_TOTAL_LINES) {
             $sizeWarning = "⚠ _Code volumineux ({$totalLines} lignes) — analyse limitee aux premieres sections_\n\n";
         }
 
-        // Check for diff/compare mode: needs exactly 2 blocks
+        // Diff mode requires exactly 2 blocks
         if ($mode === 'diff' && count($codeBlocks) < 2) {
             return AgentResult::reply(
                 "Pour le mode comparaison, envoie *deux blocs de code* :\n\n"
@@ -122,9 +182,9 @@ class CodeReviewAgent extends BaseAgent
             );
         }
 
-        // Run static pattern analysis (skip for explain mode — not relevant)
+        // Static pattern analysis (skip for explain and refactor modes)
         $staticIssues = [];
-        if ($mode !== 'explain') {
+        if (!in_array($mode, ['explain', 'refactor'])) {
             foreach ($codeBlocks as $block) {
                 $issues = $this->analyzer->analyzePatterns($block['code'], $block['language']);
                 if (!empty($issues)) {
@@ -136,7 +196,7 @@ class CodeReviewAgent extends BaseAgent
             }
         }
 
-        // Build the prompt for Claude deep analysis
+        // Build Claude prompt
         $codeContext  = $this->buildCodeContext($codeBlocks, $staticIssues, $mode);
         $model        = $this->resolveModel($context);
         $memoryPrompt = $this->formatContextMemoryForPrompt($context->from);
@@ -154,7 +214,14 @@ class CodeReviewAgent extends BaseAgent
             );
         }
 
-        // Format final report
+        // Save code for follow-up mode changes (10 min TTL)
+        if (mb_strlen($body) <= self::MAX_PENDING_CODE_CHARS && !empty($codeBlocks)) {
+            $this->setPendingContext($context, 'code_reviewed', [
+                'raw_code' => $body,
+                'mode'     => $mode,
+            ], 10);
+        }
+
         $report = $this->formatFinalReport($codeBlocks, $staticIssues, $response, $mode, $sizeWarning);
 
         $this->log($context, 'Code review completed', [
@@ -170,7 +237,7 @@ class CodeReviewAgent extends BaseAgent
     // ── Mode Detection ────────────────────────────────────────────────────────
 
     /**
-     * Detect review mode: 'quick', 'diff', 'explain', 'security', or 'full'.
+     * Detect review mode: 'quick', 'diff', 'explain', 'security', 'refactor', 'complexity', or 'full'.
      */
     private function detectMode(string $body): string
     {
@@ -185,6 +252,12 @@ class CodeReviewAgent extends BaseAgent
         }
         if (preg_match('/\b(security\s*audit|audit\s*(de\s*)?s[eé]curit[eé]|audit\s*code|code\s*audit|scan\s*(de\s*)?s[eé]curit[eé]|security\s*scan|owasp)\b/iu', $body)) {
             return 'security';
+        }
+        if (preg_match('/\b(refactor\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|refactorer\s*(ce|le|mon)\s*code|nettoyer\s*(ce\s*|le\s*|mon\s*)?code|clean\s*up\s*code|restructurer|propose\s*refactoring)\b/iu', $body)) {
+            return 'refactor';
+        }
+        if (preg_match('/\b(complexit[eé]\s*cyclomatique|cyclomatic\s*complexity|analyse\s*complexit[eé]|simplifi(er|y)\s*(ce\s*|this\s*)?code|code\s*complexe|trop\s*complexe)\b/iu', $body)) {
+            return 'complexity';
         }
         return 'full';
     }
@@ -224,11 +297,13 @@ class CodeReviewAgent extends BaseAgent
     private function buildSystemPrompt(string $mode, string $memoryPrompt): string
     {
         $base = match ($mode) {
-            'quick'    => $this->getQuickSystemPrompt(),
-            'diff'     => $this->getDiffSystemPrompt(),
-            'explain'  => $this->getExplainSystemPrompt(),
-            'security' => $this->getSecuritySystemPrompt(),
-            default    => $this->getFullSystemPrompt(),
+            'quick'      => $this->getQuickSystemPrompt(),
+            'diff'       => $this->getDiffSystemPrompt(),
+            'explain'    => $this->getExplainSystemPrompt(),
+            'security'   => $this->getSecuritySystemPrompt(),
+            'refactor'   => $this->getRefactorSystemPrompt(),
+            'complexity' => $this->getComplexitySystemPrompt(),
+            default      => $this->getFullSystemPrompt(),
         };
 
         if ($memoryPrompt) {
@@ -241,7 +316,7 @@ class CodeReviewAgent extends BaseAgent
     private function getFullSystemPrompt(): string
     {
         return <<<'PROMPT'
-Tu es un expert senior en revue de code (10+ ans d'experience, specialiste PHP/JS/Python/Go/Java). Analyse le code fourni et produis un rapport structure, precis et actionnable.
+Tu es un expert senior en revue de code (10+ ans d'experience, specialiste PHP/JS/Python/Go/Java/Rust). Analyse le code fourni et produis un rapport structure, precis et actionnable.
 
 CATEGORIES D'ANALYSE (inspecte chaque categorie systematiquement) :
 1. BUGS & ERREURS — erreurs logiques, conditions aux limites non gerees, comportements indefinis, edge cases manques
@@ -372,7 +447,7 @@ FORMAT DE REPONSE OBLIGATOIRE :
 *Points d'attention :*
 [1-3 observations sur les aspects importants a comprendre — dependances, effets de bord, preconditions]
 
-Exemples de format :
+Exemple de format :
 *But general :*
 Ce code est un middleware d'authentification JWT qui valide les tokens entrants et enrichit la requete avec les donnees utilisateur.
 
@@ -433,6 +508,98 @@ REGLES :
 PROMPT;
     }
 
+    private function getRefactorSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en refactoring et architecture logicielle (Design Patterns GoF, SOLID, Clean Code de Robert Martin). Mode REFACTORING : propose des ameliorations concretes pour rendre le code plus maintenable, lisible et robuste.
+
+Ta mission :
+1. Identifier les anti-patterns, la duplication (DRY), le code trop complexe ou mal structure
+2. Proposer des refactorings CONCRETS avec du code avant/apres (concis, 1-4 lignes)
+3. Nommer et expliquer le pattern applique (Extract Method, Strategy, Replace Magic Number, etc.)
+4. Prioriser par impact sur la maintenabilite et la testabilite
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Etat general :* [1 ligne sur la maintenabilite actuelle — Excellent/Bon/Acceptable/A ameliorer/Critique]
+
+Pour chaque refactoring propose :
+[PRIORITE] NOM DU PATTERN (ligne X) : Probleme detecte
+Avant : [code actuel simplifie — 1-3 lignes max]
+Apres : [code refactore — 1-3 lignes max]
+Benefice : [gain en 1 ligne — lisibilite, testabilite, DRY, responsabilite unique, etc.]
+
+Exemples :
+🔴 EXTRACT METHOD (ligne 45-67) : methode de 23 lignes avec 3 responsabilites distinctes
+Avant : function processOrder($o) { /* validation + calcul + email */ }
+Apres : function processOrder($o) { $this->validate($o); $total = $this->calculate($o); $this->notify($o, $total); }
+Benefice : responsabilite unique, chaque sous-methode testable independamment
+
+🟠 REPLACE MAGIC NUMBER (ligne 12) : constante numerique sans signification
+Avant : if ($elapsed > 86400) { ... }
+Apres : const SECONDS_PER_DAY = 86400; if ($elapsed > self::SECONDS_PER_DAY) { ... }
+Benefice : code auto-documente, valeur modifiable en un seul endroit
+
+PRIORITES : 🔴 Urgent | 🟠 Important | 🟡 Recommande | 🔵 Optionnel
+
+BILAN REFACTORING :
+Score maintenabilite actuel : A/B/C/D/F
+Score apres refactoring estime : A/B/C/D/F
+Effort estime : Faible (<1h) / Moyen (1-4h) / Eleve (>4h)
+
+REGLES :
+- Propose des refactorings CONCRETS, pas des generalisations vagues
+- Le code avant/apres doit etre directement exploitable
+- Nomme les patterns (Martin Fowler Refactoring, GoF Design Patterns, Clean Code)
+- Ne signale PAS les bugs de securite — concentre-toi sur la structure et la lisibilite
+- Reference toujours les numeros de ligne
+- Reponds en francais
+- N'utilise PAS de blocs ``` dans ta reponse
+PROMPT;
+    }
+
+    private function getComplexitySystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en metriques de code et architecture logicielle. Mode ANALYSE DE COMPLEXITE : evalue et quantifie la complexite du code fourni avec des metriques concretes.
+
+METRIQUES A EVALUER :
+1. COMPLEXITE CYCLOMATIQUE — nombre de chemins independants (if/else/switch/boucles/catch/ternaires)
+   Seuils : 1-5 Simple | 6-10 Moderee | 11-20 Elevee | 21+ Critique
+2. PROFONDEUR D'IMBRICATION — niveau max de nesting (if dans for dans try...)
+   Seuils : 1-2 OK | 3 Limite | 4+ Problematique
+3. LONGUEUR DES FONCTIONS — nombre de lignes par methode/fonction
+   Seuils : <15 Ideal | 15-30 Acceptable | 31-50 Long | 50+ Trop long
+4. COUPLAGE — nombre de dependances externes et interactions entre modules
+5. COHESION — est-ce que chaque fonction/classe fait une seule chose bien definie ?
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Analyse de complexite*
+
+Pour chaque fonction/methode identifiable :
+[NOM] (ligne X-Y) — CC: [score] | Imbrication: [N] | Longueur: [N] lignes | [Simple/Moderee/Elevee/Critique]
+  Problemes : [description concise ou "aucun"]
+
+POINTS CHAUDS :
+[Liste des 2-3 sections les plus complexes avec justification chiffree]
+
+RECOMMANDATIONS :
+[Pour chaque point chaud : suggestion concrete de simplification avec la technique a appliquer]
+
+SCORE GLOBAL :
+Complexite moyenne : Simple/Moderee/Elevee/Critique
+Maintenabilite : A/B/C/D/F
+Actions prioritaires : [2-3 actions concretes et ordonnees pour reduire la complexite]
+
+REGLES :
+- Calcule les metriques pour chaque fonction/methode identifiable dans le code
+- Sois quantitatif — donne des chiffres, pas juste des impressions
+- Si le code est simple et bien structure, dis-le explicitement — c'est aussi une information utile
+- Reference toujours les numeros de ligne
+- Reponds en francais
+- N'utilise PAS de blocs ``` dans ta reponse
+PROMPT;
+    }
+
     // ── Report Formatting ──────────────────────────────────────────────────────
 
     private function formatFinalReport(
@@ -443,11 +610,13 @@ PROMPT;
         string $sizeWarning
     ): string {
         $modeLabel = match ($mode) {
-            'quick'    => '⚡ *CODE REVIEW RAPIDE*',
-            'diff'     => '🔄 *COMPARAISON DE CODE*',
-            'explain'  => '📖 *EXPLICATION DE CODE*',
-            'security' => '🔒 *AUDIT DE SECURITE*',
-            default    => '🔍 *CODE REVIEW*',
+            'quick'      => '⚡ *CODE REVIEW RAPIDE*',
+            'diff'       => '🔄 *COMPARAISON DE CODE*',
+            'explain'    => '📖 *EXPLICATION DE CODE*',
+            'security'   => '🔒 *AUDIT DE SECURITE*',
+            'refactor'   => '♻ *REFACTORING*',
+            'complexity' => '📊 *ANALYSE DE COMPLEXITE*',
+            default      => '🔍 *CODE REVIEW*',
         };
 
         $langs      = array_map(fn ($b) => strtoupper($b['language'] ?: '?'), $codeBlocks);
@@ -457,9 +626,9 @@ PROMPT;
             . implode(', ', array_unique($langs)) . " | "
             . "{$totalLines} lignes\n\n";
 
-        // Static analysis critical warnings (not shown in explain mode)
+        // Static analysis critical warnings (not shown in explain/refactor modes)
         $staticSection = '';
-        if (!empty($staticIssues) && $mode !== 'explain') {
+        if (!empty($staticIssues) && !in_array($mode, ['explain', 'refactor'])) {
             $criticalCount = 0;
             foreach ($staticIssues as $group) {
                 foreach ($group['issues'] as $issue) {
@@ -498,7 +667,9 @@ PROMPT;
             . "⚡ _quick review_ — scan rapide des problemes critiques uniquement\n"
             . "🔄 _compare code_ — comparer deux versions (2 blocs requis)\n"
             . "📖 _explain code_ — comprendre ce que fait le code\n"
-            . "🔒 _security audit_ — audit de securite OWASP Top 10 approfondi\n\n"
+            . "🔒 _security audit_ — audit de securite OWASP Top 10 approfondi\n"
+            . "♻ _refactor code_ — propositions de refactoring avec exemples avant/apres\n"
+            . "📊 _analyse complexite_ — complexite cyclomatique, imbrication, longueur\n\n"
             . "*Langages supportes :*\n"
             . "PHP, JavaScript, TypeScript, Python, SQL, Go, Java, Rust\n\n"
             . "*Ce que j'analyse :*\n"
@@ -508,7 +679,8 @@ PROMPT;
             . "✨ Qualite de code & bonnes pratiques\n"
             . "💡 Suggestions de refactoring\n"
             . "📊 Score de complexite algorithmique\n\n"
-            . "*Declencheurs :* code review, quick review, compare code, explain code, security audit, @codereviewer"
+            . "*Astuce :* Apres une review, envoie juste _refactor code_ ou _security audit_ pour relancer le meme code avec un autre mode !\n\n"
+            . "*Declencheurs :* code review, quick review, compare code, explain code, security audit, refactor code, analyse complexite, @codereviewer"
         );
     }
 }

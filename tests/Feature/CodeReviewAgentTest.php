@@ -425,10 +425,10 @@ ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
         $this->assertStringContainsString('quick review', $result->reply);
     }
 
-    public function test_agent_version_is_1_2_0(): void
+    public function test_agent_version_is_1_3_0(): void
     {
         $agent = new CodeReviewAgent();
-        $this->assertEquals('1.2.0', $agent->version());
+        $this->assertEquals('1.3.0', $agent->version());
     }
 
     // ── New modes v1.2.0 ──────────────────────────────────────────────────────
@@ -476,6 +476,190 @@ ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
         $this->assertStringContainsString('explain code', $result->reply);
         $this->assertStringContainsString('security audit', $result->reply);
         $this->assertStringContainsString('OWASP', $result->reply);
+    }
+
+    // ── New modes v1.3.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_refactor_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('refactor this code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('refactorer ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('nettoyer ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('clean up code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('restructurer')));
+    }
+
+    public function test_can_handle_complexity_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('complexite cyclomatique')));
+        $this->assertTrue($agent->canHandle($this->makeContext('cyclomatic complexity')));
+        $this->assertTrue($agent->canHandle($this->makeContext('analyse complexite')));
+    }
+
+    public function test_refactor_mode_detected(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\necho 'hello';\n```\nrefactor this code");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('REFACTORING', $result->reply);
+    }
+
+    public function test_complexity_mode_detected(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\necho 'hello';\n```\nanalyse complexite");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('COMPLEXITE', $result->reply);
+    }
+
+    public function test_help_message_includes_refactor_and_complexity_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('refactor code', $result->reply);
+        $this->assertStringContainsString('analyse complexite', $result->reply);
+        $this->assertStringContainsString('Astuce', $result->reply);
+    }
+
+    public function test_no_code_blocks_returns_hint_with_refactor_mode(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('refactor code', $result->reply);
+        $this->assertStringContainsString('analyse complexite', $result->reply);
+    }
+
+    public function test_analyzer_detects_rust_unwrap(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = 'let file = File::open("foo.txt").unwrap();';
+
+        $issues = $analyzer->analyzePatterns($code, 'rust');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if (str_contains($issue['message'], 'unwrap')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect unwrap() usage in Rust');
+    }
+
+    public function test_analyzer_detects_rust_unsafe_block(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = "unsafe {\n    let raw = &mut *ptr;\n}";
+
+        $issues = $analyzer->analyzePatterns($code, 'rust');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if (str_contains($issue['message'], 'unsafe')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect unsafe block in Rust');
+    }
+
+    public function test_analyzer_detects_rust_hardcoded_credentials(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = 'let api_key = "sk-super-secret-1234";';
+
+        $issues = $analyzer->analyzePatterns($code, 'rust');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if ($issue['type'] === 'security' && str_contains($issue['message'], 'Credentials')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect hardcoded credentials in Rust');
+    }
+
+    public function test_handle_pending_context_mode_change(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        // Simulate a pending context from a previous code review
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\n\$x = 1;\necho \$x;\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        // Follow-up: request refactor mode without resending code
+        $context = $this->makeContext('refactor this code');
+
+        $result = $agent->handlePendingContext($context, $pendingContext);
+
+        // Should process (not null) — the result will be a reply using saved code
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('REFACTORING', $result->reply);
+    }
+
+    public function test_handle_pending_context_ignores_unknown_type(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'some_other_type',
+            'data' => [],
+        ];
+
+        $context = $this->makeContext('refactor this code');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNull($result);
+    }
+
+    public function test_handle_pending_context_falls_through_when_new_code_present(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\necho 'old';\n```",
+                'mode'     => 'full',
+            ],
+        ];
+
+        // Message has new code blocks — should fall through (return null)
+        $context = $this->makeContext("```php\necho 'new code';\n```\nrefactor this code");
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNull($result);
     }
 
     // ── Controller & Router integration ──────────────────────────────────────
