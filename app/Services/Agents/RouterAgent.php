@@ -56,6 +56,9 @@ class RouterAgent
         // Quiz / trivia / challenge → interactive_quiz
         '/\b(quiz|quizz|trivia|qcm|challenge)\b/iu'
             => ['interactive_quiz', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Game master → game_master
+        '/\b(jeu|game|jouer|play|startgame|enigme|devinette|riddle|anagramme|20\s*questions)\b/iu'
+            => ['game_master', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
             => ['user_preferences', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -429,6 +432,7 @@ CATALOG;
                 'interactive_quiz',
                 'content_curator',
                 'context_memory_bridge',
+                'game_master',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
