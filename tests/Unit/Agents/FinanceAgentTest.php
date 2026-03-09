@@ -26,9 +26,9 @@ class FinanceAgentTest extends TestCase
         $this->assertEquals('finance', (new FinanceAgent())->name());
     }
 
-    public function test_agent_version_is_1_5_0(): void
+    public function test_agent_version_is_1_6_0(): void
     {
-        $this->assertEquals('1.5.0', (new FinanceAgent())->version());
+        $this->assertEquals('1.6.0', (new FinanceAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -1369,6 +1369,287 @@ class FinanceAgentTest extends TestCase
 
         $this->assertStringContainsString('tendance', $help);
         $this->assertStringContainsString('recurrents', $help);
+    }
+
+    // ── keywords v1.6.0 ───────────────────────────────────────────────────────
+
+    public function test_keywords_include_budget_journalier(): void
+    {
+        $this->assertContains('budget journalier', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_export(): void
+    {
+        $this->assertContains('export', (new FinanceAgent())->keywords());
+    }
+
+    // ── canHandle v1.6.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_budget_journalier(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('budget journalier')));
+    }
+
+    public function test_can_handle_combien_par_jour(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('combien par jour')));
+    }
+
+    public function test_can_handle_export(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('export')));
+    }
+
+    public function test_can_handle_exporter(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('exporter mes depenses')));
+    }
+
+    // ── parseCommand v1.6.0 ───────────────────────────────────────────────────
+
+    public function test_parse_command_daily_budget(): void
+    {
+        $cmd = $this->parseCommand('budget journalier');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('daily_budget', $cmd['action']);
+    }
+
+    public function test_parse_command_daily_budget_combien(): void
+    {
+        $cmd = $this->parseCommand('combien par jour');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('daily_budget', $cmd['action']);
+    }
+
+    public function test_parse_command_export_month(): void
+    {
+        $cmd = $this->parseCommand('export');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('export_month', $cmd['action']);
+    }
+
+    public function test_parse_command_export_month_exporter(): void
+    {
+        $cmd = $this->parseCommand('exporter mes depenses');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('export_month', $cmd['action']);
+    }
+
+    // ── getDailyBudget ────────────────────────────────────────────────────────
+
+    private function callGetDailyBudget(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getDailyBudget');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_daily_budget_no_budget_defined(): void
+    {
+        $result = $this->callGetDailyBudget();
+        $this->assertStringContainsString('Aucun budget defini', $result);
+    }
+
+    public function test_daily_budget_shows_daily_allowance(): void
+    {
+        Budget::create([
+            'user_phone'    => $this->testPhone,
+            'category'      => 'alimentation',
+            'monthly_limit' => 300.0,
+        ]);
+
+        $result = $this->callGetDailyBudget();
+        $this->assertStringContainsString('Disponible par jour', $result);
+        $this->assertStringContainsString('€/jour', $result);
+    }
+
+    public function test_daily_budget_shows_today_expenses(): void
+    {
+        Budget::create([
+            'user_phone'    => $this->testPhone,
+            'category'      => 'alimentation',
+            'monthly_limit' => 300.0,
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 25.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetDailyBudget();
+        $this->assertStringContainsString("Aujourd'hui", $result);
+        $this->assertStringContainsString('25', $result);
+    }
+
+    public function test_daily_budget_exceeded(): void
+    {
+        Budget::create([
+            'user_phone'    => $this->testPhone,
+            'category'      => 'alimentation',
+            'monthly_limit' => 10.0,
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 50.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetDailyBudget();
+        $this->assertStringContainsString('depasse', $result);
+    }
+
+    public function test_daily_budget_multi_category_breakdown(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 300.0]);
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'transport',    'monthly_limit' => 100.0]);
+
+        $result = $this->callGetDailyBudget();
+        $this->assertStringContainsString('Par categorie', $result);
+    }
+
+    // ── exportMonth ───────────────────────────────────────────────────────────
+
+    private function callExportMonth(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('exportMonth');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_export_month_no_expenses(): void
+    {
+        $result = $this->callExportMonth();
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_export_month_shows_all_expenses(): void
+    {
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 45.0,  'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 12.50, 'category' => 'transport',    'date' => Carbon::now()->toDateString()]);
+
+        $result = $this->callExportMonth();
+        $this->assertStringContainsString('alimentation', $result);
+        $this->assertStringContainsString('transport', $result);
+        $this->assertStringContainsString('57.5', $result);
+    }
+
+    public function test_export_month_shows_total(): void
+    {
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 100.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $result = $this->callExportMonth();
+        $this->assertStringContainsString('TOTAL', $result);
+        $this->assertStringContainsString('100', $result);
+    }
+
+    public function test_export_month_shows_budget_if_defined(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 200.0]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 80.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $result = $this->callExportMonth();
+        $this->assertStringContainsString('Budget', $result);
+        $this->assertStringContainsString('200', $result);
+    }
+
+    public function test_export_month_groups_by_date(): void
+    {
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 30.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 20.0, 'category' => 'transport',    'date' => Carbon::now()->subDay()->toDateString()]);
+
+        $result = $this->callExportMonth();
+        $this->assertStringContainsString('📅', $result);
+        // Both dates should appear
+        $this->assertStringContainsString('alimentation', $result);
+        $this->assertStringContainsString('transport', $result);
+    }
+
+    // ── logExpense today total ─────────────────────────────────────────────────
+
+    public function test_log_expense_shows_today_total_when_multiple(): void
+    {
+        // First expense today
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 20.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('logExpense');
+        $method->setAccessible(true);
+        // Add a second expense for today
+        $result = $method->invoke($agent, $this->testPhone, 15.0, 'alimentation', null);
+
+        // Today total should be 20 + 15 = 35
+        $this->assertStringContainsString("Aujourd'hui total", $result);
+        $this->assertStringContainsString('35', $result);
+    }
+
+    // ── getAlerts projection warning ──────────────────────────────────────────
+
+    public function test_alerts_shows_projection_warning_when_over_budget(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 50.0]);
+
+        // Create enough expenses to project an overrun
+        // Spend 40€ on day 5 → daily avg = 8€ → projection = 8 * daysInMonth >> 50
+        Carbon::setTestNow(Carbon::create(2026, 3, 5));
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 40.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getAlerts');
+        $method->setAccessible(true);
+        $result = $method->invoke($agent, $this->testPhone);
+
+        Carbon::setTestNow(); // reset
+        $this->assertStringContainsString('Projection', $result);
+    }
+
+    // ── getBalance daily allowance ─────────────────────────────────────────────
+
+    public function test_balance_shows_daily_allowance_when_budget_defined(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 300.0]);
+
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getBalance');
+        $method->setAccessible(true);
+
+        Carbon::setTestNow(Carbon::create(2026, 3, 5)); // day 5, 26 days left
+        $result = $method->invoke($agent, $this->testPhone);
+        Carbon::setTestNow();
+
+        $this->assertStringContainsString('Budget/jour', $result);
+    }
+
+    // ── getHelp v1.6.0 ────────────────────────────────────────────────────────
+
+    public function test_help_contains_daily_budget_command(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getHelp');
+        $method->setAccessible(true);
+        $help = $method->invoke($agent);
+
+        $this->assertStringContainsString('budget journalier', $help);
+        $this->assertStringContainsString('export', $help);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

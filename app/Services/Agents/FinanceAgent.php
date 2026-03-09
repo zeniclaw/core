@@ -51,12 +51,14 @@ class FinanceAgent extends BaseAgent
             'chercher depense', 'rechercher depense', 'trouver depense', 'search expense',
             'tendance', 'trend', '6 mois', 'evolution mensuelle', 'historique mensuel', 'courbe depenses',
             'recurrent', 'recurrents', 'recurrentes', 'abonnements actifs', 'depenses recurrentes', 'recurring',
+            'budget journalier', 'budget du jour', 'combien par jour', 'par jour', 'disponible jour', 'quota journalier',
+            'export', 'exporter', 'liste complete', 'tout le mois', 'toutes depenses', 'toutes les depenses',
         ];
     }
 
     public function version(): string
     {
-        return '1.5.0';
+        return '1.6.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -86,6 +88,8 @@ class FinanceAgent extends BaseAgent
             '/\b(chercher?|rechercher?|trouver|search)\s+\S+/iu',
             '/\b(tendance|trend|6\s+mois|evolution\s+mensuelle|historique\s+mensuel)\b/iu',
             '/\b(recurrents?|recurrentes?|abonnements?\s+actifs?|depenses?\s+recurrentes?)\b/iu',
+            '/\b(budget\s+journalier|budget\s+du\s+jour|combien\s+par\s+jour|disponible\s+jour|quota\s+journalier)\b/iu',
+            '/\b(export(?:er)?|liste\s+compl[eè]te|tout\s+le\s+mois|toutes?\s+(?:les\s+)?depenses?)\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -229,6 +233,16 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'recurring_expenses'];
         }
 
+        // budget journalier / combien par jour
+        if (preg_match('/\b(budget\s+journalier|budget\s+du\s+jour|combien\s+par\s+jour|disponible\s+jour|quota\s+journalier|par\s+jour)\b/iu', $lower)) {
+            return ['action' => 'daily_budget'];
+        }
+
+        // export / liste complete / toutes les depenses
+        if (preg_match('/\b(export(?:er)?|liste\s+compl[eè]te|tout\s+le\s+mois|toutes?\s+(?:les\s+)?depenses?)\b/iu', $lower)) {
+            return ['action' => 'export_month'];
+        }
+
         return null;
     }
 
@@ -256,6 +270,8 @@ class FinanceAgent extends BaseAgent
             'search_expenses'    => $this->searchExpenses($context->from, $command['query'] ?? ''),
             'monthly_trend'      => $this->getMonthlyTrend($context->from),
             'recurring_expenses' => $this->getRecurringExpenses($context->from),
+            'daily_budget'       => $this->getDailyBudget($context->from),
+            'export_month'       => $this->exportMonth($context->from),
             'help'               => $this->getHelp(),
             default              => null,
         };
@@ -395,6 +411,8 @@ COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
 - chercher [terme] — rechercher dans les depenses
 - tendance — evolution des depenses sur 6 mois
 - recurrents — depenses et abonnements recurrents detectes
+- budget journalier — budget disponible par jour pour le reste du mois
+- export — liste complete de toutes les depenses du mois
 - alertes — alertes de depassement
 - supprimer derniere depense — annuler la derniere depense
 
@@ -441,12 +459,20 @@ PROMPT;
         $monthlySpent = Expense::calculateMonthlySpent($userPhone, $category);
         $average      = Expense::getAverageForCategory($userPhone, $category);
 
+        // Today's spending total
+        $todayTotal = round((float) Expense::where('user_phone', $userPhone)
+            ->whereDate('date', Carbon::now()->toDateString())
+            ->sum('amount'), 2);
+
         $response  = "✅ Depense enregistree !\n";
         $response .= "💳 *{$amount}€* en *{$category}*";
         if ($description) {
             $response .= " ({$description})";
         }
         $response .= "\n📅 Total {$category} ce mois: *{$monthlySpent}€*";
+        if ($todayTotal > $amount) {
+            $response .= "\n💡 Aujourd'hui total: *{$todayTotal}€*";
+        }
 
         // Anomaly check: only flag if single expense > 2x monthly average
         if ($average > 0 && $amount > ($average * 2)) {
@@ -555,7 +581,13 @@ PROMPT;
             $totalBudget    = $budgets->sum('monthly_limit');
             $totalRemaining = round($totalBudget - $totalSpent, 2);
             $response .= "📊 Budget total: {$totalBudget}€\n";
-            $response .= "💵 Restant global: *{$totalRemaining}€*\n\n";
+            $response .= "💵 Restant global: *{$totalRemaining}€*\n";
+            if ($totalRemaining > 0 && $daysInMonth > $dayOfMonth) {
+                $daysLeft      = $daysInMonth - $dayOfMonth;
+                $dailyAllowance = round($totalRemaining / $daysLeft, 2);
+                $response .= "💡 Budget/jour: *{$dailyAllowance}€* ({$daysLeft}j restants)\n";
+            }
+            $response .= "\n";
 
             foreach ($budgets as $budget) {
                 $check = $budget->checkBudgetThreshold();
@@ -880,6 +912,20 @@ PROMPT;
             $response .= "\n✨ Tout va bien ! Aucun budget en alerte.";
         }
 
+        // Projection-based warning
+        $totalSpent  = Expense::calculateTotalMonthlySpent($userPhone);
+        $dayOfMonth  = Carbon::now()->day;
+        $daysInMonth = Carbon::now()->daysInMonth;
+        if ($totalSpent > 0 && $dayOfMonth >= 3) {
+            $projectedTotal = round(($totalSpent / $dayOfMonth) * $daysInMonth, 2);
+            $totalBudget    = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+            if ($totalBudget > 0 && $projectedTotal > $totalBudget) {
+                $overrun    = round($projectedTotal - $totalBudget, 2);
+                $response  .= "\n\n🔮 *Projection fin de mois: ~{$projectedTotal}€*";
+                $response  .= "\n⚠️ Depassement budget projete: +{$overrun}€";
+            }
+        }
+
         return $response;
     }
 
@@ -905,7 +951,9 @@ PROMPT;
             . "  `comparer mois` — M vs M-1 par categorie\n"
             . "  `chercher [terme]` — rechercher une depense\n"
             . "  `tendance` — evolution depenses sur 6 mois\n"
-            . "  `recurrents` — depenses/abonnements recurrents\n\n"
+            . "  `recurrents` — depenses/abonnements recurrents\n"
+            . "  `budget journalier` — budget dispo par jour\n"
+            . "  `export` — liste complete du mois\n\n"
             . "🗑️ *Annuler:*\n"
             . "  `supprimer derniere depense`\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
@@ -1236,6 +1284,134 @@ PROMPT;
         $totalMonthly = round($totalMonthly, 2);
         $response    .= "\n💰 Cout mensuel estime: *{$totalMonthly}€*\n";
         $response    .= "💡 _Verifie tes abonnements et charges fixes._";
+
+        return $response;
+    }
+
+    private function getDailyBudget(string $userPhone): string
+    {
+        $today       = Carbon::now();
+        $dayOfMonth  = $today->day;
+        $daysInMonth = $today->daysInMonth;
+        $daysLeft    = $daysInMonth - $dayOfMonth + 1; // include today
+        $month       = $today->translatedFormat('F Y');
+
+        $totalSpent  = Expense::calculateTotalMonthlySpent($userPhone);
+        $totalBudget = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+
+        if ($totalBudget <= 0) {
+            return "📅 *Budget journalier — {$month}*\n\n"
+                . "_Aucun budget defini._\n"
+                . "Cree un budget: *budget [categorie] [montant]*\n\n"
+                . "💡 Avec un budget global, je calcule combien tu peux depenser par jour.";
+        }
+
+        $totalRemaining = round($totalBudget - $totalSpent, 2);
+
+        $response  = "📅 *Budget journalier — {$month}*\n";
+        $response .= "Jour {$dayOfMonth}/{$daysInMonth} • {$daysLeft} jour(s) restant(s)\n\n";
+
+        if ($totalRemaining <= 0) {
+            $response .= "🚨 *Budget global depasse !* ({$totalSpent}€ / {$totalBudget}€)\n";
+            $response .= "Depassement: *" . abs($totalRemaining) . "€*";
+            return $response;
+        }
+
+        $dailyAllowance = $daysLeft > 0 ? round($totalRemaining / $daysLeft, 2) : 0;
+
+        $response .= "💰 Restant global: *{$totalRemaining}€*\n";
+        $response .= "📊 Disponible par jour: *{$dailyAllowance}€/jour*\n";
+
+        // Today's expenses
+        $todayTotal = round((float) Expense::where('user_phone', $userPhone)
+            ->whereDate('date', $today->toDateString())
+            ->sum('amount'), 2);
+
+        if ($todayTotal > 0) {
+            $todayRemaining = round($dailyAllowance - $todayTotal, 2);
+            $response .= "\n📌 *Aujourd'hui:* {$todayTotal}€ depenses";
+            if ($todayRemaining > 0) {
+                $response .= "\n✅ Encore *{$todayRemaining}€* disponibles aujourd'hui";
+            } else {
+                $response .= "\n⚠️ Quota journalier depasse de *" . abs($todayRemaining) . "€*";
+            }
+        }
+
+        // Per-category breakdown (only if multiple budgets)
+        $budgets = Budget::where('user_phone', $userPhone)->get();
+        if ($budgets->count() > 1) {
+            $response .= "\n\n📋 *Par categorie (restant/jour):*\n";
+            foreach ($budgets as $budget) {
+                $check = $budget->checkBudgetThreshold();
+                if ($check['remaining'] > 0) {
+                    $catDaily  = round($check['remaining'] / $daysLeft, 2);
+                    $icon      = $check['threshold_reached'] ? '⚠️' : '✅';
+                    $response .= "{$icon} *{$check['category']}*: {$catDaily}€/jour\n";
+                } else {
+                    $response .= "🚨 *{$check['category']}*: budget depasse\n";
+                }
+            }
+        }
+
+        return $response;
+    }
+
+    private function exportMonth(string $userPhone): string
+    {
+        $month    = Carbon::now();
+        $expenses = Expense::where('user_phone', $userPhone)
+            ->whereYear('date', $month->year)
+            ->whereMonth('date', $month->month)
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get();
+
+        $monthLabel = $month->translatedFormat('F Y');
+
+        if ($expenses->isEmpty()) {
+            return "📤 *Export — {$monthLabel}*\n\n_Aucune depense ce mois._\n"
+                . "Commence avec: *depense [montant] [categorie]*";
+        }
+
+        $count = $expenses->count();
+        $total = round((float) $expenses->sum('amount'), 2);
+
+        $response  = "📤 *Export complet — {$monthLabel}*\n";
+        $response .= "{$count} depense(s) • Total: *{$total}€*\n";
+        $response .= "─────────────────────────\n";
+
+        // Group by date
+        $byDate = $expenses->groupBy(fn ($e) => Carbon::parse($e->date)->toDateString());
+
+        foreach ($byDate as $dateStr => $dateExpenses) {
+            $date      = Carbon::parse($dateStr);
+            $dateLabel = $date->isToday()
+                ? "Aujourd'hui " . $date->translatedFormat('d M')
+                : $date->translatedFormat('d M (l)');
+            $dayTotal  = round((float) $dateExpenses->sum('amount'), 2);
+
+            $response .= "\n📅 *{$dateLabel}* — {$dayTotal}€\n";
+            foreach ($dateExpenses as $expense) {
+                $desc      = $expense->description ? " {$expense->description}" : '';
+                $response .= "  • {$expense->amount}€ {$expense->category}{$desc}\n";
+            }
+        }
+
+        $response .= "\n─────────────────────────\n";
+        $response .= "💳 *TOTAL: {$total}€*";
+
+        // Budget summary if available
+        $totalBudget = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+        if ($totalBudget > 0) {
+            $remaining = round($totalBudget - $total, 2);
+            $pct       = round(($total / $totalBudget) * 100, 1);
+            $response .= "\n📊 Budget: {$total}€/{$totalBudget}€ ({$pct}%)";
+            if ($remaining >= 0) {
+                $response .= " • Restant: {$remaining}€";
+            } else {
+                $response .= " • ⚠️ Depassement: " . abs($remaining) . "€";
+            }
+        }
 
         return $response;
     }
