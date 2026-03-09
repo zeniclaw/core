@@ -17,7 +17,7 @@ class ProjectAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de projets. Permet de changer de projet actif, creer/supprimer un projet, voir les statistiques et les details, archiver/restaurer, renommer, mettre a jour l\'URL GitLab ou la description, et lister tous les projets.';
+        return 'Agent de gestion de projets. Permet de changer de projet actif, creer/supprimer un projet, voir les statistiques et les details, archiver/restaurer, renommer, mettre a jour l\'URL GitLab ou la description, definir une priorite, voir les taches recentes, et lister tous les projets.';
     }
 
     public function keywords(): array
@@ -38,12 +38,14 @@ class ProjectAgent extends BaseAgent
             'update projet', 'mettre a jour projet', 'changer url', 'modifier url gitlab', 'changer description',
             'info projet', 'infos projet', 'detail projet', 'details projet', 'voir projet',
             'supprimer projet', 'delete projet', 'effacer projet', 'enlever projet',
+            'priorite projet', 'priorite', 'urgent', 'haute priorite', 'basse priorite', 'priority',
+            'taches recentes', 'dernieres taches', 'historique projet', 'activite projet', 'recent tasks',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -71,16 +73,18 @@ class ProjectAgent extends BaseAgent
         $action = $this->detectAction($context);
 
         return match ($action['action'] ?? 'switch') {
-            'create'  => $this->handleCreate($context, $action),
-            'stats'   => $this->handleStats($context, $action),
-            'archive' => $this->handleArchive($context, $action),
-            'restore' => $this->handleRestore($context, $action),
-            'rename'  => $this->handleRename($context, $action),
-            'list'    => $this->handleList($context, $action),
-            'update'  => $this->handleUpdate($context, $action),
-            'info'    => $this->handleInfo($context, $action),
-            'delete'  => $this->handleDelete($context, $action),
-            default   => $this->handleProjectSwitch($context),
+            'create'   => $this->handleCreate($context, $action),
+            'stats'    => $this->handleStats($context, $action),
+            'archive'  => $this->handleArchive($context, $action),
+            'restore'  => $this->handleRestore($context, $action),
+            'rename'   => $this->handleRename($context, $action),
+            'list'     => $this->handleList($context, $action),
+            'update'   => $this->handleUpdate($context, $action),
+            'info'     => $this->handleInfo($context, $action),
+            'delete'   => $this->handleDelete($context, $action),
+            'priority' => $this->handlePriority($context, $action),
+            'recent'   => $this->handleRecent($context, $action),
+            default    => $this->handleProjectSwitch($context),
         };
     }
 
@@ -117,7 +121,7 @@ class ProjectAgent extends BaseAgent
 Tu es un assistant de gestion de projets. L'utilisateur te donne un message et tu dois determiner l'action a effectuer.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "switch|create|stats|archive|restore|rename|list|update|info|delete", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false}
+{"action": "switch|create|stats|archive|restore|rename|list|update|info|delete|priority|recent", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false, "priority": null}
 
 ACTIONS:
 - "switch": changer de projet actif (ex: "bosse sur mon-app", "switch zeniclaw", "projet X")
@@ -130,6 +134,8 @@ ACTIONS:
 - "update": mettre a jour l'URL GitLab ou la description d'un projet (ex: "change l'url gitlab de mon-app", "met a jour la description", "l'url du projet est maintenant https://...")
 - "info": voir les details complets d'un projet (ex: "infos sur le projet", "details du projet X", "montre moi le projet Y")
 - "delete": supprimer definitivement un projet archive (ex: "supprime le projet test", "efface le projet archive X")
+- "priority": definir ou voir la priorite d'un projet (ex: "met le projet en urgent", "priorite haute pour zeniclaw", "quelle est la priorite", "priorite normale")
+- "recent": voir les dernieres taches d'un projet (ex: "dernieres taches", "activite recente du projet", "historique zeniclaw", "quoi de neuf sur le projet")
 
 CHAMPS:
 - project_name: nom actuel du projet mentionne (ou null si non mentionne)
@@ -137,21 +143,27 @@ CHAMPS:
 - gitlab_url: URL GitLab si mentionnee (ou null)
 - description: description courte du projet si fournie (ou null)
 - show_all: true si l'utilisateur demande "tous" les projets (inclut les archives)
+- priority: "urgent"|"haute"|"normale"|"basse" si action=priority et une valeur est donnee (ou null pour juste consulter)
 
 EXEMPLES:
-- "bosse sur zeniclaw" → {"action": "switch", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "cree un projet mon-app avec https://gitlab.com/team/mon-app" → {"action": "create", "project_name": "mon-app", "new_name": null, "gitlab_url": "https://gitlab.com/team/mon-app", "description": null, "show_all": false}
-- "nouveau projet api-gateway API de routage interne" → {"action": "create", "project_name": "api-gateway", "new_name": null, "gitlab_url": null, "description": "API de routage interne", "show_all": false}
-- "stats du projet" → {"action": "stats", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "archive le projet test" → {"action": "archive", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "restaure le projet test" → {"action": "restore", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "renomme zeniclaw en zeniclaw-v2" → {"action": "rename", "project_name": "zeniclaw", "new_name": "zeniclaw-v2", "gitlab_url": null, "description": null, "show_all": false}
-- "mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "tous mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": true}
-- "change l'url gitlab de mon-app en https://gitlab.com/new/mon-app" → {"action": "update", "project_name": "mon-app", "new_name": null, "gitlab_url": "https://gitlab.com/new/mon-app", "description": null, "show_all": false}
-- "mets a jour la description: nouvelle API REST" → {"action": "update", "project_name": null, "new_name": null, "gitlab_url": null, "description": "nouvelle API REST", "show_all": false}
-- "infos sur le projet zeniclaw" → {"action": "info", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
-- "supprime le projet test" → {"action": "delete", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
+- "bosse sur zeniclaw" → {"action": "switch", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "cree un projet mon-app avec https://gitlab.com/team/mon-app" → {"action": "create", "project_name": "mon-app", "new_name": null, "gitlab_url": "https://gitlab.com/team/mon-app", "description": null, "show_all": false, "priority": null}
+- "nouveau projet api-gateway API de routage interne" → {"action": "create", "project_name": "api-gateway", "new_name": null, "gitlab_url": null, "description": "API de routage interne", "show_all": false, "priority": null}
+- "stats du projet" → {"action": "stats", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "archive le projet test" → {"action": "archive", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "restaure le projet test" → {"action": "restore", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "renomme zeniclaw en zeniclaw-v2" → {"action": "rename", "project_name": "zeniclaw", "new_name": "zeniclaw-v2", "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "tous mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": true, "priority": null}
+- "change l'url gitlab de mon-app en https://gitlab.com/new/mon-app" → {"action": "update", "project_name": "mon-app", "new_name": null, "gitlab_url": "https://gitlab.com/new/mon-app", "description": null, "show_all": false, "priority": null}
+- "mets a jour la description: nouvelle API REST" → {"action": "update", "project_name": null, "new_name": null, "gitlab_url": null, "description": "nouvelle API REST", "show_all": false, "priority": null}
+- "infos sur le projet zeniclaw" → {"action": "info", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "supprime le projet test" → {"action": "delete", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "met le projet zeniclaw en urgent" → {"action": "priority", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": "urgent"}
+- "priorite normale pour mon-app" → {"action": "priority", "project_name": "mon-app", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": "normale"}
+- "quelle est la priorite du projet" → {"action": "priority", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "dernieres taches du projet zeniclaw" → {"action": "recent", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "activite recente" → {"action": "recent", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -211,7 +223,10 @@ PROMPT;
 
         $lastSubAgent = $subAgents->sortByDesc('updated_at')->first();
 
-        $lines = ["✅ Projet *{$project->name}* active !"];
+        $priority      = $project->getSetting('priority');
+        $priorityBadge = $this->priorityBadge($priority);
+
+        $lines = ["✅ Projet *{$project->name}* active !" . ($priorityBadge ? " {$priorityBadge}" : '')];
 
         $taskSummary = "{$total} tache" . ($total !== 1 ? 's' : '');
         if ($runningCount > 0) {
@@ -631,6 +646,7 @@ PROMPT;
         $query = Project::withCount([
             'subAgents as completed_tasks_count' => fn($q) => $q->where('status', 'completed'),
             'subAgents as running_tasks_count'   => fn($q) => $q->where('status', 'running'),
+            'subAgents as pending_tasks_count'   => fn($q) => $q->where('status', 'pending'),
         ])->orderByDesc('created_at');
 
         if ($showAll) {
@@ -652,16 +668,21 @@ PROMPT;
 
         $lines = ["📁 *" . ($showAll ? "Tous tes projets" : "Tes projets") . "* ({$count}) :"];
         foreach ($projects as $p) {
-            $isActive = $p->id === $activeId;
-            $marker   = $isActive ? ' 👈' : '';
-            $archived = $p->status === 'archived' ? ' _(archive)_' : '';
-            $done     = $p->completed_tasks_count ?? 0;
-            $running  = $p->running_tasks_count ?? 0;
-            $details  = "{$done} faite" . ($done !== 1 ? 's' : '');
+            $isActive      = $p->id === $activeId;
+            $marker        = $isActive ? ' 👈' : '';
+            $archived      = $p->status === 'archived' ? ' _(archive)_' : '';
+            $done          = $p->completed_tasks_count ?? 0;
+            $running       = $p->running_tasks_count ?? 0;
+            $pending       = $p->pending_tasks_count ?? 0;
+            $priorityBadge = $this->priorityBadge($p->getSetting('priority'));
+            $details       = "{$done} faite" . ($done !== 1 ? 's' : '');
             if ($running > 0) {
                 $details .= " · {$running} en cours";
             }
-            $lines[] = "• *{$p->name}*{$archived} ({$details}){$marker}";
+            if ($pending > 0) {
+                $details .= " · {$pending} en attente";
+            }
+            $lines[] = "• *{$p->name}*{$archived} ({$details}){$priorityBadge}{$marker}";
         }
 
         $lines[] = "\nDis \"switch nom\" pour changer · \"info nom\" pour les details";
@@ -752,10 +773,16 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'project_info_no_project']);
         }
 
-        $totalTasks     = SubAgent::where('project_id', $project->id)->count();
-        $completedTasks = SubAgent::where('project_id', $project->id)->where('status', 'completed')->count();
-        $runningTasks   = SubAgent::where('project_id', $project->id)->where('status', 'running')->count();
-        $failedTasks    = SubAgent::where('project_id', $project->id)->where('status', 'failed')->count();
+        // Single query for all task counts
+        $taskCounts = SubAgent::where('project_id', $project->id)
+            ->selectRaw('COUNT(*) as total, SUM(status="completed") as completed, SUM(status="running") as running, SUM(status="failed") as failed, SUM(status="pending") as pending')
+            ->first();
+
+        $totalTasks     = (int) ($taskCounts->total ?? 0);
+        $completedTasks = (int) ($taskCounts->completed ?? 0);
+        $runningTasks   = (int) ($taskCounts->running ?? 0);
+        $failedTasks    = (int) ($taskCounts->failed ?? 0);
+        $pendingTasks   = (int) ($taskCounts->pending ?? 0);
         $lastTask       = SubAgent::where('project_id', $project->id)->orderByDesc('updated_at')->first();
 
         $statusEmoji = match ($project->status) {
@@ -772,10 +799,12 @@ PROMPT;
             default       => 'Actif',
         };
 
-        $isActive = $context->session->active_project_id === $project->id;
+        $isActive      = $context->session->active_project_id === $project->id;
+        $priority      = $project->getSetting('priority');
+        $priorityBadge = $this->priorityBadge($priority);
 
         $lines = [
-            "📋 *{$project->name}*" . ($isActive ? ' 👈 actif' : ''),
+            "📋 *{$project->name}*" . ($isActive ? ' 👈 actif' : '') . ($priorityBadge ? " {$priorityBadge}" : ''),
             "",
             "{$statusEmoji} Statut : {$statusLabel}",
         ];
@@ -797,6 +826,7 @@ PROMPT;
             $taskLine = "📊 {$totalTasks} tache" . ($totalTasks !== 1 ? 's' : '');
             if ($completedTasks > 0) $taskLine .= " · {$completedTasks} terminees";
             if ($runningTasks > 0)   $taskLine .= " · {$runningTasks} en cours";
+            if ($pendingTasks > 0)   $taskLine .= " · {$pendingTasks} en attente";
             if ($failedTasks > 0)    $taskLine .= " · {$failedTasks} echouees";
             $lines[] = $taskLine;
         }
@@ -931,6 +961,117 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'project_deleted']);
     }
 
+    // ─── Priority (NEW) ────────────────────────────────────────────────
+
+    private function handlePriority(AgentContext $context, array $action): AgentResult
+    {
+        $project  = $this->resolveTargetProject($context, $action);
+        $priority = $action['priority'] ?? null;
+
+        if (!$project) {
+            $reply = "Aucun projet actif. Precise le nom du projet ou active-en un d'abord.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_priority_no_project']);
+        }
+
+        // Read-only: just show current priority
+        if (!$priority) {
+            $current = $project->getSetting('priority');
+            $badge   = $this->priorityBadge($current);
+            $label   = $current ? ucfirst($current) : 'non definie';
+            $reply   = "🎯 Priorite du projet *{$project->name}* : {$label}" . ($badge ? " {$badge}" : '') . "\n\n"
+                . "Pour changer : \"priorite urgent|haute|normale|basse pour {$project->name}\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_priority_view', 'project_id' => $project->id]);
+        }
+
+        $allowed = ['urgent', 'haute', 'normale', 'basse'];
+        if (!in_array(mb_strtolower($priority), $allowed)) {
+            $reply = "Priorite invalide. Valeurs acceptees : urgent, haute, normale, basse.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_priority_invalid']);
+        }
+
+        $priority = mb_strtolower($priority);
+
+        try {
+            $project->setSetting('priority', $priority);
+        } catch (\Exception $e) {
+            Log::error("[project] handlePriority setSetting failed: " . $e->getMessage());
+            $reply = "Erreur lors de la mise a jour de la priorite. Reessaie dans un moment.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_priority_error']);
+        }
+
+        $badge = $this->priorityBadge($priority);
+        $reply = "🎯 Priorite du projet *{$project->name}* definie a *{$priority}* {$badge}";
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project priority updated', [
+            'project_id' => $project->id,
+            'priority'   => $priority,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'project_priority_set', 'project_id' => $project->id]);
+    }
+
+    // ─── Recent (NEW) ──────────────────────────────────────────────────
+
+    private function handleRecent(AgentContext $context, array $action): AgentResult
+    {
+        $project = $this->resolveTargetProject($context, $action);
+
+        if (!$project) {
+            $reply = "Aucun projet actif. Dis \"switch nom-du-projet\" pour en selectionner un, ou precise le nom.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_recent_no_project']);
+        }
+
+        $tasks = SubAgent::where('project_id', $project->id)
+            ->orderByDesc('updated_at')
+            ->limit(7)
+            ->get();
+
+        if ($tasks->isEmpty()) {
+            $reply = "Aucune tache enregistree pour le projet *{$project->name}*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_recent_empty', 'project_id' => $project->id]);
+        }
+
+        $lines = ["🕐 *Activite recente : {$project->name}*", ""];
+
+        foreach ($tasks as $task) {
+            $statusIcon = match ($task->status) {
+                'completed' => '✅',
+                'failed'    => '❌',
+                'running'   => '🔄',
+                'pending'   => '⏳',
+                default     => '•',
+            };
+            $desc = mb_strimwidth($task->task_description ?? 'sans description', 0, 55, '...');
+            $ago  = $task->updated_at ? Carbon::parse($task->updated_at)->diffForHumans() : '';
+
+            $line = "{$statusIcon} {$desc}";
+            if ($ago) {
+                $line .= " _({$ago})_";
+            }
+            $lines[] = $line;
+        }
+
+        $total = SubAgent::where('project_id', $project->id)->count();
+        if ($total > 7) {
+            $lines[] = "";
+            $lines[] = "_(+ " . ($total - 7) . " autres taches — dis \"stats {$project->name}\" pour le detail)_";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project recent tasks requested', ['project_id' => $project->id]);
+
+        return AgentResult::reply($reply, ['action' => 'project_recent', 'project_id' => $project->id]);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────
 
     private function resolveTargetProject(AgentContext $context, array $action): ?Project
@@ -996,6 +1137,17 @@ PROMPT;
             Log::warning("[project] smartMatchProject AI failed: " . $e->getMessage());
             return null;
         }
+    }
+
+    private function priorityBadge(?string $priority): string
+    {
+        return match ($priority) {
+            'urgent'  => '🔴',
+            'haute'   => '🟠',
+            'normale' => '🟡',
+            'basse'   => '🟢',
+            default   => '',
+        };
     }
 
     private function statusLabel(string $status): string
