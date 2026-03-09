@@ -346,4 +346,91 @@ class VoiceCommandAgentTest extends TestCase
         $this->assertEquals('1', $major);
         $this->assertGreaterThanOrEqual(2, (int) $minor);
     }
+
+    public function test_handle_detects_whisper_hallucination(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => "Sous-titres réalisés par la communauté d'Amara.org",
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('bruit de fond', $result->reply);
+    }
+
+    public function test_handle_includes_word_count_in_metadata(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => 'Rappelle-moi d\'acheter du lait demain matin',
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertArrayHasKey('word_count', $result->metadata);
+        $this->assertGreaterThan(0, $result->metadata['word_count']);
+    }
+
+    public function test_handle_thank_you_hallucination_is_rejected(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => 'Thank you for watching',
+                'language' => 'en',
+                'segments' => [
+                    ['avg_logprob' => -0.05],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('bruit de fond', $result->reply);
+    }
+
+    public function test_version_is_1_3(): void
+    {
+        $this->assertEquals('1.3.0', $this->agent->version());
+    }
 }

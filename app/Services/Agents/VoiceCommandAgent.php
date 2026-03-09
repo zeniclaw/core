@@ -22,12 +22,31 @@ class VoiceCommandAgent extends BaseAgent
     // Max download attempts before giving up
     private const MAX_DOWNLOAD_ATTEMPTS = 2;
 
+    // Chars threshold above which an AI summary is generated
+    private const LONG_TRANSCRIPT_THRESHOLD = 600;
+
+    // Known Whisper hallucination patterns (common false positives on silent/noisy audio)
+    private const WHISPER_HALLUCINATIONS = [
+        "sous-titres r\u{00E9}alis\u{00E9}s par la communaut\u{00E9} d'amara",
+        "sous-titres r\u{00E9}alis\u{00E9}s par",
+        'sous-titres francophones',
+        "merci d'avoir regard\u{00E9}",
+        "merci d'avoir vu cette vid\u{00E9}o",
+        'thank you for watching',
+        'transcribed by',
+        'amara.org',
+        "sous titres r\u{00E9}alis\u{00E9}s",
+    ];
+
     // Language code to WhatsApp-friendly flag emoji
     private const LANGUAGE_FLAGS = [
         'fr' => '🇫🇷', 'en' => '🇬🇧', 'es' => '🇪🇸', 'de' => '🇩🇪',
         'it' => '🇮🇹', 'pt' => '🇵🇹', 'ar' => '🇸🇦', 'zh' => '🇨🇳',
         'ja' => '🇯🇵', 'ko' => '🇰🇷', 'ru' => '🇷🇺', 'nl' => '🇳🇱',
-        'tr' => '🇹🇷', 'pl' => '🇵🇱', 'sv' => '🇸🇪',
+        'tr' => '🇹🇷', 'pl' => '🇵🇱', 'sv' => '🇸🇪', 'he' => '🇮🇱',
+        'vi' => '🇻🇳', 'uk' => '🇺🇦', 'cs' => '🇨🇿', 'ro' => '🇷🇴',
+        'hu' => '🇭🇺', 'da' => '🇩🇰', 'fi' => '🇫🇮', 'el' => '🇬🇷',
+        'hi' => '🇮🇳', 'id' => '🇮🇩', 'th' => '🇹🇭', 'ms' => '🇲🇾',
     ];
 
     public function name(): string
@@ -37,7 +56,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription, detection du silence/bruit, confirmation interactive en cas de doute et indicateur de langue par drapeau. Supporte ogg, mp3, wav, mp4, webm, amr et plus.';
+        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription, detection du silence/bruit/hallucinations Whisper, confirmation interactive en cas de doute, indicateur de langue par drapeau et resume automatique des longs messages. Supporte ogg, mp3, wav, mp4, webm, amr et plus.';
     }
 
     public function keywords(): array
@@ -47,7 +66,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -66,6 +85,9 @@ class VoiceCommandAgent extends BaseAgent
             'hasMedia' => $context->hasMedia,
             'is_video' => $isVideo,
         ]);
+
+        // Send processing indicator immediately so the user knows we received the message
+        $this->sendProcessingIndicator($context, $isVideo);
 
         // Download audio from WAHA (with retry on transient failures)
         $audioBytes = $this->downloadAudioWithRetry($context);
@@ -110,6 +132,7 @@ class VoiceCommandAgent extends BaseAgent
         $language = $result['language'] ?? config('voice_command.default_language', 'fr');
         $minConfidence = config('voice_command.min_confidence', 0.8);
         $sizeKb = round($audioSize / 1024, 1);
+        $wordCount = str_word_count($transcript);
 
         // Detect silence or background noise (transcript too short to be meaningful)
         if ($this->isSilenceOrNoise($transcript)) {
@@ -122,12 +145,24 @@ class VoiceCommandAgent extends BaseAgent
             return AgentResult::reply($reply);
         }
 
+        // Detect known Whisper hallucinations (false positives on silent/noisy audio)
+        if ($this->isWhisperHallucination($transcript)) {
+            $this->log($context, 'Whisper hallucination detected — rejecting transcript', [
+                'transcript' => mb_substr($transcript, 0, 200),
+                'size_kb' => $sizeKb,
+            ], 'warn');
+            $reply = "Je n'ai pas detecte de parole claire dans ton message (bruit de fond probable). Reessaie ou ecris-moi directement en texte.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
         $this->log($context, 'Transcription successful', [
             'transcript' => mb_substr($transcript, 0, 200),
             'confidence' => $confidence,
             'language' => $language,
             'is_video' => $isVideo,
             'size_kb' => $sizeKb,
+            'word_count' => $wordCount,
         ]);
 
         // If confidence is too low, store transcript and ask for confirmation
@@ -138,12 +173,16 @@ class VoiceCommandAgent extends BaseAgent
         // Build language note with flag emoji for non-default-language transcriptions
         $languageNote = $this->buildLanguageNote($language);
 
+        // For long transcripts, generate an AI summary appended to the reply
+        $summaryNote = $this->maybeSummarizeTranscript($context, $transcript);
+
         // Return transcript — orchestrator will re-route to the appropriate agent
-        return AgentResult::reply($transcript . $languageNote, [
+        return AgentResult::reply($transcript . $languageNote . $summaryNote, [
             'transcript' => $transcript,
             'confidence' => $confidence,
             'language' => $language,
             'source' => 'voice',
+            'word_count' => $wordCount,
         ]);
     }
 
@@ -232,6 +271,60 @@ class VoiceCommandAgent extends BaseAgent
             'confidence' => $confidence,
             'low_confidence' => true,
         ]);
+    }
+
+    /**
+     * Send a brief processing indicator to the user before the download+transcription pipeline.
+     * Gives immediate feedback so the user knows their voice message was received.
+     */
+    private function sendProcessingIndicator(AgentContext $context, bool $isVideo): void
+    {
+        $msg = $isVideo ? "\u{23F3} Je traite ta video..." : "\u{23F3} Je traite ton vocal...";
+        $this->sendText($context->from, $msg);
+    }
+
+    /**
+     * For transcripts above LONG_TRANSCRIPT_THRESHOLD chars, use Claude to generate a brief summary.
+     * Returns formatted summary note (with leading newlines) or empty string on failure/short transcript.
+     */
+    private function maybeSummarizeTranscript(AgentContext $context, string $transcript): string
+    {
+        if (mb_strlen($transcript) < self::LONG_TRANSCRIPT_THRESHOLD) {
+            return '';
+        }
+
+        $model = $this->resolveModel($context);
+        $systemPrompt = 'Tu es un assistant qui resume des transcriptions vocales. '
+            . 'Genere un resume TRES court (1-2 phrases maximum) en francais de la transcription fournie. '
+            . 'Sois concis et direct. Ne commence pas par "La transcription dit" ou similaire. '
+            . "Reponds uniquement avec le resume, rien d'autre.";
+
+        try {
+            $summary = $this->claude->chat($transcript, $model, $systemPrompt);
+            if (!$summary) {
+                return '';
+            }
+            $summary = trim($summary);
+            return "\n\n\u{1F4DD} *Resume :* _{$summary}_";
+        } catch (\Exception $e) {
+            $this->log($context, 'Summary generation failed: ' . $e->getMessage(), [], 'warn');
+            return '';
+        }
+    }
+
+    /**
+     * Returns true if the transcript matches a known Whisper hallucination pattern.
+     * These are common false positives generated when audio is silent or too noisy.
+     */
+    private function isWhisperHallucination(string $transcript): bool
+    {
+        $lower = mb_strtolower(trim($transcript));
+        foreach (self::WHISPER_HALLUCINATIONS as $pattern) {
+            if (str_contains($lower, mb_strtolower($pattern))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
