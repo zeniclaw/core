@@ -425,10 +425,57 @@ ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
         $this->assertStringContainsString('quick review', $result->reply);
     }
 
-    public function test_agent_version_is_1_1_0(): void
+    public function test_agent_version_is_1_2_0(): void
     {
         $agent = new CodeReviewAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
+    }
+
+    // ── New modes v1.2.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_explain_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('explain code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('expliquer ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('que fait ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('explain this code')));
+    }
+
+    public function test_can_handle_security_audit_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('security audit')));
+        $this->assertTrue($agent->canHandle($this->makeContext('audit securite')));
+        $this->assertTrue($agent->canHandle($this->makeContext('audit de securite')));
+        $this->assertTrue($agent->canHandle($this->makeContext('code audit')));
+    }
+
+    public function test_no_code_blocks_returns_hint_with_all_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('explain code', $result->reply);
+        $this->assertStringContainsString('security audit', $result->reply);
+    }
+
+    public function test_help_message_includes_new_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('explain code', $result->reply);
+        $this->assertStringContainsString('security audit', $result->reply);
+        $this->assertStringContainsString('OWASP', $result->reply);
     }
 
     // ── Controller & Router integration ──────────────────────────────────────
