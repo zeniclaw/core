@@ -51,6 +51,9 @@ class RouterAgent
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
             => ['user_preferences', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // API / CRUD operations on project data → dev (api_query)
+        '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
+            => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
     ];
 
     public function __construct()
