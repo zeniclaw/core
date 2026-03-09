@@ -31,6 +31,7 @@ use App\Services\Agents\DocumentAgent;
 use App\Services\Agents\WebSearchAgent;
 use App\Services\Agents\UserPreferencesAgent;
 use App\Services\Agents\ConversationMemoryAgent;
+use App\Services\Agents\StreamlineAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -88,6 +89,7 @@ class AgentOrchestrator
             new WebSearchAgent(),
             new UserPreferencesAgent(),
             new ConversationMemoryAgent(),
+            new StreamlineAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
@@ -197,14 +199,14 @@ class AgentOrchestrator
                     );
 
                     $dispatchAgent = $newRouting['agent'];
-                    if (!in_array($dispatchAgent, ['dev', 'document'])) {
+                    if (!in_array($dispatchAgent, ['dev', 'document', 'streamline'])) {
                         $dispatchAgent = 'chat';
                     }
                 } else {
                     // Low confidence or failed — voice agent already replied to user
                     return $voiceResult;
                 }
-            } elseif (!in_array($dispatchAgent, ['dev', 'document'])) {
+            } elseif (!in_array($dispatchAgent, ['dev', 'document', 'streamline'])) {
                 $dispatchAgent = 'chat';
             }
 
