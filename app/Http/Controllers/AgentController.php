@@ -201,6 +201,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Chainer et automatiser des workflows multi-agents',
         ],
+        'interactive_quiz' => [
+            'label' => 'Quiz Interactif',
+            'icon' => '🎯',
+            'color' => 'purple',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Quizz ludiques avec scoring et défis',
+        ],
     ];
 
     public function index(Request $request)

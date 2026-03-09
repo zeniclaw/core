@@ -32,6 +32,7 @@ use App\Services\Agents\WebSearchAgent;
 use App\Services\Agents\UserPreferencesAgent;
 use App\Services\Agents\ConversationMemoryAgent;
 use App\Services\Agents\StreamlineAgent;
+use App\Services\Agents\InteractiveQuizAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -90,6 +91,7 @@ class AgentOrchestrator
             new UserPreferencesAgent(),
             new ConversationMemoryAgent(),
             new StreamlineAgent(),
+            new InteractiveQuizAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
