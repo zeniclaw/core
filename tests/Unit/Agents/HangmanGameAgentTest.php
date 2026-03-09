@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_2_0(): void
+    public function test_agent_version_is_1_3_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.2.0', $agent->version());
+        $this->assertEquals('1.3.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -494,6 +494,162 @@ class HangmanGameAgentTest extends TestCase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // ── Guess whole word ──────────────────────────────────────────────────────
+
+    public function test_guess_word_correct_wins_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine LARAVEL');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('trouve le mot', $result->reply);
+        $this->assertStringContainsString('LARAVEL', $result->reply);
+        $this->assertStringContainsString('pts', $result->reply);
+
+        $game->refresh();
+        $this->assertEquals('won', $game->status);
+    }
+
+    public function test_guess_word_wrong_costs_two_errors(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine MAUVAIS');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+
+        $agent->handle($context);
+
+        $game->refresh();
+        $this->assertEquals(2, $game->wrong_count);
+        $this->assertEquals('playing', $game->status);
+    }
+
+    public function test_guess_word_wrong_causes_loss_when_not_enough_lives(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine MAUVAIS');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['wrong_count' => 5]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Mauvaise reponse', $result->reply);
+        $this->assertStringContainsString('LARAVEL', $result->reply);
+
+        $game->refresh();
+        $this->assertEquals('lost', $game->status);
+    }
+
+    public function test_guess_word_correct_updates_stats(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine DOCKER');
+
+        $this->createActiveGame($context, 'DOCKER');
+
+        $agent->handle($context);
+
+        $stats = HangmanStats::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->first();
+
+        $this->assertEquals(1, $stats->games_won);
+        $this->assertEquals(1, $stats->current_streak);
+    }
+
+    public function test_guess_word_without_active_game_prompts_start(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine DOCKER');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('hangman start', $result->reply);
+    }
+
+    public function test_multi_letter_body_guesses_word_when_game_active(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('LARAVEL');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('trouve le mot', $result->reply);
+
+        $game->refresh();
+        $this->assertEquals('won', $game->status);
+    }
+
+    // ── Categories ────────────────────────────────────────────────────────────
+
+    public function test_show_categories_lists_all_categories(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman categories');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Categories disponibles', $result->reply);
+        $this->assertStringContainsString('tech', $result->reply);
+        $this->assertStringContainsString('animaux', $result->reply);
+        $this->assertStringContainsString('nature', $result->reply);
+        $this->assertStringContainsString('vocab', $result->reply);
+    }
+
+    // ── Best score in stats ───────────────────────────────────────────────────
+
+    public function test_stats_shows_best_score_when_games_won(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('A');
+
+        // Win a game to generate a score
+        $this->createActiveGame($context, 'A');
+        $agent->handle($context);
+
+        // Now check stats
+        $statsContext = $this->makeContext('/hangman stats', context: $context);
+        $result       = $agent->handle($statsContext);
+
+        $this->assertStringContainsString('Meilleur score', $result->reply);
+        $this->assertStringContainsString('pts', $result->reply);
+    }
+
+    // ── History with score ────────────────────────────────────────────────────
+
+    public function test_history_shows_score_for_won_games(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman history');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['status' => 'won', 'wrong_count' => 1]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('pts', $result->reply);
+    }
+
+    // ── Status improvements ───────────────────────────────────────────────────
+
+    public function test_status_shows_hidden_letter_count(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman status');
+
+        $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('lettre(s) a trouver', $result->reply);
+    }
 
     private function makeContext(string $body, ?AgentContext $context = null): AgentContext
     {
