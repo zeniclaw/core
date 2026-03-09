@@ -71,8 +71,11 @@ class RouterAgent
         '/\b(workflow|chain|enchainer|chainer|pipeline)\s+.*(then|puis|ensuite|etape)/iu'
             => ['streamline', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
         // Budget tracker → budget_tracker
-        '/\b(d[eé]pense\s+\d|budget\s+\d|\d+\s*€|j[\'']ai\s+(?:d[eé]pens[eé]|pay[eé])\s+\d|r[eé]sum[eé]\s+budget|mes\s+d[eé]penses|reset\s+budget|cat[eé]gories\s+budget)\b/iu'
+        '/\b(d[eé]pense\s+\d|budget\s+\d|\d+\s*€|j[\x27\x{2019}]ai\s+(?:d[eé]pens[eé]|pay[eé])\s+\d|r[eé]sum[eé]\s+budget|mes\s+d[eé]penses|reset\s+budget|cat[eé]gories\s+budget)\b/iu'
             => ['budget_tracker', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Daily brief → daily_brief
+        '/\b(daily\s*brief|mon\s+brief|briefing\s+du\s+jour|r[eé]sum[eé]\s+du\s+jour|r[eé]sum[eé]\s+matinal|morning\s+brief|configure\s+brief|enable\s+brief|disable\s+brief)\b/iu'
+            => ['daily_brief', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
             => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -436,6 +439,8 @@ CATALOG;
                 'content_curator',
                 'context_memory_bridge',
                 'game_master',
+                'budget_tracker',
+                'daily_brief',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
