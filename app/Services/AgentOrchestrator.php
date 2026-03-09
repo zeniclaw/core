@@ -28,6 +28,7 @@ use App\Services\Agents\EventReminderAgent;
 use App\Services\Agents\HabitAgent;
 use App\Services\Agents\PomodoroAgent;
 use App\Services\Agents\DocumentAgent;
+use App\Services\Agents\WebSearchAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -82,6 +83,7 @@ class AgentOrchestrator
             new HabitAgent(),
             new PomodoroAgent(),
             new DocumentAgent(),
+            new WebSearchAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

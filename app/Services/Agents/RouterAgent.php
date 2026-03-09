@@ -335,6 +335,9 @@ PROMPT;
 
 ■ "pomodoro" — Sessions de focus
   Mots-cles: pomodoro, focus, timer, session de travail
+
+■ "web_search" — Recherche web en temps reel, actualites, definitions, meteo, comparaisons, stats API
+  Mots-cles: cherche, recherche, google, search, trouve, actualite, news, c'est quoi, definition, meteo, weather, compare, vs, prix de, stats api
 CATALOG;
     }
 
@@ -376,7 +379,7 @@ CATALOG;
                 'chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music',
                 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard',
                 'voice_command', 'code_review', 'screenshot', 'content_summarizer',
-                'event_reminder', 'habit', 'pomodoro', 'document',
+                'event_reminder', 'habit', 'pomodoro', 'document', 'web_search',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {

@@ -93,7 +93,7 @@
                                       'content_summarizer' => '#06b6d4', 'screenshot' => '#64748b',
                                       'event_reminder' => '#eab308', 'pomodoro' => '#dc2626',
                                       'hangman' => '#a855f7', 'flashcard' => '#2563eb',
-                                      'smart_meeting' => '#059669',
+                                      'smart_meeting' => '#059669', 'web_search' => '#f43f5e',
                                       default => '#6b7280'
                                   } }}">{{ $msg['routed_agent'] }}</span>
                         @endif
@@ -165,7 +165,7 @@
                                   'reminder' => '#f59e0b', 'project' => '#10b981', 'todo' => '#14b8a6',
                                   'finance' => '#22c55e', 'habit' => '#22c55e', 'music' => '#ec4899',
                                   'analysis' => '#ef4444', 'code_review' => '#3b82f6',
-                                  default => '#6b7280'
+                                  'web_search' => '#f43f5e', default => '#6b7280'
                               } }}">
                             {{ $routing['agent'] ?? '?' }}
                         </span>

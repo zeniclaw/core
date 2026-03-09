@@ -246,6 +246,19 @@ class AgentTools
                     'properties' => (object) [],
                 ],
             ],
+            // ── Web search tool ──
+            [
+                'name' => 'web_search',
+                'description' => 'Search the web for real-time information, news, definitions, prices, weather, etc. Use this when the user asks about current events, facts you don\'t know, or anything that requires up-to-date information.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'The search query (e.g. "meteo Paris", "derniere version Laravel", "prix bitcoin")'],
+                        'type' => ['type' => 'string', 'enum' => ['web', 'news'], 'description' => 'Search type: "web" for general, "news" for current events'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
         ];
     }
 
@@ -275,6 +288,7 @@ class AgentTools
                 'store_knowledge' => self::executeStoreKnowledge($input, $context),
                 'recall_knowledge' => self::executeRecallKnowledge($input, $context),
                 'list_knowledge' => self::executeListKnowledge($context),
+                'web_search' => self::executeWebSearch($input, $context),
                 default => json_encode(['error' => "Unknown tool: {$toolName}"]),
             };
         } catch (\Exception $e) {
@@ -844,5 +858,33 @@ class AgentTools
         ])->toArray();
 
         return json_encode(['entries' => $list]);
+    }
+
+    // ── Web search executor ──────────────────────────────────────────
+
+    private static function executeWebSearch(array $input, AgentContext $context): string
+    {
+        $query = $input['query'] ?? '';
+        if (!$query) {
+            return json_encode(['error' => 'Missing query parameter']);
+        }
+
+        $results = Agents\WebSearchAgent::searchFor(
+            $query,
+            $context->routedAgent ?? 'chat',
+            $context->agent->id,
+            $context->from,
+            5
+        );
+
+        if ($results === null) {
+            return json_encode(['error' => 'Web search failed — API key may not be configured. Go to settings and add brave_search_api_key.']);
+        }
+
+        if (empty($results)) {
+            return json_encode(['results' => [], 'message' => 'No results found']);
+        }
+
+        return json_encode(['results' => $results, 'count' => count($results)]);
     }
 }
