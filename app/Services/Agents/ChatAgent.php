@@ -8,6 +8,7 @@ use App\Models\UserKnowledge;
 use App\Services\AgentContext;
 use App\Services\AgenticLoop;
 use App\Services\AgentTools;
+use App\Services\ContextMemory\ContextStore;
 use App\Services\WhisperService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -20,7 +21,14 @@ class ChatAgent extends BaseAgent
     private const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
     /** Quick commands resolved without agentic loop. */
-    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer'];
+    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer', '/resume'];
+
+    /** Supported languages for the /langue command. */
+    private const SUPPORTED_LANGUAGES = [
+        'fr' => 'français', 'en' => 'anglais', 'es' => 'espagnol',
+        'de' => 'allemand', 'it' => 'italien', 'pt' => 'portugais',
+        'ar' => 'arabe', 'nl' => 'néerlandais', 'ru' => 'russe',
+    ];
 
     private ?string $lastVoiceTranscript = null;
 
@@ -37,19 +45,21 @@ class ChatAgent extends BaseAgent
     public function keywords(): array
     {
         return [
-            'bonjour', 'salut', 'hello', 'hey', 'coucou', 'bonsoir',
-            'comment ca va', 'ca va', 'quoi de neuf', 'question',
-            'aide', 'help', 'info', 'information',
-            'merci', 'thanks', 'ok', 'daccord',
-            'raconte', 'explique', 'dis-moi', 'parle-moi',
-            'blague', 'joke', 'rigole', 'humour',
-            'qui es-tu', 'tu fais quoi', 'what can you do',
+            'bonjour', 'salut', 'hello', 'hey', 'coucou', 'bonsoir', 'bonne nuit',
+            'comment ca va', 'ca va', 'quoi de neuf', 'question', 'dis moi',
+            'aide', 'help', 'info', 'information', 'explique', 'qu est ce que',
+            'merci', 'thanks', 'ok', 'daccord', 'parfait', 'super', 'cool',
+            'raconte', 'explique', 'dis-moi', 'parle-moi', 'kesako', 'c est quoi',
+            'blague', 'joke', 'rigole', 'humour', 'drole', 'marrant',
+            'qui es-tu', 'tu fais quoi', 'what can you do', 'capable de',
+            'langue', 'langage', 'language', 'resume', 'historique',
+            'pourquoi', 'comment', 'quand', 'ou', 'combien', 'lequel',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -59,6 +69,12 @@ class ChatAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        // Check /langue prefix command before other quick commands
+        $body = trim($context->body ?? '');
+        if (preg_match('/^\/langue(?:\s+(.+))?$/iu', $body, $m)) {
+            return $this->handleLangueCommand($context, trim($m[1] ?? ''));
+        }
+
         // Quick commands bypass the agentic loop for instant responses
         $quickResult = $this->handleQuickCommand($context);
         if ($quickResult) {
@@ -158,6 +174,12 @@ class ChatAgent extends BaseAgent
     {
         $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
 
+        // Detect user's preferred language from context memory
+        $preferredLang = $this->resolvePreferredLanguage($context->from);
+        $langInstruction = $preferredLang
+            ? "L'utilisateur a configure sa langue preferee : *{$preferredLang}*. Reponds TOUJOURS dans cette langue sauf s'il ecrit dans une autre langue."
+            : "Reponds dans la meme langue que l'utilisateur (detecte automatiquement).";
+
         $systemPrompt =
             "Tu es ZeniClaw, un assistant WhatsApp autonome et intelligent. "
             . "Tu as acces a des outils (tools) que tu peux utiliser librement pour aider l'utilisateur. "
@@ -179,7 +201,7 @@ class ChatAgent extends BaseAgent
             . "Tu tutoies, tu es direct, drole et bienveillant. "
             . "Tu utilises un langage naturel et detendu (pas trop formel). "
             . "Tu peux utiliser des emojis avec moderation. "
-            . "Reponds dans la meme langue que l'utilisateur. "
+            . $langInstruction . " "
             . $this->buildLengthDirective($context->complexity)
             . "\n\nFORMATAGE WHATSAPP: "
             . "Utilise *texte* pour le gras, _texte_ pour l'italique, ~texte~ pour le barre. "
@@ -242,16 +264,33 @@ class ChatAgent extends BaseAgent
     }
 
     /**
+     * Resolve preferred language from context memory. Returns null if not set.
+     */
+    private function resolvePreferredLanguage(string $userId): ?string
+    {
+        $facts = $this->getContextMemory($userId);
+        foreach ($facts as $fact) {
+            if (($fact['key'] ?? '') === 'preferred_language') {
+                return $fact['value'] ?? null;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Build a summary of active user data (todos, reminders) so the LLM can reference them.
      */
     private function buildUserContext(AgentContext $context): string
     {
         $parts = [];
+        $now = now(AppSetting::timezone());
 
-        // Active todos summary
+        // Active todos summary — capped at 15, overdue highlighted, sorted pending first
         $todos = \App\Models\Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
+            ->orderByRaw("CASE WHEN is_done = false THEN 0 ELSE 1 END")
             ->orderBy('id')
+            ->limit(15)
             ->get();
 
         if ($todos->isNotEmpty()) {
@@ -259,7 +298,11 @@ class ChatAgent extends BaseAgent
             foreach ($todos->values() as $i => $todo) {
                 $status = $todo->is_done ? 'FAIT' : 'A FAIRE';
                 $list = $todo->list_name ? " [{$todo->list_name}]" : '';
-                $lines[] = "  " . ($i + 1) . ". [{$status}] {$todo->title}{$list}";
+                $overdue = '';
+                if (!$todo->is_done && $todo->due_at && $todo->due_at->lt($now)) {
+                    $overdue = ' [EN RETARD]';
+                }
+                $lines[] = "  " . ($i + 1) . ". [{$status}]{$overdue} {$todo->title}{$list}";
             }
             $parts[] = implode("\n", $lines);
         }
@@ -277,7 +320,8 @@ class ChatAgent extends BaseAgent
             foreach ($reminders->values() as $i => $r) {
                 $at = $r->scheduled_at->setTimezone(AppSetting::timezone())->format('d/m H:i');
                 $recurrence = $r->recurrence_rule ? " (recurrent: {$r->recurrence_rule})" : '';
-                $lines[] = "  " . ($i + 1) . ". {$r->message} → {$at}{$recurrence}";
+                $late = $r->scheduled_at->lt($now) ? ' [DEPASSE]' : '';
+                $lines[] = "  " . ($i + 1) . ". {$r->message} → {$at}{$recurrence}{$late}";
             }
             $parts[] = implode("\n", $lines);
         }
@@ -323,7 +367,8 @@ class ChatAgent extends BaseAgent
         }
 
         $topics = array_slice($topics, -30);
-        return "Sujets abordes precedemment (" . count($olderEntries) . " echanges) :\n- " . implode("\n- ", $topics);
+        $count = count($olderEntries);
+        return "Sujets abordes dans les {$count} echanges precedents :\n- " . implode("\n- ", $topics);
     }
 
     private function buildMessageContent(AgentContext $context): string|array
@@ -342,7 +387,7 @@ class ChatAgent extends BaseAgent
                 $mediaLabel = $mimetype === 'application/pdf' ? 'PDF' : 'image';
                 $message = ($context->body ? "{$context->body}\n\n" : '')
                     . "[Impossible de telecharger le {$mediaLabel}. "
-                    . "Informe l'utilisateur et invite-le a reessayer.]";
+                    . "Informe l'utilisateur et invite-le a reessayer ou a verifier sa connexion.]";
             } elseif (str_starts_with($mimetype, 'audio/')) {
                 $voiceContent = $this->handleVoiceMessage($context);
                 if ($voiceContent) {
@@ -350,7 +395,7 @@ class ChatAgent extends BaseAgent
                 }
                 $message = ($context->body ? "{$context->body}\n\n" : '') .
                     "[{$context->senderName} a envoye un message vocal/audio. Tu ne peux pas l'ecouter, " .
-                    "dis-le poliment et propose de continuer la conversation.]";
+                    "dis-le poliment et propose de continuer la conversation par texte.]";
             } else {
                 $mediaType = $context->media['mediaType'] ?? $context->media['type'] ?? '';
                 $mediaDesc = match (true) {
@@ -407,6 +452,17 @@ class ChatAgent extends BaseAgent
         }
 
         try {
+            // Check size before downloading the audio file
+            $headResponse = $this->waha(10)->head($context->mediaUrl);
+            if ($headResponse->successful()) {
+                $contentLength = (int) ($headResponse->header('Content-Length') ?? 0);
+                if ($contentLength > 0 && $contentLength > self::MAX_MEDIA_BYTES) {
+                    $sizeMb = round($contentLength / 1024 / 1024, 1);
+                    Log::warning("[chat] Voice message too large: {$sizeMb} MB, skipping transcription.");
+                    return null;
+                }
+            }
+
             $response = $this->waha(30)->get($context->mediaUrl);
             if (!$response->successful()) {
                 Log::warning('[chat] Voice message download failed: HTTP ' . $response->status());
@@ -416,6 +472,11 @@ class ChatAgent extends BaseAgent
             $audioBytes = $response->body();
             if (empty($audioBytes)) {
                 Log::warning('[chat] Voice message download returned empty body');
+                return null;
+            }
+
+            if (strlen($audioBytes) > self::MAX_MEDIA_BYTES) {
+                Log::warning('[chat] Voice message body exceeds size limit, skipping transcription.');
                 return null;
             }
 
@@ -461,16 +522,19 @@ class ChatAgent extends BaseAgent
         }
 
         if ($mimetype === 'application/pdf') {
-            $text = $caption
-                ? $caption
-                : "Analyse ce document PDF. Commence par un resume concis (3-5 points cles), "
-                . "puis demande a l'utilisateur s'il veut plus de details sur une section specifique.";
+            $defaultPdfPrompt = "Analyse ce document PDF en suivant ces etapes :\n"
+                . "1. *Resume* : synthese en 3-5 points cles\n"
+                . "2. *Sections principales* : liste les titres ou chapitres detectes\n"
+                . "3. *Points notables* : chiffres cles, dates importantes, conclusions\n"
+                . "Demande ensuite si l'utilisateur veut approfondir une section specifique.";
+            $text = $caption ? $caption : $defaultPdfPrompt;
         } else {
             // Smart image analysis: read text + describe content + handle screenshots/documents
-            $imageHint = "Analyse cette image avec attention : "
-                . "1) Si elle contient du texte (screenshot, document, photo d'affiche), lis-le integralement et cite-le. "
-                . "2) Decris ce que tu vois : personnes, objets, lieux, couleurs, mise en page. "
-                . "3) Si c'est un graphique, code ou tableau, analyse son contenu specifiquement.";
+            $imageHint = "Analyse cette image avec attention :\n"
+                . "1) Si elle contient du texte (screenshot, document, affiche, panneau), lis-le et cite-le integralement.\n"
+                . "2) Decris ce que tu vois : personnes, objets, lieux, couleurs, mise en page.\n"
+                . "3) Si c'est un graphique, un tableau ou du code, analyse son contenu specifiquement.\n"
+                . "4) Si c'est un QR code ou un code-barres, indique-le clairement.";
             $text = $caption ? "{$caption}\n\n({$imageHint})" : $imageHint;
         }
 
@@ -515,6 +579,7 @@ class ChatAgent extends BaseAgent
         return match ($body) {
             '/status'  => $this->handleStatusCommand($context),
             '/effacer' => $this->handleEffacerCommand($context),
+            '/resume'  => $this->handleResumeCommand($context),
             default    => $this->handleHelpCommand($context),
         };
     }
@@ -549,6 +614,8 @@ class ChatAgent extends BaseAgent
             . "*Commandes rapides*\n"
             . "- /aide ou /help → cette aide\n"
             . "- /status → ton tableau de bord (todos, rappels, memoire)\n"
+            . "- /resume → resume de la conversation recente\n"
+            . "- /langue [fr|en|es|de|it|pt] → definir ta langue preferee\n"
             . "- /effacer → effacer ta memoire de conversation\n\n"
             . "_Tape simplement ce que tu veux faire, je comprends le langage naturel !_";
 
@@ -559,10 +626,11 @@ class ChatAgent extends BaseAgent
     }
 
     /**
-     * New Feature 1: /status — User dashboard with todos, reminders, memory and project stats.
+     * Quick command: /status — User dashboard with todos, reminders, memory and project stats.
      */
     private function handleStatusCommand(AgentContext $context): AgentResult
     {
+        $now = now(AppSetting::timezone());
         $parts = ["*Ton tableau de bord ZeniClaw*\n"];
 
         // Todos
@@ -571,9 +639,11 @@ class ChatAgent extends BaseAgent
             ->get();
         $todoDone = $todos->where('is_done', true)->count();
         $todoPending = $todos->where('is_done', false)->count();
+        $todoOverdue = $todos->filter(fn($t) => !$t->is_done && $t->due_at && $t->due_at->lt($now))->count();
 
         if ($todos->isNotEmpty()) {
-            $parts[] = "*Todos :* {$todoPending} a faire, {$todoDone} termines";
+            $overdueStr = $todoOverdue > 0 ? " _(dont {$todoOverdue} en retard)_" : '';
+            $parts[] = "*Todos :* {$todoPending} a faire{$overdueStr}, {$todoDone} termines";
         } else {
             $parts[] = "*Todos :* aucun";
         }
@@ -588,7 +658,9 @@ class ChatAgent extends BaseAgent
         if ($reminders->isNotEmpty()) {
             $nextReminder = $reminders->first();
             $at = $nextReminder->scheduled_at->setTimezone(AppSetting::timezone())->format('d/m H:i');
-            $parts[] = "*Rappels :* {$reminders->count()} en attente (prochain : {$at})";
+            $overdueReminders = $reminders->filter(fn($r) => $r->scheduled_at->lt($now))->count();
+            $overdueStr = $overdueReminders > 0 ? " _({$overdueReminders} depasses)_" : '';
+            $parts[] = "*Rappels :* {$reminders->count()} en attente{$overdueStr} (prochain : {$at})";
         } else {
             $parts[] = "*Rappels :* aucun en attente";
         }
@@ -606,20 +678,20 @@ class ChatAgent extends BaseAgent
         $memoryCount = count($memoryData['entries'] ?? []);
         $parts[] = "*Historique de conversation :* {$memoryCount} echanges";
 
+        // Preferred language
+        $lang = $this->resolvePreferredLanguage($context->from);
+        $parts[] = "*Langue preferee :* " . ($lang ?? '_non definie_ (/langue fr pour configurer)');
+
         // Active project
         $activeProjectId = $context->session->active_project_id ?? null;
         if ($activeProjectId) {
             $project = Project::find($activeProjectId);
-            if ($project) {
-                $parts[] = "*Projet actif :* {$project->name}";
-            } else {
-                $parts[] = "*Projet actif :* aucun";
-            }
+            $parts[] = "*Projet actif :* " . ($project ? $project->name : 'aucun');
         } else {
             $parts[] = "*Projet actif :* aucun";
         }
 
-        $parts[] = "\n_/effacer pour reinitialiser l'historique de conversation_";
+        $parts[] = "\n_/resume pour voir la conversation · /effacer pour reinitialiser l'historique_";
 
         $reply = implode("\n", $parts);
         $this->sendText($context->from, $reply);
@@ -629,7 +701,7 @@ class ChatAgent extends BaseAgent
     }
 
     /**
-     * New Feature 2: /effacer — Clears conversation memory with user confirmation.
+     * Quick command: /effacer — Clears conversation memory with user confirmation.
      */
     private function handleEffacerCommand(AgentContext $context): AgentResult
     {
@@ -650,6 +722,101 @@ class ChatAgent extends BaseAgent
         $this->log($context, 'Quick command /effacer — confirmation requested', ['entries' => $count]);
 
         return AgentResult::reply($reply, ['quick_command' => '/effacer']);
+    }
+
+    /**
+     * New Feature: /resume — Shows a formatted summary of recent conversation exchanges.
+     */
+    private function handleResumeCommand(AgentContext $context): AgentResult
+    {
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $entries = $memoryData['entries'] ?? [];
+
+        if (empty($entries)) {
+            $reply = "Pas encore d'historique de conversation. Dis-moi quelque chose pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/resume']);
+        }
+
+        // Show last 10 exchanges max
+        $recent = array_slice($entries, -10);
+        $total = count($entries);
+        $shown = count($recent);
+
+        $lines = ["*Resume de la conversation* _{$shown} derniers echanges sur {$total}_\n"];
+
+        foreach ($recent as $i => $entry) {
+            $num = $i + 1;
+            $userMsg = mb_substr($entry['sender_message'] ?? '', 0, 80);
+            $botMsg = mb_substr($entry['bot_reply'] ?? $entry['summary'] ?? '', 0, 100);
+
+            if ($userMsg) {
+                $lines[] = "*{$num}. Toi :* {$userMsg}" . (mb_strlen($entry['sender_message'] ?? '') > 80 ? '...' : '');
+            }
+            if ($botMsg) {
+                $lines[] = "   _ZeniClaw :_ {$botMsg}" . (mb_strlen($entry['bot_reply'] ?? $entry['summary'] ?? '') > 100 ? '...' : '');
+            }
+        }
+
+        if ($total > 10) {
+            $lines[] = "\n_({$total} echanges au total — /effacer pour tout reinitialiser)_";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /resume handled', ['entries_shown' => $shown, 'total' => $total]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/resume', 'entries_shown' => $shown]);
+    }
+
+    /**
+     * New Feature: /langue [code] — Sets or displays the user's preferred response language.
+     */
+    private function handleLangueCommand(AgentContext $context, string $langCode): AgentResult
+    {
+        $langCode = mb_strtolower(trim($langCode));
+
+        // No code provided — show current setting and options
+        if ($langCode === '') {
+            $current = $this->resolvePreferredLanguage($context->from);
+            $available = implode(', ', array_map(
+                fn($code, $name) => "/{$code} ({$name})",
+                array_keys(self::SUPPORTED_LANGUAGES),
+                self::SUPPORTED_LANGUAGES
+            ));
+            $currentStr = $current ? "*{$current}*" : '_non definie_';
+            $reply = "*Langue preferee actuelle :* {$currentStr}\n\n"
+                . "*Langues disponibles :*\n{$available}\n\n"
+                . "_Exemple : `/langue en` pour passer en anglais_";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/langue', 'action' => 'display']);
+        }
+
+        // Validate the language code
+        if (!array_key_exists($langCode, self::SUPPORTED_LANGUAGES)) {
+            $available = implode(', ', array_keys(self::SUPPORTED_LANGUAGES));
+            $reply = "Code de langue non reconnu : *{$langCode}*\n\nCodes supportes : {$available}";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/langue', 'action' => 'error']);
+        }
+
+        $langName = self::SUPPORTED_LANGUAGES[$langCode];
+
+        // Store in context memory
+        $store = new ContextStore();
+        $store->store($context->from, [[
+            'key' => 'preferred_language',
+            'category' => 'preference',
+            'value' => $langName,
+            'score' => 0.9,
+        ]]);
+
+        $reply = "Langue preferee configuree : *{$langName}* ({$langCode}). "
+            . "Je repondrai desormais en {$langName} par defaut.";
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Language preference set to {$langName}", ['lang' => $langCode]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/langue', 'action' => 'set', 'lang' => $langCode]);
     }
 
     /**
