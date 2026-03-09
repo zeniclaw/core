@@ -19,7 +19,19 @@ class SmartContextAgent extends BaseAgent
     /** Valid fact categories */
     private const VALID_CATEGORIES = [
         'profession', 'preference', 'personal',
-        'project', 'behavior', 'goal', 'general',
+        'project', 'behavior', 'goal', 'skill', 'general',
+    ];
+
+    /** Category display labels */
+    private const CATEGORY_LABELS = [
+        'profession' => 'Profession',
+        'personal'   => 'Infos personnelles',
+        'preference' => 'Preferences',
+        'skill'      => 'Competences',
+        'project'    => 'Projets',
+        'behavior'   => 'Comportement',
+        'goal'       => 'Objectifs',
+        'general'    => 'Divers',
     ];
 
     public function __construct()
@@ -35,7 +47,7 @@ class SmartContextAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent interne d\'extraction de contexte utilisateur. Analyse les messages pour extraire des faits personnels durables (profession, preferences, projets, objectifs) et les stocker en memoire contextuelle. Detecte les contradictions pour mettre a jour le profil. Fonctionne en arriere-plan, pas d\'interaction directe.';
+        return 'Agent interne d\'extraction de contexte utilisateur. Analyse les messages pour extraire des faits personnels durables (profession, competences, preferences, projets, objectifs) et les stocker en memoire contextuelle. Detecte les contradictions pour mettre a jour le profil. Fonctionne en arriere-plan, pas d\'interaction directe.';
     }
 
     public function keywords(): array
@@ -45,7 +57,7 @@ class SmartContextAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -63,6 +75,11 @@ class SmartContextAgent extends BaseAgent
         // Skip commands and system messages
         if (preg_match('/^[\/!]/', trim($body))) {
             return AgentResult::silent(['reason' => 'command_skipped']);
+        }
+
+        // Skip very repetitive/short-value messages (pure numbers, single emoji, etc.)
+        if (preg_match('/^[\d\s\.\,\!\?]+$/', trim($body))) {
+            return AgentResult::silent(['reason' => 'numeric_only_skipped']);
         }
 
         try {
@@ -107,7 +124,52 @@ class SmartContextAgent extends BaseAgent
     }
 
     /**
+     * Retrieve facts filtered by a specific category.
+     * Returns an empty array if the category is invalid or no facts match.
+     */
+    public function getFactsByCategory(string $userId, string $category): array
+    {
+        if (!in_array($category, self::VALID_CATEGORIES, true)) {
+            return [];
+        }
+
+        $facts = $this->contextStore->retrieve($userId);
+
+        return array_values(array_filter(
+            $facts,
+            fn ($f) => ($f['category'] ?? 'general') === $category
+        ));
+    }
+
+    /**
+     * Remove all facts belonging to a specific category.
+     * Returns the number of facts removed.
+     */
+    public function forgetCategory(string $userId, string $category): int
+    {
+        if (!in_array($category, self::VALID_CATEGORIES, true)) {
+            return 0;
+        }
+
+        $facts = $this->contextStore->retrieve($userId);
+        $toForget = array_filter(
+            $facts,
+            fn ($f) => ($f['category'] ?? 'general') === $category
+        );
+
+        $count = count($toForget);
+        foreach ($toForget as $fact) {
+            if (!empty($fact['key'])) {
+                $this->contextStore->forget($userId, $fact['key']);
+            }
+        }
+
+        return $count;
+    }
+
+    /**
      * Generate a human-readable profile summary grouped by category.
+     * Includes confidence indicator and fact count.
      * Useful for ChatAgent or other agents that need user context.
      */
     public function summarizeProfile(string $userId): string
@@ -121,23 +183,23 @@ class SmartContextAgent extends BaseAgent
         $grouped = [];
         foreach ($facts as $fact) {
             $cat = $fact['category'] ?? 'general';
-            $grouped[$cat][] = $fact['value'];
+            $score = $fact['score'] ?? 0.5;
+
+            // Append confidence indicator only for low-confidence facts
+            $display = $fact['value'];
+            if ($score < 0.6) {
+                $display .= ' _(?)_';
+            }
+
+            $grouped[$cat][] = $display;
         }
 
-        $categoryLabels = [
-            'profession' => 'Profession',
-            'personal'   => 'Infos personnelles',
-            'preference' => 'Preferences',
-            'project'    => 'Projets',
-            'behavior'   => 'Comportement',
-            'goal'       => 'Objectifs',
-            'general'    => 'Divers',
-        ];
-
         $lines = [];
-        foreach ($categoryLabels as $cat => $label) {
+        foreach (self::CATEGORY_LABELS as $cat => $label) {
             if (!empty($grouped[$cat])) {
-                $lines[] = "*{$label}* : " . implode(', ', $grouped[$cat]);
+                $count = count($grouped[$cat]);
+                $countSuffix = $count > 1 ? " ({$count})" : '';
+                $lines[] = "*{$label}*{$countSuffix} : " . implode(', ', $grouped[$cat]);
             }
         }
 
@@ -216,7 +278,7 @@ class SmartContextAgent extends BaseAgent
 
         $existingContext = '';
         if (!empty($existingFacts)) {
-            $topFacts = array_slice($existingFacts, 0, 10);
+            $topFacts = array_slice($existingFacts, 0, 15);
             $lines    = array_map(
                 fn ($f) => "  - [{$f['category']}] {$f['key']}: {$f['value']}",
                 $topFacts
@@ -232,31 +294,37 @@ Reponds UNIQUEMENT en JSON valide, sans markdown:
 {"facts": [{"key": "identifiant_unique", "value": "description du fait", "category": "categorie", "score": 0.8, "contradicts": null}]}
 
 CATEGORIES possibles:
-- "profession" : metier, competences techniques, stack, experience, certifications
-- "preference" : gouts, style de communication, humour, langue preferee, hobbies
-- "personal"   : nom, age, localisation, situation familiale, nationalite
-- "project"    : projets en cours, technologies utilisees
-- "behavior"   : habitudes, horaires, frequence d'utilisation, rythme de travail
-- "goal"       : objectifs personnels, ambitions, plans futurs
+- "profession" : metier, poste, titre, experience professionnelle, certifications
+- "skill"      : langages de programmation, frameworks, outils, technologies maitrisees
+- "preference" : gouts, style de communication, humour, langue preferee, hobbies, alimentation
+- "personal"   : nom, age, localisation, situation familiale, nationalite, contact
+- "project"    : projets en cours, applications developpees, side-projects
+- "behavior"   : habitudes, horaires, frequence d'utilisation, rythme de travail, methode de travail
+- "goal"       : objectifs personnels, ambitions, plans futurs, projets de carriere
 
 REGLES:
-- N'extrais QUE les faits DURABLES et PERSONNELS (pas les questions ponctuelles)
+- N'extrais QUE les faits DURABLES et PERSONNELS (pas les questions ponctuelles ou les opinions passageres)
 - score entre 0.1 (peu fiable/implicite) et 1.0 (explicite et certain)
 - key doit etre un identifiant court en snake_case (ex: "tech_stack", "humor_level", "profession")
+- Separe "profession" (metier/poste) de "skill" (technologies maitrisees) : un dev peut avoir profession=developpeur et skill=Laravel
 - Si le fait CONTREDIT un fait deja connu, mets la cle du fait existant dans "contradicts"
 - Si AUCUN fait personnel n'est exprime, reponds: {"facts": []}
 - Maximum {$maxFacts} faits par message
 - Ne repete pas un fait deja connu avec la meme valeur (sauf contradiction)
 
 EXEMPLES:
-- "je suis dev Laravel depuis 5 ans"
-  → {"facts": [{"key": "profession", "value": "Developpeur Laravel, 5 ans d'experience", "category": "profession", "score": 1.0, "contradicts": null}]}
+- "je suis dev backend chez une startup"
+  → {"facts": [{"key": "profession", "value": "Developpeur backend en startup", "category": "profession", "score": 1.0, "contradicts": null}]}
+- "j'utilise Laravel, Vue.js et PostgreSQL au quotidien"
+  → {"facts": [{"key": "tech_stack", "value": "Laravel, Vue.js, PostgreSQL", "category": "skill", "score": 1.0, "contradicts": null}]}
 - "j'aime les blagues sombres"
   → {"facts": [{"key": "humor_style", "value": "Apprecie l'humour noir/sombre", "category": "preference", "score": 0.9, "contradicts": null}]}
 - "j'ai demenage a Lyon" (si "location: Habite a Paris" deja connu)
   → {"facts": [{"key": "location", "value": "Habite a Lyon", "category": "personal", "score": 1.0, "contradicts": "location"}]}
-- "mon objectif est de devenir CTO"
-  → {"facts": [{"key": "career_goal", "value": "Ambition de devenir CTO", "category": "goal", "score": 0.9, "contradicts": null}]}
+- "mon objectif est de devenir CTO dans 3 ans"
+  → {"facts": [{"key": "career_goal", "value": "Ambition de devenir CTO dans 3 ans", "category": "goal", "score": 0.9, "contradicts": null}]}
+- "je commence a apprendre Rust"
+  → {"facts": [{"key": "learning_rust", "value": "Apprend Rust", "category": "skill", "score": 0.7, "contradicts": null}]}
 - "quel temps fait-il ?" → {"facts": []}
 
 Reponds UNIQUEMENT avec le JSON.
@@ -302,13 +370,20 @@ PROMPT;
                 $category = 'general';
             }
 
+            // Sanitize key: snake_case only, strip leading/trailing underscores
+            $key = preg_replace('/[^a-z0-9_]/', '_', strtolower((string) $fact['key']));
+            $key = trim($key, '_');
+            if (empty($key)) {
+                continue;
+            }
+
             $valid[] = [
-                'key'        => preg_replace('/[^a-z0-9_]/', '_', strtolower((string) $fact['key'])),
-                'value'      => mb_substr(trim((string) $fact['value']), 0, 500),
-                'category'   => $category,
-                'score'      => $score,
-                'contradicts'=> !empty($fact['contradicts']) ? (string) $fact['contradicts'] : null,
-                'timestamp'  => time(),
+                'key'         => $key,
+                'value'       => mb_substr(trim((string) $fact['value']), 0, 500),
+                'category'    => $category,
+                'score'       => $score,
+                'contradicts' => !empty($fact['contradicts']) ? trim((string) $fact['contradicts'], '_') : null,
+                'timestamp'   => time(),
             ];
         }
 

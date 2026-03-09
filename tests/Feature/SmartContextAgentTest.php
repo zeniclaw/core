@@ -321,10 +321,127 @@ class SmartContextAgentTest extends TestCase
         $this->assertNotNull($stats['oldest_fact']);
     }
 
-    public function test_smart_context_agent_version_is_1_1_0(): void
+    public function test_smart_context_agent_version_is_1_2_0(): void
     {
         $agent = new SmartContextAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
+    }
+
+    // ── New capabilities v1.2.0 ───────────────────────────────────────────────
+
+    public function test_get_facts_by_category_returns_matching_facts(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev Laravel', 'category' => 'profession', 'score' => 1.0],
+            ['key' => 'tech_stack', 'value' => 'Laravel, Vue.js', 'category' => 'skill', 'score' => 0.9],
+            ['key' => 'location', 'value' => 'Paris', 'category' => 'personal', 'score' => 0.9],
+        ]);
+
+        $agent = new SmartContextAgent();
+
+        $skills = $agent->getFactsByCategory($this->testPhone, 'skill');
+        $this->assertCount(1, $skills);
+        $this->assertEquals('tech_stack', $skills[0]['key']);
+
+        $profession = $agent->getFactsByCategory($this->testPhone, 'profession');
+        $this->assertCount(1, $profession);
+        $this->assertEquals('Dev Laravel', $profession[0]['value']);
+    }
+
+    public function test_get_facts_by_category_returns_empty_for_unknown_category(): void
+    {
+        $agent = new SmartContextAgent();
+        $result = $agent->getFactsByCategory($this->testPhone, 'unknown_category');
+        $this->assertEmpty($result);
+    }
+
+    public function test_get_facts_by_category_returns_empty_when_no_match(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev Laravel', 'category' => 'profession', 'score' => 1.0],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $goals = $agent->getFactsByCategory($this->testPhone, 'goal');
+        $this->assertEmpty($goals);
+    }
+
+    public function test_forget_category_removes_all_facts_of_category(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'tech_stack', 'value' => 'Laravel, Vue.js', 'category' => 'skill', 'score' => 0.9],
+            ['key' => 'learning_rust', 'value' => 'Apprend Rust', 'category' => 'skill', 'score' => 0.7],
+            ['key' => 'profession', 'value' => 'Dev Backend', 'category' => 'profession', 'score' => 1.0],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $removed = $agent->forgetCategory($this->testPhone, 'skill');
+
+        $this->assertEquals(2, $removed);
+
+        $remaining = $agent->getStoredContext($this->testPhone);
+        $this->assertCount(1, $remaining);
+        $this->assertEquals('profession', $remaining[0]['key']);
+    }
+
+    public function test_forget_category_returns_zero_for_unknown_category(): void
+    {
+        $agent = new SmartContextAgent();
+        $result = $agent->forgetCategory($this->testPhone, 'invalid_cat');
+        $this->assertEquals(0, $result);
+    }
+
+    public function test_forget_category_returns_zero_when_no_facts_in_category(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev Laravel', 'category' => 'profession', 'score' => 1.0],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $removed = $agent->forgetCategory($this->testPhone, 'goal');
+        $this->assertEquals(0, $removed);
+    }
+
+    public function test_summarize_profile_shows_skill_category(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'tech_stack', 'value' => 'Laravel, PostgreSQL', 'category' => 'skill', 'score' => 1.0],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $summary = $agent->summarizeProfile($this->testPhone);
+
+        $this->assertStringContainsString('Competences', $summary);
+        $this->assertStringContainsString('Laravel, PostgreSQL', $summary);
+    }
+
+    public function test_summarize_profile_marks_low_confidence_facts(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'location', 'value' => 'Quelque part en France', 'category' => 'personal', 'score' => 0.4],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $summary = $agent->summarizeProfile($this->testPhone);
+
+        $this->assertStringContainsString('_(?)', $summary);
+    }
+
+    public function test_smart_context_agent_skips_numeric_only_messages(): void
+    {
+        $agent = new SmartContextAgent();
+        $context = $this->makeContext('123456789012');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('silent', $result->action);
+        $this->assertEquals('numeric_only_skipped', $result->metadata['reason']);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
