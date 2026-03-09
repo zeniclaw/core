@@ -21,7 +21,7 @@ class ChatAgent extends BaseAgent
     private const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
     /** Quick commands resolved without agentic loop. */
-    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer', '/resume', '/ping', '/memoire'];
+    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer', '/resume', '/ping', '/memoire', '/stats'];
 
     /** Supported languages for the /langue command. */
     private const SUPPORTED_LANGUAGES = [
@@ -57,12 +57,13 @@ class ChatAgent extends BaseAgent
             'ping', 'memoire', 'status', 'effacer', 'traduis', 'traduit',
             'calcule', 'convertis', 'definis', 'definition', 'synonyme',
             'ecris', 'redige', 'resume', 'analyse', 'compare', 'liste',
+            'stats', 'statistiques', 'oublie', 'supprimer', 'version',
         ];
     }
 
     public function version(): string
     {
-        return '1.4.0';
+        return '1.5.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -72,10 +73,13 @@ class ChatAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
-        // Check /langue prefix command before other quick commands
+        // Check prefix commands before other quick commands
         $body = trim($context->body ?? '');
         if (preg_match('/^\/langue(?:\s+(.+))?$/iu', $body, $m)) {
             return $this->handleLangueCommand($context, trim($m[1] ?? ''));
+        }
+        if (preg_match('/^\/oublie(?:\s+(.+))?$/iu', $body, $m)) {
+            return $this->handleOublieCommand($context, trim($m[1] ?? ''));
         }
 
         // Quick commands bypass the agentic loop for instant responses
@@ -115,8 +119,12 @@ class ChatAgent extends BaseAgent
         }
 
         if (!$reply) {
-            $fallback = 'Desole, je n\'ai pas pu generer de reponse. Reessaie !';
+            $fallback = "Desole, je n'ai pas pu generer une reponse. Reessaie dans quelques instants ou contacte le support.";
             $this->sendText($context->from, $fallback);
+            Log::warning("[chat] Both agentic loop and fallback chat returned empty reply", [
+                'from' => $context->from,
+                'body' => mb_substr($context->body ?? '', 0, 100),
+            ]);
             return AgentResult::reply($fallback);
         }
 
@@ -191,15 +199,18 @@ class ChatAgent extends BaseAgent
             . "- Rappel: \"rappelle-moi d'appeler Jean demain a 10h\" → utilise create_reminder immediatement\n"
             . "- Todo: \"ajoute 'acheter du pain' a ma liste\" → utilise add_todo immediatement\n"
             . "- Connaissance: l'utilisateur partage son email/numero/preference → utilise store_knowledge\n"
-            . "- Recherche: question sur un fait/actualite → utilise web_search si disponible\n"
+            . "- Recherche: question sur un fait/actualite recente → utilise web_search si disponible\n"
             . "- Code: l'utilisateur demande de modifier du code → utilise les outils gitlab/git\n"
+            . "- Apres chaque action reussie, confirme brievement ce qui a ete fait (ex: 'Rappel cree pour 10h !')\n"
+            . "- En cas d'echec d'outil, propose une alternative ou demande de preciser\n"
             . "Ne JAMAIS dire 'je vais essayer de ...' ou 'je peux ... si tu veux' — FAIS directement.\n"
             . "\n\n"
             . "MEMOIRE PERSISTANTE (CRITIQUE):\n"
             . "- AVANT de demander une info, utilise recall_knowledge/list_knowledge pour verifier si tu l'as deja.\n"
-            . "- Quand tu obtiens des donnees importantes, utilise store_knowledge pour les sauvegarder.\n"
+            . "- Quand tu obtiens des donnees importantes (email, tel, adresse, preference forte), utilise store_knowledge.\n"
             . "- Les donnees persistent PAR UTILISATEUR entre toutes les conversations.\n"
             . "- Ne redemande JAMAIS une info deja stockee. Si tu trouves une info en memoire, utilise-la directement.\n"
+            . "- Cles de stockage standardisees: email, telephone, prenom, nom, ville, langue_preferee, preference_[sujet]\n"
             . "\n\n"
             . "STYLE: Tu parles comme un ami ou un collegue decontracte. "
             . "Tu tutoies, tu es direct, drole et bienveillant. "
@@ -214,6 +225,7 @@ class ChatAgent extends BaseAgent
             . "- Separateurs visuels: --- (tres rarement, seulement pour sections longues)\n"
             . "- Code: backticks simples (`) pour inline, triple (```) pour blocs\n"
             . "- Tables: evite les tables HTML/Markdown, prefere des listes formatees\n"
+            . "- Liens: affiche l'URL complete, pas de markdown [texte](url)\n"
             . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
             . "\nLe message vient de {$context->senderName}.";
 
@@ -529,19 +541,21 @@ class ChatAgent extends BaseAgent
         }
 
         if ($mimetype === 'application/pdf') {
-            $defaultPdfPrompt = "Analyse ce document PDF en suivant ces etapes :\n"
-                . "1. *Resume* : synthese en 3-5 points cles\n"
-                . "2. *Sections principales* : liste les titres ou chapitres detectes\n"
-                . "3. *Points notables* : chiffres cles, dates importantes, conclusions\n"
-                . "Demande ensuite si l'utilisateur veut approfondir une section specifique.";
-            $text = $caption ? $caption : $defaultPdfPrompt;
+            $defaultPdfPrompt = "Analyse ce document PDF de facon structuree :\n"
+                . "1. *Resume executif* : synthese en 3-5 points cles (max 3 lignes)\n"
+                . "2. *Structure du document* : liste les titres/sections detectes\n"
+                . "3. *Informations cles* : chiffres, dates importantes, noms, conclusions\n"
+                . "4. *Type de document* : contrat, rapport, facture, CV, article... (si identifiable)\n"
+                . "Termine en demandant si l'utilisateur veut approfondir une section specifique.";
+            $text = $caption ? "{$caption}\n\n(Contexte supplementaire : applique aussi l'analyse structuree ci-dessus si pertinent.)" : $defaultPdfPrompt;
         } else {
             // Smart image analysis: read text + describe content + handle screenshots/documents
             $imageHint = "Analyse cette image avec attention :\n"
                 . "1) Si elle contient du texte (screenshot, document, affiche, panneau), lis-le et cite-le integralement.\n"
                 . "2) Decris ce que tu vois : personnes, objets, lieux, couleurs, mise en page.\n"
                 . "3) Si c'est un graphique, un tableau ou du code, analyse son contenu specifiquement.\n"
-                . "4) Si c'est un QR code ou un code-barres, indique-le clairement.";
+                . "4) Si c'est un QR code ou un code-barres, signale-le et tente de lire le contenu encodé.\n"
+                . "5) Si c'est une facture, un recu ou un formulaire, extrais les montants et informations importantes.";
             $text = $caption ? "{$caption}\n\n({$imageHint})" : $imageHint;
         }
 
@@ -589,6 +603,7 @@ class ChatAgent extends BaseAgent
             '/resume'  => $this->handleResumeCommand($context),
             '/ping'    => $this->handlePingCommand($context),
             '/memoire' => $this->handleMemoireCommand($context),
+            '/stats'   => $this->handleStatsCommand($context),
             default    => $this->handleHelpCommand($context),
         };
     }
@@ -621,12 +636,15 @@ class ChatAgent extends BaseAgent
             . "- \"Recommande-moi de la musique chill\"\n\n"
             . "*Memoire*\n"
             . "- Je me souviens de tes preferences et donnees entre conversations\n"
-            . "- \"Souviens-toi que mon email pro est ...\"\n\n"
+            . "- \"Souviens-toi que mon email pro est ...\"\n"
+            . "- /oublie [sujet] → supprimer une entree memoire\n\n"
             . "*Commandes rapides*\n"
             . "- /aide ou /help → cette aide\n"
             . "- /status → tableau de bord (todos, rappels, memoire)\n"
+            . "- /stats → statistiques d'utilisation detaillees\n"
             . "- /resume → resume de la conversation recente\n"
             . "- /memoire → voir ta memoire persistante stockee\n"
+            . "- /oublie [sujet] → supprimer une entree de la memoire\n"
             . "- /langue [fr|en|es|de|it|pt|ar|nl|ru] → definir ta langue preferee\n"
             . "- /effacer → effacer l'historique de conversation\n"
             . "- /ping → tester que je reponds bien\n\n"
@@ -808,9 +826,11 @@ class ChatAgent extends BaseAgent
         $memoryCount = count($memoryData['entries'] ?? []);
         $lang = $this->resolvePreferredLanguage($context->from);
 
-        $reply = "*Pong !* Je suis bien la. \n\n"
+        $knowledgeCount = UserKnowledge::allFor($context->from)->count();
+        $reply = "*Pong !* Je suis bien la.\n\n"
             . "- Heure: *{$now}*\n"
             . "- Historique: *{$memoryCount}* echange(s)\n"
+            . "- Memoire persistante: *{$knowledgeCount}* entree(s)\n"
             . "- Langue: *" . ($lang ?? 'auto') . "*\n"
             . "- Version agent: *" . $this->version() . "*\n\n"
             . "_Tout fonctionne correctement._";
@@ -849,15 +869,21 @@ class ChatAgent extends BaseAgent
                 $label = $entry->label ?? $entry->topic_key;
                 $age = $entry->updated_at->diffForHumans();
                 $key = $entry->topic_key;
-                $lines[] = "- *{$label}* (`{$key}`, {$age})";
+                // Show a short preview of the stored value if available
+                $data = $entry->data ?? [];
+                $valuePreview = '';
+                if (!empty($data['value'])) {
+                    $val = (string) $data['value'];
+                    $valuePreview = ': _' . (mb_strlen($val) > 50 ? mb_substr($val, 0, 50) . '...' : $val) . '_';
+                }
+                $lines[] = "- *{$label}*{$valuePreview} (`{$key}`, {$age})";
             }
         }
 
         if ($total > 25) {
             $lines[] = "\n_Pour acceder a toutes les entrees, demande-moi de lister ma memoire._";
-        } else {
-            $lines[] = "\n_Dis 'oublie [sujet]' pour supprimer une entree._";
         }
+        $lines[] = "\n_/oublie [sujet] pour supprimer une entree · /stats pour tes statistiques_";
 
         $reply = implode("\n", $lines);
         $this->sendText($context->from, $reply);
@@ -951,6 +977,162 @@ class ChatAgent extends BaseAgent
         $this->log($context, 'Empty message received — nudge sent');
 
         return AgentResult::reply($reply, ['empty_message' => true]);
+    }
+
+    /**
+     * Quick command: /stats — Detailed usage statistics for the user.
+     */
+    private function handleStatsCommand(AgentContext $context): AgentResult
+    {
+        $now = now(AppSetting::timezone());
+        $parts = ["*Statistiques d'utilisation ZeniClaw*\n"];
+
+        // Conversation memory stats
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $entries = $memoryData['entries'] ?? [];
+        $totalMessages = count($entries);
+
+        if ($totalMessages > 0) {
+            // First and last message dates
+            $firstEntry = $entries[0];
+            $lastEntry = $entries[array_key_last($entries)];
+            $firstDate = !empty($firstEntry['created_at'])
+                ? \Illuminate\Support\Carbon::parse($firstEntry['created_at'])->setTimezone(AppSetting::timezone())->format('d/m/Y')
+                : 'inconnu';
+            $lastDate = !empty($lastEntry['created_at'])
+                ? \Illuminate\Support\Carbon::parse($lastEntry['created_at'])->setTimezone(AppSetting::timezone())->format('d/m/Y H:i')
+                : 'inconnu';
+
+            $parts[] = "*Historique de conversation :*\n"
+                . "- Total echanges: *{$totalMessages}*\n"
+                . "- Depuis le: *{$firstDate}*\n"
+                . "- Dernier message: *{$lastDate}*";
+
+            // Message length stats
+            $lengths = array_filter(array_map(fn ($e) => mb_strlen($e['sender_message'] ?? ''), $entries));
+            if (!empty($lengths)) {
+                $avgLen = (int) (array_sum($lengths) / count($lengths));
+                $maxLen = max($lengths);
+                $parts[] = "- Longueur moyenne des messages: *{$avgLen}* caracteres (max: *{$maxLen}*)";
+            }
+        } else {
+            $parts[] = "*Historique de conversation :* aucun echange enregistre";
+        }
+
+        // Todos stats
+        $todos = \App\Models\Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->get();
+
+        if ($todos->isNotEmpty()) {
+            $todoDone    = $todos->where('is_done', true)->count();
+            $todoPending = $todos->where('is_done', false)->count();
+            $todoOverdue = $todos->filter(fn ($t) => !$t->is_done && $t->due_at && $t->due_at->lt($now))->count();
+            $completionRate = $todos->count() > 0 ? round(($todoDone / $todos->count()) * 100) : 0;
+            $overdueStr = $todoOverdue > 0 ? ", *{$todoOverdue}* en retard" : '';
+            $parts[] = "*Todos :*\n"
+                . "- Total: *{$todos->count()}* (fait: *{$todoDone}*, a faire: *{$todoPending}*{$overdueStr})\n"
+                . "- Taux de completion: *{$completionRate}%*";
+        } else {
+            $parts[] = "*Todos :* aucun";
+        }
+
+        // Reminders stats
+        $reminders = \App\Models\Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->get();
+
+        if ($reminders->isNotEmpty()) {
+            $pending   = $reminders->where('status', 'pending')->count();
+            $sent      = $reminders->where('status', 'sent')->count();
+            $cancelled = $reminders->where('status', 'cancelled')->count();
+            $recurrent = $reminders->whereNotNull('recurrence_rule')->count();
+            $parts[] = "*Rappels :*\n"
+                . "- En attente: *{$pending}*, envoyes: *{$sent}*, annules: *{$cancelled}*\n"
+                . "- Recurrents: *{$recurrent}*";
+        } else {
+            $parts[] = "*Rappels :* aucun cree";
+        }
+
+        // Knowledge stats
+        $knowledge = UserKnowledge::allFor($context->from);
+        if ($knowledge->isNotEmpty()) {
+            $bySource = $knowledge->groupBy('source');
+            $sourceLines = $bySource->map(fn ($items, $src) => "  - {$src}: *{$items->count()}*")->implode("\n");
+            $parts[] = "*Memoire persistante :* *{$knowledge->count()}* entree(s)\n{$sourceLines}";
+        } else {
+            $parts[] = "*Memoire persistante :* vide";
+        }
+
+        // Language
+        $lang = $this->resolvePreferredLanguage($context->from);
+        $parts[] = "*Langue preferee :* " . ($lang ?? '_non definie_');
+
+        $parts[] = "\n_/status pour le tableau de bord · /memoire pour les details_";
+
+        $reply = implode("\n\n", $parts);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /stats handled', ['total_messages' => $totalMessages]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/stats', 'total_messages' => $totalMessages]);
+    }
+
+    /**
+     * Prefix command: /oublie [sujet] — Deletes a specific knowledge entry from persistent memory.
+     */
+    private function handleOublieCommand(AgentContext $context, string $subject): AgentResult
+    {
+        // No subject provided — show usage instructions
+        if ($subject === '') {
+            $reply = "*Commande /oublie*\n\n"
+                . "Usage: `/oublie [sujet]`\n\n"
+                . "Exemples:\n"
+                . "- `/oublie email` → supprime la cle 'email'\n"
+                . "- `/oublie telephone` → supprime la cle 'telephone'\n\n"
+                . "_Utilise /memoire pour voir les cles disponibles._";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/oublie', 'action' => 'usage']);
+        }
+
+        // Search for matching entries (topic_key or label)
+        $matches = UserKnowledge::search($context->from, $subject);
+
+        if ($matches->isEmpty()) {
+            // Try exact topic_key match as fallback
+            $exact = UserKnowledge::recall($context->from, $subject);
+            if ($exact) {
+                $matches = collect([$exact]);
+            }
+        }
+
+        if ($matches->isEmpty()) {
+            $reply = "Aucune entree trouvee dans ta memoire pour *{$subject}*.\n\n"
+                . "_Utilise /memoire pour voir toutes tes entrees._";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/oublie', 'action' => 'not_found', 'subject' => $subject]);
+        }
+
+        // Delete all matching entries
+        $deleted = [];
+        foreach ($matches as $entry) {
+            $deleted[] = $entry->label ?? $entry->topic_key;
+            $entry->delete();
+        }
+
+        $deletedList = implode(', ', array_map(fn ($d) => "*{$d}*", $deleted));
+        $count = count($deleted);
+        $reply = ($count === 1)
+            ? "Entree {$deletedList} supprimee de ta memoire persistante."
+            : "{$count} entrees supprimees : {$deletedList}.";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Knowledge entries deleted via /oublie", [
+            'subject' => $subject,
+            'deleted' => $deleted,
+            'count'   => $count,
+        ]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/oublie', 'action' => 'deleted', 'count' => $count, 'deleted' => $deleted]);
     }
 
     private function buildProjectContext(AgentContext $context): ?string
