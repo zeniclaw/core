@@ -8,6 +8,7 @@ use App\Models\Reminder;
 use App\Models\Todo;
 use App\Services\AgentContext;
 use App\Services\Agents\SmartContextAgent;
+use App\Services\Agents\ConversationMemoryAgent;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
 use App\Services\ConversationMemoryService;
@@ -17,6 +18,7 @@ class RouterAgent
 {
     private AnthropicClient $claude;
     private SmartContextAgent $smartContext;
+    private ConversationMemoryAgent $conversationMemory;
     private array $registeredAgents = [];
 
     /**
@@ -60,6 +62,7 @@ class RouterAgent
     {
         $this->claude = new AnthropicClient();
         $this->smartContext = new SmartContextAgent();
+        $this->conversationMemory = new ConversationMemoryAgent();
     }
 
     /**
@@ -77,6 +80,13 @@ class RouterAgent
             $this->smartContext->handle($context);
         } catch (\Throwable $e) {
             Log::warning('SmartContextAgent failed silently: ' . $e->getMessage());
+        }
+
+        // Silently run ConversationMemoryAgent to extract and store memorable facts
+        try {
+            $this->conversationMemory->extractFactsInBackground($context);
+        } catch (\Throwable $e) {
+            Log::warning('ConversationMemoryAgent failed silently: ' . $e->getMessage());
         }
 
         // ── Only 2 unambiguous fast-paths ──
@@ -389,6 +399,7 @@ CATALOG;
                 'voice_command', 'code_review', 'screenshot', 'content_summarizer',
                 'event_reminder', 'habit', 'pomodoro', 'document', 'web_search',
                 'user_preferences',
+                'conversation_memory',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {

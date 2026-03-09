@@ -20,3 +20,4 @@ Schedule::command('zeniclaw:heartbeat')->everyFifteenMinutes();
 Schedule::command('zeniclaw:auto-improve-agents')->everyThirtyMinutes()->when(function () {
     return AppSetting::get('auto_improve_agents_enabled') === 'true';
 });
+Schedule::command('memories:cleanup')->dailyAt('02:00');

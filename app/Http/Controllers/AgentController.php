@@ -185,6 +185,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Langue, fuseau horaire, format, style communication',
         ],
+        'conversation_memory' => [
+            'label' => 'Memory',
+            'icon' => '🧠',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Memorise contexte et historique pour continuite',
+        ],
     ];
 
     public function index(Request $request)

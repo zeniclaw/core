@@ -278,6 +278,11 @@ class ChatAgent extends BaseAgent
             $systemPrompt .= "\n\n" . $memoryContext;
         }
 
+        // Inject conversation memory (persistent cross-session facts)
+        if ($context->memoryContext) {
+            $systemPrompt .= "\n\n" . $context->memoryContext;
+        }
+
         return $systemPrompt;
     }
 

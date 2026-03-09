@@ -30,6 +30,7 @@ use App\Services\Agents\PomodoroAgent;
 use App\Services\Agents\DocumentAgent;
 use App\Services\Agents\WebSearchAgent;
 use App\Services\Agents\UserPreferencesAgent;
+use App\Services\Agents\ConversationMemoryAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -86,6 +87,7 @@ class AgentOrchestrator
             new DocumentAgent(),
             new WebSearchAgent(),
             new UserPreferencesAgent(),
+            new ConversationMemoryAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
@@ -204,6 +206,19 @@ class AgentOrchestrator
                 }
             } elseif (!in_array($dispatchAgent, ['dev', 'document'])) {
                 $dispatchAgent = 'chat';
+            }
+
+            // Inject conversation memory context into the routed context
+            try {
+                $memoryAgent = $this->agents['conversation_memory'] ?? null;
+                if ($memoryAgent instanceof ConversationMemoryAgent) {
+                    $memoryContext = $memoryAgent->formatFactsForPrompt($context->from, $context->body);
+                    if ($memoryContext) {
+                        $routedContext = $routedContext->withMemoryContext($memoryContext);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('ConversationMemory injection failed: ' . $e->getMessage());
             }
 
             if ($debug) {
