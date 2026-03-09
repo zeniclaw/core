@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\SubAgent;
 use App\Services\AgentContext;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class ProjectAgent extends BaseAgent
 {
@@ -16,7 +17,7 @@ class ProjectAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de projets. Permet de changer de projet actif, creer un nouveau projet, voir les statistiques, archiver/restaurer un projet, renommer un projet et lister tous les projets.';
+        return 'Agent de gestion de projets. Permet de changer de projet actif, creer/supprimer un projet, voir les statistiques et les details, archiver/restaurer, renommer, mettre a jour l\'URL GitLab ou la description, et lister tous les projets.';
     }
 
     public function keywords(): array
@@ -34,12 +35,15 @@ class ProjectAgent extends BaseAgent
             'mes projets', 'liste projets', 'list projects', 'my projects',
             'tous mes projets', 'all projects',
             'quel projet', 'projet actif', 'active project',
+            'update projet', 'mettre a jour projet', 'changer url', 'modifier url gitlab', 'changer description',
+            'info projet', 'infos projet', 'detail projet', 'details projet', 'voir projet',
+            'supprimer projet', 'delete projet', 'effacer projet', 'enlever projet',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -49,7 +53,16 @@ class ProjectAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
-        // Handle pending switch confirmation first
+        // Handle generic pending context (delete confirmation, etc.)
+        $pendingCtx = $context->session->pending_agent_context ?? null;
+        if ($pendingCtx && ($pendingCtx['agent'] ?? '') === 'project') {
+            $result = $this->handlePendingContext($context, $pendingCtx);
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        // Handle pending switch confirmation
         if ($context->session->pending_switch_project_id) {
             return $this->handlePendingSwitchConfirmation($context);
         }
@@ -64,19 +77,38 @@ class ProjectAgent extends BaseAgent
             'restore' => $this->handleRestore($context, $action),
             'rename'  => $this->handleRename($context, $action),
             'list'    => $this->handleList($context, $action),
+            'update'  => $this->handleUpdate($context, $action),
+            'info'    => $this->handleInfo($context, $action),
+            'delete'  => $this->handleDelete($context, $action),
             default   => $this->handleProjectSwitch($context),
         };
     }
 
+    public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
+    {
+        $type = $pendingContext['type'] ?? '';
+
+        if ($type === 'delete_confirm') {
+            return $this->handleDeleteConfirmation($context, $pendingContext['data'] ?? []);
+        }
+
+        return null;
+    }
+
     private function detectAction(AgentContext $context): array
     {
-        $response = $this->claude->chat(
-            "Message: \"{$context->body}\"",
-            'claude-haiku-4-5-20251001',
-            $this->buildActionPrompt()
-        );
+        try {
+            $response = $this->claude->chat(
+                "Message: \"{$context->body}\"",
+                'claude-haiku-4-5-20251001',
+                $this->buildActionPrompt()
+            );
 
-        return $this->parseJson($response) ?? ['action' => 'switch'];
+            return $this->parseJson($response) ?? ['action' => 'switch'];
+        } catch (\Exception $e) {
+            Log::warning("[project] detectAction failed: " . $e->getMessage());
+            return ['action' => 'switch'];
+        }
     }
 
     private function buildActionPrompt(): string
@@ -85,16 +117,19 @@ class ProjectAgent extends BaseAgent
 Tu es un assistant de gestion de projets. L'utilisateur te donne un message et tu dois determiner l'action a effectuer.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "switch|create|stats|archive|restore|rename|list", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false}
+{"action": "switch|create|stats|archive|restore|rename|list|update|info|delete", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false}
 
 ACTIONS:
-- "switch": l'utilisateur veut changer de projet actif (ex: "bosse sur mon-app", "switch zeniclaw", "projet X")
-- "create": l'utilisateur veut creer un nouveau projet avec un nom et/ou une URL GitLab (ex: "cree un projet mon-app avec gitlab.com/...", "nouveau projet test-api")
-- "stats": l'utilisateur demande des statistiques (ex: "stats du projet", "comment va mon projet", "etat du projet", "statistiques")
-- "archive": l'utilisateur veut archiver un projet (ex: "archive le projet X", "archive mon-app")
-- "restore": l'utilisateur veut restaurer/desarchiver un projet (ex: "restaure le projet X", "desarchive mon-app", "reactive le projet Y")
-- "rename": l'utilisateur veut renommer un projet (ex: "renomme zeniclaw en zeniclaw-v2", "le projet X s'appelle maintenant Y")
-- "list": l'utilisateur veut voir la liste de ses projets (ex: "mes projets", "liste des projets", "quels projets", "tous mes projets")
+- "switch": changer de projet actif (ex: "bosse sur mon-app", "switch zeniclaw", "projet X")
+- "create": creer un nouveau projet (ex: "cree un projet mon-app", "nouveau projet test-api avec gitlab.com/...")
+- "stats": voir les statistiques d'un projet (ex: "stats du projet", "comment va mon projet", "statistiques")
+- "archive": archiver un projet (ex: "archive le projet X", "archive mon-app")
+- "restore": restaurer/desarchiver un projet (ex: "restaure le projet X", "reactive le projet Y")
+- "rename": renommer un projet (ex: "renomme zeniclaw en zeniclaw-v2", "le projet X s'appelle maintenant Y")
+- "list": lister les projets (ex: "mes projets", "liste des projets", "tous mes projets", "quels projets")
+- "update": mettre a jour l'URL GitLab ou la description d'un projet (ex: "change l'url gitlab de mon-app", "met a jour la description", "l'url du projet est maintenant https://...")
+- "info": voir les details complets d'un projet (ex: "infos sur le projet", "details du projet X", "montre moi le projet Y")
+- "delete": supprimer definitivement un projet archive (ex: "supprime le projet test", "efface le projet archive X")
 
 CHAMPS:
 - project_name: nom actuel du projet mentionne (ou null si non mentionne)
@@ -113,6 +148,10 @@ EXEMPLES:
 - "renomme zeniclaw en zeniclaw-v2" → {"action": "rename", "project_name": "zeniclaw", "new_name": "zeniclaw-v2", "gitlab_url": null, "description": null, "show_all": false}
 - "mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
 - "tous mes projets" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": true}
+- "change l'url gitlab de mon-app en https://gitlab.com/new/mon-app" → {"action": "update", "project_name": "mon-app", "new_name": null, "gitlab_url": "https://gitlab.com/new/mon-app", "description": null, "show_all": false}
+- "mets a jour la description: nouvelle API REST" → {"action": "update", "project_name": null, "new_name": null, "gitlab_url": null, "description": "nouvelle API REST", "show_all": false}
+- "infos sur le projet zeniclaw" → {"action": "info", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
+- "supprime le projet test" → {"action": "delete", "project_name": "test", "new_name": null, "gitlab_url": null, "description": null, "show_all": false}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -124,16 +163,21 @@ PROMPT;
     {
         $pendingId = $context->session->pending_switch_project_id;
 
-        $classification = $this->claude->chat(
-            "Message de l'utilisateur: \"{$context->body}\"",
-            'claude-haiku-4-5-20251001',
-            "L'utilisateur repond a une demande de confirmation (oui/non).\n"
-            . "Reponds UNIQUEMENT par OUI ou NON.\n"
-            . "OUI = l'utilisateur confirme (oui, ok, yes, go, c'est bon, parfait, yep, ouais...)\n"
-            . "NON = l'utilisateur refuse ou dit autre chose (non, annule, stop, pas celui-la...)"
-        );
+        try {
+            $classification = $this->claude->chat(
+                "Message de l'utilisateur: \"{$context->body}\"",
+                'claude-haiku-4-5-20251001',
+                "L'utilisateur repond a une demande de confirmation (oui/non).\n"
+                . "Reponds UNIQUEMENT par OUI ou NON.\n"
+                . "OUI = confirme (oui, ok, yes, go, c'est bon, parfait, yep, ouais, confirme, allez, let's go...)\n"
+                . "NON = refuse ou autre chose (non, annule, stop, pas celui-la, nope, laisse tomber...)"
+            );
+            $intent = strtoupper(trim($classification ?? ''));
+        } catch (\Exception $e) {
+            Log::warning("[project] handlePendingSwitchConfirmation AI failed: " . $e->getMessage());
+            $intent = 'NON';
+        }
 
-        $intent = strtoupper(trim($classification ?? ''));
         $context->session->update(['pending_switch_project_id' => null]);
 
         if (str_contains($intent, 'OUI')) {
@@ -160,22 +204,33 @@ PROMPT;
 
     private function buildSwitchSummary(Project $project): string
     {
-        $completedCount = SubAgent::where('project_id', $project->id)
-            ->where('status', 'completed')
-            ->count();
+        $subAgents      = SubAgent::where('project_id', $project->id)->get();
+        $total          = $subAgents->count();
+        $completedCount = $subAgents->where('status', 'completed')->count();
+        $runningCount   = $subAgents->where('status', 'running')->count();
 
-        $lastSubAgent = SubAgent::where('project_id', $project->id)
-            ->orderByDesc('created_at')
-            ->first();
+        $lastSubAgent = $subAgents->sortByDesc('updated_at')->first();
 
         $lines = ["✅ Projet *{$project->name}* active !"];
-        $lines[] = "📊 {$completedCount} tache" . ($completedCount > 1 ? 's' : '') . " realisee" . ($completedCount > 1 ? 's' : '');
+
+        $taskSummary = "{$total} tache" . ($total !== 1 ? 's' : '');
+        if ($runningCount > 0) {
+            $taskSummary .= " · {$runningCount} en cours";
+        }
+        if ($completedCount > 0) {
+            $taskSummary .= " · {$completedCount} terminees";
+        }
+        $lines[] = "📊 {$taskSummary}";
 
         if ($lastSubAgent) {
             $taskDesc    = mb_strimwidth($lastSubAgent->task_description ?? 'sans description', 0, 50, '...');
             $statusLabel = $this->statusLabel($lastSubAgent->status);
             $ago         = $lastSubAgent->updated_at ? Carbon::parse($lastSubAgent->updated_at)->diffForHumans() : '';
-            $lines[] = "🔧 Derniere : \"{$taskDesc}\" ({$statusLabel} {$ago})";
+            $lines[] = "🔧 Derniere : \"{$taskDesc}\" ({$statusLabel}" . ($ago ? ", {$ago}" : '') . ")";
+        }
+
+        if ($project->request_description) {
+            $lines[] = "📝 " . mb_strimwidth($project->request_description, 0, 80, '...');
         }
 
         if ($project->gitlab_url) {
@@ -194,8 +249,10 @@ PROMPT;
         if ($project) {
             $context->session->update(['pending_switch_project_id' => $project->id]);
 
-            $urlPart = $project->gitlab_url ? " ({$project->gitlab_url})" : '';
-            $reply = "[{$project->name}] Tu veux bosser sur ce projet{$urlPart} ?\nDis \"oui\" pour confirmer.";
+            $desc    = $project->request_description ? "\n📝 " . mb_strimwidth($project->request_description, 0, 60, '...') : '';
+            $urlPart = $project->gitlab_url ? "\n🔗 {$project->gitlab_url}" : '';
+            $reply   = "*{$project->name}*{$desc}{$urlPart}\nTu veux bosser sur ce projet ? Dis \"oui\" pour confirmer.";
+
             $this->sendText($context->from, $reply);
 
             $this->log($context, 'Project switch proposed', [
@@ -213,10 +270,11 @@ PROMPT;
             ->get();
 
         if ($projects->isEmpty()) {
-            $reply = "Je n'ai trouve aucun projet configure. Dis \"cree un projet mon-app\" pour en ajouter un.";
+            $reply = "Aucun projet configure. Dis \"cree un projet mon-app\" pour en ajouter un.";
         } else {
-            $list  = $projects->map(fn($p) => "- {$p->name}")->implode("\n");
-            $reply = "J'ai pas trouve le projet. Voici les projets disponibles :\n{$list}\n\nPrecise lequel tu veux.";
+            $activeId = $context->session->active_project_id;
+            $list     = $projects->map(fn($p) => ($p->id === $activeId ? '👈 ' : '- ') . $p->name)->implode("\n");
+            $reply    = "Projet introuvable. Projets disponibles :\n{$list}\n\nPrecise lequel tu veux.";
         }
 
         $this->sendText($context->from, $reply);
@@ -232,9 +290,15 @@ PROMPT;
         $description = $action['description'] ?? null;
 
         if (!$name) {
-            $reply = "Pour creer un projet, donne-moi un nom.\nEx: \"Cree un projet mon-app avec https://gitlab.com/team/mon-app\"";
+            $reply = "Pour creer un projet, donne-moi un nom.\nEx: \"cree un projet mon-app avec https://gitlab.com/team/mon-app\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_create_missing_name']);
+        }
+
+        if (mb_strlen($name) > 100) {
+            $reply = "Le nom du projet est trop long (max 100 caracteres).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_create_invalid_name']);
         }
 
         // Validate GitLab URL format if provided
@@ -247,21 +311,32 @@ PROMPT;
         // Check for duplicate name (case-insensitive)
         $existing = Project::whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
         if ($existing) {
-            $reply = "Un projet \"{$existing->name}\" existe deja. Tu veux bosser dessus ? Dis \"switch {$existing->name}\".";
+            $isArchived = $existing->status === 'archived';
+            $hint       = $isArchived
+                ? "Dis \"restaure {$existing->name}\" pour le reactiver."
+                : "Dis \"switch {$existing->name}\" pour l'activer.";
+            $reply = "Un projet *{$existing->name}*" . ($isArchived ? ' (archive)' : '') . " existe deja. {$hint}";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_create_duplicate']);
         }
 
-        $project = Project::create([
-            'name'                => $name,
-            'gitlab_url'          => $gitlabUrl,
-            'request_description' => $description,
-            'requester_phone'     => $context->from,
-            'requester_name'      => $context->senderName,
-            'agent_id'            => $context->agent->id,
-            'status'              => 'approved',
-            'approved_at'         => now(),
-        ]);
+        try {
+            $project = Project::create([
+                'name'                => $name,
+                'gitlab_url'          => $gitlabUrl,
+                'request_description' => $description,
+                'requester_phone'     => $context->from,
+                'requester_name'      => $context->senderName,
+                'agent_id'            => $context->agent->id,
+                'status'              => 'approved',
+                'approved_at'         => now(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error("[project] handleCreate DB error: " . $e->getMessage());
+            $reply = "Erreur lors de la creation du projet. Reessaie dans un moment.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_create_error']);
+        }
 
         // Auto-activate the new project
         $context->session->update(['active_project_id' => $project->id]);
@@ -312,8 +387,8 @@ PROMPT;
         $successRate = $doneCount > 0 ? round(($completed / $doneCount) * 100) : null;
 
         // Average execution time for completed tasks
-        $avgTime             = null;
-        $completedWithTimes  = $subAgents->filter(fn($s) => $s->status === 'completed' && $s->started_at && $s->completed_at);
+        $avgTime            = null;
+        $completedWithTimes = $subAgents->filter(fn($s) => $s->status === 'completed' && $s->started_at && $s->completed_at);
         if ($completedWithTimes->isNotEmpty()) {
             $totalSeconds = $completedWithTimes->sum(
                 fn($s) => Carbon::parse($s->completed_at)->diffInSeconds(Carbon::parse($s->started_at))
@@ -328,19 +403,24 @@ PROMPT;
             ? Carbon::parse($lastActivity->updated_at)->diffForHumans()
             : 'aucune';
 
+        // Project age
+        $projectAge = $project->created_at
+            ? Carbon::parse($project->created_at)->diffForHumans()
+            : null;
+
         $lines = [
-            "📊 *Stats du projet {$project->name}*",
+            "📊 *Stats : {$project->name}*",
             "",
-            "Total : {$total} tache" . ($total > 1 ? 's' : ''),
-            "✅ Terminees : {$completed}",
+            "Total : {$total} tache" . ($total !== 1 ? 's' : ''),
         ];
 
-        if ($running > 0) $lines[] = "🔄 En cours : {$running}";
-        if ($pending > 0) $lines[] = "⏳ En attente : {$pending}";
-        if ($failed > 0)  $lines[] = "❌ Echouees : {$failed}";
+        if ($completed > 0) $lines[] = "✅ Terminees : {$completed}";
+        if ($running > 0)   $lines[] = "🔄 En cours : {$running}";
+        if ($pending > 0)   $lines[] = "⏳ En attente : {$pending}";
+        if ($failed > 0)    $lines[] = "❌ Echouees : {$failed}";
 
         if ($successRate !== null) {
-            $lines[] = "🎯 Taux de succes : {$successRate}%";
+            $lines[] = "🎯 Succes : {$successRate}%";
         }
 
         if ($avgTime) {
@@ -349,11 +429,27 @@ PROMPT;
 
         $lines[] = "🕐 Derniere activite : {$lastActivityText}";
 
+        if ($projectAge) {
+            $lines[] = "📅 Cree : {$projectAge}";
+        }
+
         if ($project->status === 'archived') {
             $lines[] = "📦 Statut : archive";
         }
 
+        // Show running task names if any
+        if ($running > 0) {
+            $runningTasks = $subAgents->where('status', 'running')->take(3);
+            $lines[] = "";
+            $lines[] = "Taches en cours :";
+            foreach ($runningTasks as $task) {
+                $desc    = mb_strimwidth($task->task_description ?? '?', 0, 60, '...');
+                $lines[] = "• {$desc}";
+            }
+        }
+
         if ($project->gitlab_url) {
+            $lines[] = "";
             $lines[] = "🔗 {$project->gitlab_url}";
         }
 
@@ -361,9 +457,9 @@ PROMPT;
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'Project stats requested', [
-            'project_id'   => $project->id,
-            'total_tasks'  => $total,
-            'completed'    => $completed,
+            'project_id'  => $project->id,
+            'total_tasks' => $total,
+            'completed'   => $completed,
         ]);
 
         return AgentResult::reply($reply, ['action' => 'project_stats', 'project_id' => $project->id]);
@@ -376,7 +472,7 @@ PROMPT;
         $project = $this->resolveTargetProject($context, $action);
 
         if (!$project) {
-            $reply = "Je n'ai pas trouve le projet a archiver. Precise le nom exact ou active un projet d'abord.";
+            $reply = "Projet introuvable. Precise le nom exact ou active un projet d'abord.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_archive_not_found']);
         }
@@ -387,6 +483,12 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'project_already_archived']);
         }
 
+        // Warn about running tasks (but proceed anyway)
+        $runningCount = SubAgent::where('project_id', $project->id)->where('status', 'running')->count();
+        $warning      = $runningCount > 0
+            ? "⚠️ {$runningCount} tache" . ($runningCount > 1 ? 's' : '') . " en cours (non interrompue" . ($runningCount > 1 ? 's' : '') . ").\n"
+            : '';
+
         $project->update(['status' => 'archived']);
 
         // If this was the active project, clear it
@@ -394,7 +496,7 @@ PROMPT;
             $context->session->update(['active_project_id' => null]);
         }
 
-        $reply = "📦 Projet *{$project->name}* archive.\nIl n'apparaitra plus dans ta liste par defaut. Dis \"restaure {$project->name}\" pour le reactiver.";
+        $reply = "{$warning}📦 Projet *{$project->name}* archive.\nDis \"restaure {$project->name}\" pour le reactiver.";
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'Project archived', [
@@ -425,16 +527,20 @@ PROMPT;
             if (!$project) {
                 $archived = Project::where('status', 'archived')->get();
                 if ($archived->isNotEmpty()) {
-                    $list     = $archived->map(fn($p) => "- ID:{$p->id} nom:\"{$p->name}\"")->implode("\n");
-                    $response = $this->claude->chat(
-                        "Message utilisateur: \"{$name}\"\n\nProjets archives:\n{$list}",
-                        'claude-haiku-4-5-20251001',
-                        "Trouve le projet archive le plus probable dans la liste.\n"
-                        . "Reponds UNIQUEMENT avec l'ID (ex: 42) ou AUCUN si aucun ne correspond."
-                    );
-                    $clean = trim($response ?? '');
-                    if (is_numeric($clean)) {
-                        $project = $archived->firstWhere('id', (int) $clean);
+                    try {
+                        $list     = $archived->map(fn($p) => "- ID:{$p->id} nom:\"{$p->name}\"")->implode("\n");
+                        $response = $this->claude->chat(
+                            "Message utilisateur: \"{$name}\"\n\nProjets archives:\n{$list}",
+                            'claude-haiku-4-5-20251001',
+                            "Trouve le projet archive le plus probable dans la liste.\n"
+                            . "Reponds UNIQUEMENT avec l'ID (ex: 42) ou AUCUN si aucun ne correspond."
+                        );
+                        $clean = trim($response ?? '');
+                        if (is_numeric($clean)) {
+                            $project = $archived->firstWhere('id', (int) $clean);
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning("[project] handleRestore AI match failed: " . $e->getMessage());
                     }
                 }
             }
@@ -446,7 +552,7 @@ PROMPT;
                 $reply = "Aucun projet archive. Il n'y a rien a restaurer.";
             } else {
                 $list  = $archived->map(fn($p) => "- {$p->name}")->implode("\n");
-                $reply = "Je n'ai pas trouve le projet archive. Projets archives :\n{$list}\n\nPrecise lequel tu veux restaurer.";
+                $reply = "Projet archive introuvable. Projets archives :\n{$list}\n\nPrecise lequel tu veux restaurer.";
             }
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_restore_not_found']);
@@ -454,7 +560,7 @@ PROMPT;
 
         $project->update(['status' => 'approved']);
 
-        $reply = "✅ Projet *{$project->name}* restaure et disponible !\nDis \"switch {$project->name}\" pour l'activer.";
+        $reply = "✅ Projet *{$project->name}* restaure !\nDis \"switch {$project->name}\" pour l'activer.";
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'Project restored', [
@@ -473,7 +579,7 @@ PROMPT;
         $newName = trim($action['new_name'] ?? '');
 
         if (!$project) {
-            $reply = "Je n'ai pas trouve le projet a renommer. Precise le nom actuel.\nEx: \"renomme mon-app en mon-app-v2\"";
+            $reply = "Projet introuvable. Precise le nom actuel.\nEx: \"renomme mon-app en mon-app-v2\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_rename_not_found']);
         }
@@ -482,6 +588,12 @@ PROMPT;
             $reply = "Donne-moi le nouveau nom du projet.\nEx: \"renomme {$project->name} en nouveau-nom\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_rename_missing_name']);
+        }
+
+        if (mb_strlen($newName) > 100) {
+            $reply = "Le nouveau nom est trop long (max 100 caracteres).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_rename_invalid']);
         }
 
         // Check if new name is already taken
@@ -516,10 +628,10 @@ PROMPT;
     {
         $showAll = $action['show_all'] ?? false;
 
-        // Use withCount to avoid N+1 query
-        $query = Project::withCount(['subAgents as completed_tasks_count' => function ($q) {
-            $q->where('status', 'completed');
-        }])->orderByDesc('created_at');
+        $query = Project::withCount([
+            'subAgents as completed_tasks_count' => fn($q) => $q->where('status', 'completed'),
+            'subAgents as running_tasks_count'   => fn($q) => $q->where('status', 'running'),
+        ])->orderByDesc('created_at');
 
         if ($showAll) {
             $query->whereIn('status', ['approved', 'in_progress', 'completed', 'archived']);
@@ -536,26 +648,287 @@ PROMPT;
         }
 
         $activeId = $context->session->active_project_id;
+        $count    = $projects->count();
 
-        $lines = ["📁 *" . ($showAll ? "Tous tes projets" : "Tes projets") . "* :"];
+        $lines = ["📁 *" . ($showAll ? "Tous tes projets" : "Tes projets") . "* ({$count}) :"];
         foreach ($projects as $p) {
-            $marker   = $p->id === $activeId ? ' 👈' : '';
-            $archived = $p->status === 'archived' ? ' (archive)' : '';
-            $count    = $p->completed_tasks_count ?? 0;
-            $lines[]  = "- *{$p->name}*{$archived} ({$count} taches){$marker}";
+            $isActive = $p->id === $activeId;
+            $marker   = $isActive ? ' 👈' : '';
+            $archived = $p->status === 'archived' ? ' _(archive)_' : '';
+            $done     = $p->completed_tasks_count ?? 0;
+            $running  = $p->running_tasks_count ?? 0;
+            $details  = "{$done} faite" . ($done !== 1 ? 's' : '');
+            if ($running > 0) {
+                $details .= " · {$running} en cours";
+            }
+            $lines[] = "• *{$p->name}*{$archived} ({$details}){$marker}";
         }
 
-        $lines[] = "\nDis \"switch nom-du-projet\" pour changer.";
+        $lines[] = "\nDis \"switch nom\" pour changer · \"info nom\" pour les details";
 
         $reply = implode("\n", $lines);
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'Project list requested', [
-            'count'    => $projects->count(),
+            'count'    => $count,
             'show_all' => $showAll,
         ]);
 
         return AgentResult::reply($reply, ['action' => 'project_list']);
+    }
+
+    // ─── Update (NEW) ──────────────────────────────────────────────────
+
+    private function handleUpdate(AgentContext $context, array $action): AgentResult
+    {
+        $project = $this->resolveTargetProject($context, $action);
+        $newUrl  = $action['gitlab_url'] ?? null;
+        $newDesc = $action['description'] ?? null;
+
+        if (!$project) {
+            $reply = "Aucun projet cible. Precise le nom du projet ou active-en un d'abord.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_update_no_project']);
+        }
+
+        if (!$newUrl && !$newDesc) {
+            $reply = "Dis-moi ce que tu veux mettre a jour :\n"
+                . "• URL GitLab : \"change l'url de {$project->name} en https://gitlab.com/...\"\n"
+                . "• Description : \"description de {$project->name} : nouveau texte\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_update_nothing']);
+        }
+
+        // Validate URL if provided
+        if ($newUrl && !filter_var($newUrl, FILTER_VALIDATE_URL)) {
+            $reply = "L'URL \"{$newUrl}\" n'est pas valide. Donne-moi une URL complete (ex: https://gitlab.com/team/mon-app).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_update_invalid_url']);
+        }
+
+        $updates = [];
+        $changes = [];
+
+        if ($newUrl) {
+            $updates['gitlab_url'] = $newUrl;
+            $changes[] = "🔗 URL : {$newUrl}";
+        }
+
+        if ($newDesc) {
+            $updates['request_description'] = $newDesc;
+            $changes[] = "📝 Description : {$newDesc}";
+        }
+
+        try {
+            $project->update($updates);
+        } catch (\Exception $e) {
+            Log::error("[project] handleUpdate DB error: " . $e->getMessage());
+            $reply = "Erreur lors de la mise a jour. Reessaie dans un moment.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_update_error']);
+        }
+
+        $reply = "✅ Projet *{$project->name}* mis a jour !\n" . implode("\n", $changes);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project updated', [
+            'project_id'   => $project->id,
+            'project_name' => $project->name,
+            'updates'      => array_keys($updates),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'project_updated', 'project_id' => $project->id]);
+    }
+
+    // ─── Info (NEW) ────────────────────────────────────────────────────
+
+    private function handleInfo(AgentContext $context, array $action): AgentResult
+    {
+        $project = $this->resolveTargetProject($context, $action);
+
+        if (!$project) {
+            $reply = "Aucun projet actif. Dis \"switch nom-du-projet\" pour en selectionner un, ou precise le nom.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_info_no_project']);
+        }
+
+        $totalTasks     = SubAgent::where('project_id', $project->id)->count();
+        $completedTasks = SubAgent::where('project_id', $project->id)->where('status', 'completed')->count();
+        $runningTasks   = SubAgent::where('project_id', $project->id)->where('status', 'running')->count();
+        $failedTasks    = SubAgent::where('project_id', $project->id)->where('status', 'failed')->count();
+        $lastTask       = SubAgent::where('project_id', $project->id)->orderByDesc('updated_at')->first();
+
+        $statusEmoji = match ($project->status) {
+            'archived'    => '📦',
+            'completed'   => '✅',
+            'in_progress' => '🔄',
+            default       => '🟢',
+        };
+
+        $statusLabel = match ($project->status) {
+            'archived'    => 'Archive',
+            'completed'   => 'Termine',
+            'in_progress' => 'En cours',
+            default       => 'Actif',
+        };
+
+        $isActive = $context->session->active_project_id === $project->id;
+
+        $lines = [
+            "📋 *{$project->name}*" . ($isActive ? ' 👈 actif' : ''),
+            "",
+            "{$statusEmoji} Statut : {$statusLabel}",
+        ];
+
+        if ($project->request_description) {
+            $lines[] = "📝 {$project->request_description}";
+        }
+
+        if ($project->gitlab_url) {
+            $lines[] = "🔗 {$project->gitlab_url}";
+        }
+
+        if ($project->created_at) {
+            $lines[] = "📅 Cree " . Carbon::parse($project->created_at)->diffForHumans();
+        }
+
+        if ($totalTasks > 0) {
+            $lines[] = "";
+            $taskLine = "📊 {$totalTasks} tache" . ($totalTasks !== 1 ? 's' : '');
+            if ($completedTasks > 0) $taskLine .= " · {$completedTasks} terminees";
+            if ($runningTasks > 0)   $taskLine .= " · {$runningTasks} en cours";
+            if ($failedTasks > 0)    $taskLine .= " · {$failedTasks} echouees";
+            $lines[] = $taskLine;
+        }
+
+        if ($lastTask) {
+            $desc      = mb_strimwidth($lastTask->task_description ?? 'sans description', 0, 60, '...');
+            $statusLbl = $this->statusLabel($lastTask->status);
+            $ago       = $lastTask->updated_at ? Carbon::parse($lastTask->updated_at)->diffForHumans() : '';
+            $lines[]   = "🔧 Derniere tache : \"{$desc}\" ({$statusLbl}" . ($ago ? ", {$ago}" : '') . ")";
+        }
+
+        if ($project->requester_name) {
+            $lines[] = "👤 Cree par : {$project->requester_name}";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project info requested', ['project_id' => $project->id]);
+
+        return AgentResult::reply($reply, ['action' => 'project_info', 'project_id' => $project->id]);
+    }
+
+    // ─── Delete (NEW) ──────────────────────────────────────────────────
+
+    private function handleDelete(AgentContext $context, array $action): AgentResult
+    {
+        $name    = $action['project_name'] ?? null;
+        $project = null;
+
+        // Only archived projects can be deleted
+        if ($name) {
+            $project = Project::where('status', 'archived')
+                ->where(function ($q) use ($name) {
+                    $q->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
+                      ->orWhere('name', 'LIKE', "%{$name}%");
+                })
+                ->first();
+        }
+
+        if (!$project) {
+            $reply = "Je ne peux supprimer que des projets *archives*.\n"
+                . ($name ? "Le projet \"{$name}\" n'est pas archive ou n'existe pas.\n" : '')
+                . "Archive d'abord un projet : \"archive {$name}\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_delete_not_archived']);
+        }
+
+        $taskCount = SubAgent::where('project_id', $project->id)->count();
+
+        $reply = "⚠️ Supprimer *{$project->name}* definitivement ?\n"
+            . ($taskCount > 0 ? "{$taskCount} tache" . ($taskCount > 1 ? 's' : '') . " associee" . ($taskCount > 1 ? 's' : '') . " seront perdues.\n" : '')
+            . "Cette action est *irreversible*. Reponds \"oui\" pour confirmer.";
+
+        $this->setPendingContext($context, 'delete_confirm', [
+            'project_id'   => $project->id,
+            'project_name' => $project->name,
+        ], 5);
+
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project delete proposed', [
+            'project_id'   => $project->id,
+            'project_name' => $project->name,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'project_delete_proposed']);
+    }
+
+    private function handleDeleteConfirmation(AgentContext $context, array $data): AgentResult
+    {
+        $this->clearPendingContext($context);
+
+        $projectId   = $data['project_id'] ?? null;
+        $projectName = $data['project_name'] ?? 'inconnu';
+
+        try {
+            $classification = $this->claude->chat(
+                "Message: \"{$context->body}\"",
+                'claude-haiku-4-5-20251001',
+                "L'utilisateur confirme-t-il une suppression definitive ? Reponds OUI ou NON uniquement.\n"
+                . "OUI = confirme (oui, yes, ok, confirme, go, d'accord, supprimer, delete...)\n"
+                . "NON = refuse (non, annule, stop, non merci, laisse tomber, nope...)"
+            );
+            $intent = strtoupper(trim($classification ?? ''));
+        } catch (\Exception $e) {
+            Log::warning("[project] handleDeleteConfirmation AI failed: " . $e->getMessage());
+            $intent = 'NON';
+        }
+
+        if (!str_contains($intent, 'OUI')) {
+            $reply = "Suppression annulee. Le projet *{$projectName}* est conserve.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_delete_cancelled']);
+        }
+
+        $project = Project::find($projectId);
+
+        if (!$project) {
+            $reply = "Projet introuvable. Il a peut-etre deja ete supprime.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_delete_not_found']);
+        }
+
+        // Safety guard: only archived projects can be deleted
+        if ($project->status !== 'archived') {
+            $reply = "Impossible de supprimer un projet non archive. Archive-le d'abord.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_delete_not_archived']);
+        }
+
+        try {
+            if ($context->session->active_project_id === $project->id) {
+                $context->session->update(['active_project_id' => null]);
+            }
+            $project->delete();
+        } catch (\Exception $e) {
+            Log::error("[project] handleDeleteConfirmation delete failed: " . $e->getMessage());
+            $reply = "Erreur lors de la suppression. Reessaie dans un moment.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_delete_error']);
+        }
+
+        $reply = "🗑️ Projet *{$projectName}* supprime definitivement.";
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project deleted', [
+            'project_id'   => $projectId,
+            'project_name' => $projectName,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'project_deleted']);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────
@@ -586,14 +959,14 @@ PROMPT;
 
         if ($projects->isEmpty()) return null;
 
-        // Try exact name match (case-insensitive)
+        // Exact name match (case-insensitive)
         foreach ($projects as $project) {
             if (mb_stripos($body, $project->name) !== false) {
                 return $project;
             }
         }
 
-        // Try repo slug match
+        // GitLab repo slug match
         foreach ($projects as $project) {
             $slug = basename(parse_url($project->gitlab_url ?? '', PHP_URL_PATH) ?? '');
             $slug = str_replace('.git', '', $slug);
@@ -605,19 +978,24 @@ PROMPT;
         // AI match with Haiku
         $projectList = $projects->map(fn($p) => "- ID:{$p->id} nom:\"{$p->name}\" url:{$p->gitlab_url}")->implode("\n");
 
-        $response = $this->claude->chat(
-            "Message utilisateur: \"{$body}\"\n\nProjets disponibles:\n{$projectList}",
-            'claude-haiku-4-5-20251001',
-            "L'utilisateur mentionne un projet. Trouve le projet le plus probable dans la liste.\n"
-            . "Reponds UNIQUEMENT avec l'ID du projet (ex: 42) ou AUCUN si aucun projet ne correspond.\n"
-            . "Gere les noms partiels, fautes de frappe, descriptions vagues.\n"
-            . "Reponds un seul mot: l'ID ou AUCUN."
-        );
+        try {
+            $response = $this->claude->chat(
+                "Message utilisateur: \"{$body}\"\n\nProjets disponibles:\n{$projectList}",
+                'claude-haiku-4-5-20251001',
+                "L'utilisateur mentionne un projet. Trouve le projet le plus probable dans la liste.\n"
+                . "Reponds UNIQUEMENT avec l'ID du projet (ex: 42) ou AUCUN si aucun ne correspond.\n"
+                . "Gere les noms partiels, fautes de frappe, descriptions vagues.\n"
+                . "Reponds un seul mot: l'ID ou AUCUN."
+            );
 
-        $clean = trim($response ?? '');
-        if ($clean === 'AUCUN' || !is_numeric($clean)) return null;
+            $clean = trim($response ?? '');
+            if ($clean === 'AUCUN' || !is_numeric($clean)) return null;
 
-        return $projects->firstWhere('id', (int) $clean);
+            return $projects->firstWhere('id', (int) $clean);
+        } catch (\Exception $e) {
+            Log::warning("[project] smartMatchProject AI failed: " . $e->getMessage());
+            return null;
+        }
     }
 
     private function statusLabel(string $status): string
@@ -633,7 +1011,7 @@ PROMPT;
 
     private function formatDuration(int $seconds): string
     {
-        if ($seconds < 60) return "{$seconds}s";
+        if ($seconds < 60)   return "{$seconds}s";
         if ($seconds < 3600) return round($seconds / 60) . " min";
         $hours = floor($seconds / 3600);
         $mins  = round(($seconds % 3600) / 60);
