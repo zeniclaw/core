@@ -133,6 +133,7 @@ class ChatAgent extends BaseAgent
         $modelUsed = $result->model ?? $model;
         $this->log($context, 'Reply sent (agentic)', [
             'model' => $modelUsed,
+            'routed_agent' => $context->routedAgent,
             'complexity' => $context->complexity,
             'iterations' => $result->iterations,
             'tools_used' => $result->toolsUsed,

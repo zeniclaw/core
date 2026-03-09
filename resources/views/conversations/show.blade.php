@@ -83,6 +83,20 @@
                     @endif
                     <p class="text-xs mt-1 {{ $msg['direction'] === 'out' ? 'text-indigo-300' : 'text-gray-400' }} flex items-center gap-2">
                         <span>{{ $msg['timestamp']->format('d/m H:i') }}</span>
+                        @if(!empty($msg['routed_agent']))
+                            <span class="px-1.5 py-0.5 rounded-full font-semibold text-white text-[10px]"
+                                  style="background:{{ match($msg['routed_agent']) {
+                                      'chat' => '#3b82f6', 'dev' => '#8b5cf6', 'document' => '#0ea5e9',
+                                      'reminder' => '#f59e0b', 'project' => '#10b981', 'todo' => '#14b8a6',
+                                      'finance' => '#22c55e', 'habit' => '#22c55e', 'music' => '#ec4899',
+                                      'analysis' => '#ef4444', 'code_review' => '#3b82f6', 'mood_check' => '#f97316',
+                                      'content_summarizer' => '#06b6d4', 'screenshot' => '#64748b',
+                                      'event_reminder' => '#eab308', 'pomodoro' => '#dc2626',
+                                      'hangman' => '#a855f7', 'flashcard' => '#2563eb',
+                                      'smart_meeting' => '#059669',
+                                      default => '#6b7280'
+                                  } }}">{{ $msg['routed_agent'] }}</span>
+                        @endif
                         @if(!empty($msg['model']))
                             <span class="px-1.5 py-0.5 rounded {{ $msg['direction'] === 'out' ? 'bg-indigo-500/30 text-indigo-200' : 'bg-gray-200 text-gray-500' }} text-[10px] font-mono">{{ $msg['model'] }}</span>
                         @endif

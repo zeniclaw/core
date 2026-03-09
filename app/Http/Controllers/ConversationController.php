@@ -67,8 +67,14 @@ class ConversationController extends Controller
                 $mimetype = $media['mimetype'] ?? null;
 
                 $model = null;
+                $routedAgent = null;
                 if (!$isIncoming) {
                     $model = $context['model'] ?? null;
+                    // Extract routed agent from log context or message prefix
+                    $routedAgent = $context['routed_agent'] ?? null;
+                    if (!$routedAgent && preg_match('/^\[(\w+)\]/', $log->message ?? '', $m)) {
+                        $routedAgent = $m[1];
+                    }
                 }
 
                 return [
@@ -84,6 +90,7 @@ class ConversationController extends Controller
                     'media_url' => $isIncoming ? $mediaUrl : null,
                     'media_type' => $isIncoming ? $mimetype : null,
                     'model' => $model,
+                    'routed_agent' => $routedAgent,
                 ];
             })
             ->filter(fn ($m) => !empty($m['body']) || $m['has_media']);

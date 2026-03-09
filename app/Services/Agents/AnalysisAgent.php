@@ -127,6 +127,7 @@ class AnalysisAgent extends BaseAgent
 
         $this->log($context, 'Analysis reply sent', [
             'model'        => $model,
+            'routed_agent' => $context->routedAgent,
             'type'         => $analysisType,
             'depth'        => $depth,
             'complexity'   => $context->complexity,
