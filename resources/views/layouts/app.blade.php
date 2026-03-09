@@ -50,6 +50,7 @@
                     ['route'=>'contacts.index',       'icon'=>'&#x1F465;', 'label'=>'Contacts',       'match'=>'contacts*'],
                     ['route'=>'projects.index',       'icon'=>'&#x1F4C1;', 'label'=>'Projects',       'match'=>'projects*'],
                     ['route'=>'subagents.index',      'icon'=>'&#x1F680;', 'label'=>'SubAgents',      'match'=>'subagents*'],
+                    ['route'=>'workflows.index',       'icon'=>'&#x2699;',  'label'=>'Workflows',      'match'=>'workflows*'],
                     ['route'=>'improvements.index',   'icon'=>'&#x1F9E0;', 'label'=>'Improvements',   'match'=>'improvements*'],
                     ['route'=>'reminders.index',      'icon'=>'&#x23F0;',  'label'=>'Reminders',      'match'=>'reminders*'],
                     ['route'=>'logs.index',           'icon'=>'&#x1F4CB;', 'label'=>'Logs',           'match'=>'logs*'],

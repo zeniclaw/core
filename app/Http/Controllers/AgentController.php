@@ -193,6 +193,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Memorise contexte et historique pour continuite',
         ],
+        'streamline' => [
+            'label' => 'Streamline',
+            'icon' => '⚙️',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Chainer et automatiser des workflows multi-agents',
+        ],
     ];
 
     public function index(Request $request)

@@ -19,6 +19,7 @@ use App\Http\Controllers\OllamaController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SelfImprovementController;
 use App\Http\Controllers\SubAgentController;
+use App\Http\Controllers\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ────────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/agents/{agent}/sessions/{session}', [AgentSessionController::class, 'destroy'])->name('agents.sessions.destroy');
     Route::get('/agents/{agent}/sub/{subAgent}', [AgentController::class, 'showSubAgent'])
         ->name('agents.sub-agent')
-        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro|web_search');
+        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro|web_search|document|user_preferences|conversation_memory|streamline');
     Route::post('/agents/{agent}/sub-agent-models', [AgentController::class, 'updateSubAgentModels'])->name('agents.sub-agent-models');
 
     // Reminders
@@ -98,6 +99,20 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/subagents/{subAgent}/kill', [SubAgentController::class, 'kill'])->name('subagents.kill');
     Route::post('/subagents/{subAgent}/retry', [SubAgentController::class, 'retry'])->name('subagents.retry');
     Route::post('/subagents/{subAgent}/relaunch', [SubAgentController::class, 'relaunch'])->name('subagents.relaunch');
+
+    // Workflows
+    Route::get('/workflows', [WorkflowController::class, 'index'])->name('workflows.index');
+    Route::post('/workflows', [WorkflowController::class, 'store'])->name('workflows.store');
+    Route::get('/workflows/{workflow}', [WorkflowController::class, 'show'])->name('workflows.show');
+    Route::delete('/workflows/{workflow}', [WorkflowController::class, 'destroy'])->name('workflows.destroy');
+    Route::post('/workflows/{workflow}/trigger', [WorkflowController::class, 'trigger'])->name('workflows.trigger');
+    Route::post('/workflows/{workflow}/toggle', [WorkflowController::class, 'toggle'])->name('workflows.toggle');
+
+    // Workflow API endpoints
+    Route::get('/api/workflows', [WorkflowController::class, 'apiList'])->name('api.workflows');
+    Route::post('/api/workflows', [WorkflowController::class, 'apiStore'])->name('api.workflows.store');
+    Route::post('/api/workflows/{workflow}/trigger', [WorkflowController::class, 'apiTrigger'])->name('api.workflows.trigger');
+    Route::delete('/api/workflows/{workflow}', [WorkflowController::class, 'apiDestroy'])->name('api.workflows.destroy');
 
     // Improvements (auto-amelioration)
     Route::get('/improvements', [SelfImprovementController::class, 'index'])->name('improvements.index');
