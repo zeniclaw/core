@@ -282,7 +282,153 @@ CODE;
         $this->assertTrue($analyzer->isSupported('python'));
         $this->assertTrue($analyzer->isSupported('sql'));
         $this->assertTrue($analyzer->isSupported('typescript'));
+        $this->assertTrue($analyzer->isSupported('go'));
+        $this->assertTrue($analyzer->isSupported('java'));
         $this->assertFalse($analyzer->isSupported('cobol'));
+    }
+
+    public function test_analyzer_detects_go_error_ignored(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = "result, _ := os.Open(\"file.txt\")";
+
+        $issues = $analyzer->analyzePatterns($code, 'go');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if (str_contains($issue['message'], 'Erreur ignoree')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect ignored error in Go');
+    }
+
+    public function test_analyzer_detects_java_sql_injection(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = 'Statement stmt = conn.createStatement();
+ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
+
+        $issues = $analyzer->analyzePatterns($code, 'java');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if ($issue['type'] === 'security' && str_contains($issue['message'], 'SQL Injection')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect SQL injection in Java');
+    }
+
+    public function test_analyzer_detects_python_mutable_default_arg(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = "def add_item(item, items=[]):\n    items.append(item)\n    return items";
+
+        $issues = $analyzer->analyzePatterns($code, 'python');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if (str_contains($issue['message'], 'mutable')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect mutable default argument in Python');
+    }
+
+    public function test_analyzer_detects_js_promise_without_catch(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        $code = 'fetch("/api/data").then(res => res.json()).then(data => console.log(data));';
+
+        $issues = $analyzer->analyzePatterns($code, 'javascript');
+
+        $hasIssue = false;
+        foreach ($issues as $issue) {
+            if (str_contains($issue['message'], 'catch') || str_contains($issue['message'], 'Promise')) {
+                $hasIssue = true;
+                break;
+            }
+        }
+
+        $this->assertTrue($hasIssue, 'Should detect Promise without .catch()');
+    }
+
+    public function test_analyzer_truncates_large_code_blocks(): void
+    {
+        $analyzer = new CodeAnalyzer();
+
+        // Generate 250 lines of code
+        $lines = [];
+        for ($i = 1; $i <= 250; $i++) {
+            $lines[] = "echo \$i; // line {$i}";
+        }
+        $code = implode("\n", $lines);
+        $message = "```php\n{$code}\n```\ncode review";
+
+        $blocks = $analyzer->extractCodeBlocks($message);
+
+        $this->assertCount(1, $blocks);
+        $this->assertEquals(250, $blocks[0]['line_count']);
+        $this->assertTrue($blocks[0]['truncated']);
+    }
+
+    public function test_code_review_agent_detects_quick_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('quick review')));
+        $this->assertTrue($agent->canHandle($this->makeContext('revue rapide')));
+    }
+
+    public function test_code_review_agent_detects_diff_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('compare code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('comparer code')));
+    }
+
+    public function test_diff_mode_requires_two_blocks(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        // Only one code block — should ask for two
+        $body = "```php\necho 'hello';\n```\ncompare code";
+        $context = $this->makeContext($body);
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('deux blocs', $result->reply);
+    }
+
+    public function test_no_code_blocks_returns_hint_with_modes(): void
+    {
+        $agent = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas trouve de code', $result->reply);
+        $this->assertStringContainsString('quick review', $result->reply);
+    }
+
+    public function test_agent_version_is_1_1_0(): void
+    {
+        $agent = new CodeReviewAgent();
+        $this->assertEquals('1.1.0', $agent->version());
     }
 
     // ── Controller & Router integration ──────────────────────────────────────
@@ -321,8 +467,10 @@ CODE;
         $user = User::factory()->create();
         $agent = Agent::factory()->create(['user_id' => $user->id]);
         $session = AgentSession::create([
-            'agent_id' => $agent->id,
-            'phone' => $this->testPhone,
+            'agent_id'      => $agent->id,
+            'session_key'   => AgentSession::keyFor($agent->id, 'whatsapp', $this->testPhone),
+            'channel'       => 'whatsapp',
+            'peer_id'       => $this->testPhone,
             'last_message_at' => now(),
         ]);
 
@@ -336,6 +484,8 @@ CODE;
             mediaUrl: null,
             mimetype: null,
             media: null,
+            routedAgent: 'code_review',
+            routedModel: 'claude-haiku-4-5-20251001',
         );
     }
 }

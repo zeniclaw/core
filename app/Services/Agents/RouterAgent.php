@@ -376,6 +376,14 @@ CATALOG;
         return (bool) preg_match('#https?://gitlab\.[^\s]+#i', $body);
     }
 
+    private function detectCodeReviewKeywords(string $body): bool
+    {
+        return (bool) preg_match(
+            '/(?:\b|@)(code\s*review|review\s*(my|this|the)?\s*code|verifi(er|e)\s*(ce|mon|le)\s*code|check\s*(this|my)?\s*code|codereviewer|quick\s*review|revue\s*rapide)\b/iu',
+            $body
+        );
+    }
+
     private function getRecentHistory(ConversationMemoryService $memory, AgentContext $context, int $count = 5): string
     {
         $data = $memory->read($context->agent->id, $context->from);
