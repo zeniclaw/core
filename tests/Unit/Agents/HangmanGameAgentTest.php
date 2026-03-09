@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_4_0(): void
+    public function test_agent_version_is_1_5_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.4.0', $agent->version());
+        $this->assertEquals('1.5.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -857,6 +857,178 @@ class HangmanGameAgentTest extends TestCase
         if (str_contains($result->reply, 'Victoire')) {
             $this->assertStringContainsString('pts', $result->reply);
         }
+    }
+
+    // ── Difficulty levels ─────────────────────────────────────────────────────
+
+    public function test_start_with_easy_difficulty_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start facile');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Facile', $result->reply);
+    }
+
+    public function test_start_with_hard_difficulty_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start difficile');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Difficile', $result->reply);
+    }
+
+    public function test_start_with_medium_difficulty_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start moyen');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Moyen', $result->reply);
+    }
+
+    public function test_start_with_category_and_difficulty_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start tech facile');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Informatique', $result->reply);
+        $this->assertStringContainsString('Facile', $result->reply);
+
+        $game = \App\Models\HangmanGame::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->first();
+
+        // Word should be 2-6 characters (easy range)
+        $this->assertLessThanOrEqual(6, mb_strlen($game->word));
+    }
+
+    public function test_easy_difficulty_word_length_within_range(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start easy');
+
+        $agent->handle($context);
+
+        $game = \App\Models\HangmanGame::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->first();
+
+        $this->assertNotNull($game);
+        $this->assertGreaterThanOrEqual(2, mb_strlen($game->word));
+        $this->assertLessThanOrEqual(6, mb_strlen($game->word));
+    }
+
+    // ── Alphabet display ──────────────────────────────────────────────────────
+
+    public function test_alphabet_shows_remaining_letters_during_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman alpha');
+
+        $game = $this->createActiveGame($context, 'LARAVEL');
+        $game->update(['guessed_letters' => ['A', 'L']]);
+
+        $result = $agent->handle($context);
+
+        // 26 letters - A - L = 24 remaining
+        $this->assertStringContainsString('Lettres non essayees', $result->reply);
+        $this->assertStringContainsString('24 restantes', $result->reply);
+        $this->assertStringContainsString('B', $result->reply);
+        $this->assertStringContainsString('C', $result->reply);
+    }
+
+    public function test_alphabet_without_active_game_prompts_start(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman alpha');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('hangman start', $result->reply);
+    }
+
+    // ── Common letters feedback ───────────────────────────────────────────────
+
+    public function test_wrong_word_guess_shows_common_letters_count(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine LARABE');
+
+        $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        // LARABE vs LARAVEL share L, A, R, E -> 4 common letters
+        $this->assertStringContainsString('en commun', $result->reply);
+    }
+
+    public function test_wrong_word_guess_no_common_letters(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman devine ZOOM');
+
+        $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        // ZOOM vs LARAVEL: no common letters
+        $this->assertStringNotContainsString('en commun', $result->reply);
+    }
+
+    // ── Streak display on win ─────────────────────────────────────────────────
+
+    public function test_winning_streak_displayed_when_more_than_one(): void
+    {
+        $agent = new HangmanGameAgent();
+
+        // Win first game
+        $context1 = $this->makeContext('A');
+        $this->createActiveGame($context1, 'A');
+        $agent->handle($context1);
+
+        // Win second game with the SAME user (same phone) — streak = 2
+        $context2 = $this->makeContext('B', context: $context1);
+        $this->createActiveGame($context2, 'B');
+        $result = $agent->handle($context2);
+
+        $this->assertStringContainsString("d'affile", $result->reply);
+    }
+
+    // ── Help updated ──────────────────────────────────────────────────────────
+
+    public function test_help_mentions_difficulty(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman help');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('difficulte', strtolower($result->reply));
+    }
+
+    public function test_help_mentions_alpha_command(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman help');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('alpha', strtolower($result->reply));
     }
 
     private function makeContext(string $body, ?AgentContext $context = null): AgentContext
