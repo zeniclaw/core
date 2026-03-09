@@ -324,6 +324,57 @@ class VoiceCommandAgentTest extends TestCase
         $this->assertEquals('reply', $result->action);
         $this->assertStringContainsString('oui', $result->reply);
         $this->assertStringContainsString('non', $result->reply);
+        $this->assertStringContainsString('corriger', $result->reply);
+    }
+
+    public function test_handle_pending_context_accepts_manual_correction(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('{}', 200),
+        ]);
+
+        $context = $this->makeContext(body: 'corriger: Rappelle-moi d\'acheter du fromage');
+        $pendingContext = [
+            'type' => 'low_confidence_confirm',
+            'data' => [
+                'transcript' => 'Rappelle-moi d\'acheter du pain',
+                'confidence' => 0.65,
+                'language' => 'fr',
+            ],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('fromage', $result->reply);
+        $this->assertTrue($result->metadata['user_corrected'] ?? false);
+        $this->assertTrue($result->metadata['user_confirmed'] ?? false);
+        $this->assertEquals('voice', $result->metadata['source'] ?? null);
+    }
+
+    public function test_handle_pending_context_accepts_correction_with_accent(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('{}', 200),
+        ]);
+
+        $context = $this->makeContext(body: 'Corriger: Bonjour le monde');
+        $pendingContext = [
+            'type' => 'low_confidence_confirm',
+            'data' => [
+                'transcript' => 'Bnjour le monde',
+                'confidence' => 0.6,
+                'language' => 'fr',
+            ],
+        ];
+
+        $result = $this->agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Bonjour', $result->reply);
+        $this->assertTrue($result->metadata['user_corrected'] ?? false);
     }
 
     public function test_handle_pending_context_ignores_unknown_type(): void
@@ -429,8 +480,130 @@ class VoiceCommandAgentTest extends TestCase
         $this->assertStringContainsString('bruit de fond', $result->reply);
     }
 
-    public function test_version_is_1_3(): void
+    public function test_version_is_1_4(): void
     {
-        $this->assertEquals('1.3.0', $this->agent->version());
+        $this->assertEquals('1.4.0', $this->agent->version());
+    }
+
+    public function test_can_handle_returns_true_for_quicktime_video(): void
+    {
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/video.mov',
+            mimetype: 'video/quicktime',
+        );
+
+        $this->assertTrue($this->agent->canHandle($context));
+    }
+
+    public function test_handle_includes_duration_in_metadata(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => 'Rappelle-moi d\'acheter du lait demain matin s\'il te plait',
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertArrayHasKey('duration_sec', $result->metadata);
+        $this->assertIsInt($result->metadata['duration_sec']);
+        $this->assertGreaterThanOrEqual(0, $result->metadata['duration_sec']);
+    }
+
+    public function test_handle_detects_music_hallucination(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => '[music]',
+                'language' => 'en',
+                'segments' => [
+                    ['avg_logprob' => -0.05],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('bruit de fond', $result->reply);
+    }
+
+    public function test_handle_detects_applause_hallucination(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => '[applaudissements]',
+                'language' => 'fr',
+                'segments' => [
+                    ['avg_logprob' => -0.05],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('bruit de fond', $result->reply);
+    }
+
+    public function test_language_note_shows_full_name_not_code(): void
+    {
+        Http::fake([
+            'waha:3000/*' => Http::response('fake-audio-bytes', 200),
+            'api.openai.com/*' => Http::response([
+                'text' => 'Hello this is a test message in English',
+                'language' => 'en',
+                'segments' => [
+                    ['avg_logprob' => -0.1],
+                ],
+            ], 200),
+        ]);
+
+        \App\Models\AppSetting::set('openai_api_key', 'test-key');
+
+        $context = $this->makeContext(
+            hasMedia: true,
+            mediaUrl: 'http://waha:3000/api/files/audio.ogg',
+            mimetype: 'audio/ogg',
+        );
+
+        $result = $this->agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        // Should display "Anglais" not just "en"
+        $this->assertStringContainsString('Anglais', $result->reply);
     }
 }

@@ -11,6 +11,7 @@ class VoiceCommandAgent extends BaseAgent
     // Video mimetypes that contain audio and can be transcribed
     private const TRANSCRIBABLE_VIDEO_TYPES = [
         'video/mp4', 'video/webm', 'video/ogg', 'video/3gpp', 'video/mpeg',
+        'video/quicktime',
     ];
 
     // Max audio size in bytes (25MB — Whisper API limit)
@@ -25,6 +26,9 @@ class VoiceCommandAgent extends BaseAgent
     // Chars threshold above which an AI summary is generated
     private const LONG_TRANSCRIPT_THRESHOLD = 600;
 
+    // Average speaking rate in words per minute (French/English average)
+    private const WORDS_PER_MINUTE = 130;
+
     // Known Whisper hallucination patterns (common false positives on silent/noisy audio)
     private const WHISPER_HALLUCINATIONS = [
         "sous-titres r\u{00E9}alis\u{00E9}s par la communaut\u{00E9} d'amara",
@@ -36,7 +40,21 @@ class VoiceCommandAgent extends BaseAgent
         'transcribed by',
         'amara.org',
         "sous titres r\u{00E9}alis\u{00E9}s",
+        // Musical/noise hallucinations
+        '[music]',
+        '[musique]',
+        '[applaudissements]',
+        '[applause]',
+        '[rires]',
+        '[laughter]',
+        '[bruit de fond]',
+        '[background noise]',
+        '[inaudible]',
+        '[silence]',
     ];
+
+    // Hallucination patterns detected by single special chars (checked separately)
+    private const WHISPER_HALLUCINATION_CHARS = ['♪', '♫', '🎵', '🎶'];
 
     // Language code to WhatsApp-friendly flag emoji
     private const LANGUAGE_FLAGS = [
@@ -49,6 +67,17 @@ class VoiceCommandAgent extends BaseAgent
         'hi' => '🇮🇳', 'id' => '🇮🇩', 'th' => '🇹🇭', 'ms' => '🇲🇾',
     ];
 
+    // Language code to human-readable name (in French)
+    private const LANGUAGE_NAMES = [
+        'fr' => 'Français', 'en' => 'Anglais', 'es' => 'Espagnol', 'de' => 'Allemand',
+        'it' => 'Italien', 'pt' => 'Portugais', 'ar' => 'Arabe', 'zh' => 'Chinois',
+        'ja' => 'Japonais', 'ko' => 'Coréen', 'ru' => 'Russe', 'nl' => 'Néerlandais',
+        'tr' => 'Turc', 'pl' => 'Polonais', 'sv' => 'Suédois', 'he' => 'Hébreu',
+        'vi' => 'Vietnamien', 'uk' => 'Ukrainien', 'cs' => 'Tchèque', 'ro' => 'Roumain',
+        'hu' => 'Hongrois', 'da' => 'Danois', 'fi' => 'Finnois', 'el' => 'Grec',
+        'hi' => 'Hindi', 'id' => 'Indonésien', 'th' => 'Thaï', 'ms' => 'Malais',
+    ];
+
     public function name(): string
     {
         return 'voice_command';
@@ -56,7 +85,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription, detection du silence/bruit/hallucinations Whisper, confirmation interactive en cas de doute, indicateur de langue par drapeau et resume automatique des longs messages. Supporte ogg, mp3, wav, mp4, webm, amr et plus.';
+        return 'Agent interne de traitement des messages vocaux et videos. Telecharge et transcrit les messages audio/video via Whisper ou Deepgram, avec gestion de la confiance de transcription, detection du silence/bruit/hallucinations Whisper, confirmation interactive en cas de doute, correction manuelle de transcript, estimation de duree, indicateur de langue par drapeau et resume automatique des longs messages. Supporte ogg, mp3, wav, mp4, webm, amr, mov et plus.';
     }
 
     public function keywords(): array
@@ -66,7 +95,7 @@ class VoiceCommandAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -133,6 +162,7 @@ class VoiceCommandAgent extends BaseAgent
         $minConfidence = config('voice_command.min_confidence', 0.8);
         $sizeKb = round($audioSize / 1024, 1);
         $wordCount = str_word_count($transcript);
+        $durationSec = $this->estimateDurationSeconds($wordCount);
 
         // Detect silence or background noise (transcript too short to be meaningful)
         if ($this->isSilenceOrNoise($transcript)) {
@@ -163,6 +193,7 @@ class VoiceCommandAgent extends BaseAgent
             'is_video' => $isVideo,
             'size_kb' => $sizeKb,
             'word_count' => $wordCount,
+            'duration_sec' => $durationSec,
         ]);
 
         // If confidence is too low, store transcript and ask for confirmation
@@ -174,7 +205,7 @@ class VoiceCommandAgent extends BaseAgent
         $languageNote = $this->buildLanguageNote($language);
 
         // For long transcripts, generate an AI summary appended to the reply
-        $summaryNote = $this->maybeSummarizeTranscript($context, $transcript);
+        $summaryNote = $this->maybeSummarizeTranscript($context, $transcript, $language);
 
         // Return transcript — orchestrator will re-route to the appropriate agent
         return AgentResult::reply($transcript . $languageNote . $summaryNote, [
@@ -183,6 +214,7 @@ class VoiceCommandAgent extends BaseAgent
             'language' => $language,
             'source' => 'voice',
             'word_count' => $wordCount,
+            'duration_sec' => $durationSec,
         ]);
     }
 
@@ -197,11 +229,32 @@ class VoiceCommandAgent extends BaseAgent
 
         $this->clearPendingContext($context);
 
-        $userReply = mb_strtolower(trim($context->body ?? ''));
+        $rawReply = trim($context->body ?? '');
+        $userReply = mb_strtolower($rawReply);
         $storedTranscript = $pendingContext['data']['transcript'] ?? null;
 
         if (!$storedTranscript) {
             return null;
+        }
+
+        // NEW: User wants to manually correct the transcript
+        if (preg_match('/^corrig(?:er|é|e)\s*:\s*(.+)$/isu', $rawReply, $matches)) {
+            $correctedText = trim($matches[1]);
+            if (mb_strlen($correctedText) >= self::MIN_TRANSCRIPT_CHARS) {
+                $language = $pendingContext['data']['language'] ?? 'fr';
+                $this->log($context, 'Transcript manually corrected by user', [
+                    'original' => mb_substr($storedTranscript, 0, 200),
+                    'corrected' => mb_substr($correctedText, 0, 200),
+                ]);
+                return AgentResult::reply($correctedText, [
+                    'transcript' => $correctedText,
+                    'confidence' => 1.0,
+                    'language' => $language,
+                    'source' => 'voice',
+                    'user_corrected' => true,
+                    'user_confirmed' => true,
+                ]);
+            }
         }
 
         // User confirmed the transcript
@@ -238,7 +291,7 @@ class VoiceCommandAgent extends BaseAgent
         ], ttlMinutes: 3, expectRawInput: true);
 
         $preview = mb_substr($storedTranscript, 0, 120) . (mb_strlen($storedTranscript) > 120 ? '...' : '');
-        $reply = "Reponds *oui* pour valider ou *non* pour annuler la transcription :\n\n\"{$preview}\"";
+        $reply = "Reponds *oui* pour valider, *non* pour annuler, ou *corriger: [ton texte]* pour corriger la transcription :\n\n\"{$preview}\"";
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply);
     }
@@ -262,7 +315,7 @@ class VoiceCommandAgent extends BaseAgent
         $preview = mb_substr($transcript, 0, 200) . (mb_strlen($transcript) > 200 ? '...' : '');
         $reply = "J'ai transcrit ton vocal (confiance : *{$confidencePct}%*){$langSuffix} :\n\n"
             . "_{$preview}_\n\n"
-            . "C'est bien ca ? Reponds *oui* pour valider ou *non* pour annuler.";
+            . "C'est bien ca ? Reponds *oui* pour valider, *non* pour annuler, ou *corriger: [ton texte]* pour corriger.";
 
         $this->sendText($context->from, $reply);
 
@@ -285,18 +338,20 @@ class VoiceCommandAgent extends BaseAgent
 
     /**
      * For transcripts above LONG_TRANSCRIPT_THRESHOLD chars, use Claude to generate a brief summary.
+     * The summary is generated in the detected language when possible, defaulting to French.
      * Returns formatted summary note (with leading newlines) or empty string on failure/short transcript.
      */
-    private function maybeSummarizeTranscript(AgentContext $context, string $transcript): string
+    private function maybeSummarizeTranscript(AgentContext $context, string $transcript, string $language = 'fr'): string
     {
         if (mb_strlen($transcript) < self::LONG_TRANSCRIPT_THRESHOLD) {
             return '';
         }
 
         $model = $this->resolveModel($context);
-        $systemPrompt = 'Tu es un assistant qui resume des transcriptions vocales. '
-            . 'Genere un resume TRES court (1-2 phrases maximum) en francais de la transcription fournie. '
-            . 'Sois concis et direct. Ne commence pas par "La transcription dit" ou similaire. '
+        $langName = self::LANGUAGE_NAMES[$language] ?? 'français';
+        $systemPrompt = "Tu es un assistant qui resume des transcriptions vocales. "
+            . "Genere un resume TRES court (1-2 phrases maximum) en {$langName} de la transcription fournie. "
+            . "Sois concis et direct. Ne commence pas par \"La transcription dit\" ou similaire. "
             . "Reponds uniquement avec le resume, rien d'autre.";
 
         try {
@@ -319,11 +374,22 @@ class VoiceCommandAgent extends BaseAgent
     private function isWhisperHallucination(string $transcript): bool
     {
         $lower = mb_strtolower(trim($transcript));
+
         foreach (self::WHISPER_HALLUCINATIONS as $pattern) {
             if (str_contains($lower, mb_strtolower($pattern))) {
                 return true;
             }
         }
+
+        // Check if transcript consists almost entirely of hallucination chars
+        $strippedOfHallucinationChars = $transcript;
+        foreach (self::WHISPER_HALLUCINATION_CHARS as $char) {
+            $strippedOfHallucinationChars = str_replace($char, '', $strippedOfHallucinationChars);
+        }
+        if ($this->isSilenceOrNoise($strippedOfHallucinationChars)) {
+            return true;
+        }
+
         return false;
     }
 
@@ -386,7 +452,7 @@ class VoiceCommandAgent extends BaseAgent
     }
 
     /**
-     * Build a language note with flag emoji for non-default languages.
+     * Build a language note with flag emoji and full language name for non-default languages.
      * Returns empty string for the default language.
      */
     private function buildLanguageNote(string $language): string
@@ -398,7 +464,20 @@ class VoiceCommandAgent extends BaseAgent
 
         $flag = self::LANGUAGE_FLAGS[$language] ?? '';
         $flagStr = $flag ? "{$flag} " : '';
-        return "\n_{$flagStr}Langue detectee : {$language}_";
+        $langName = self::LANGUAGE_NAMES[$language] ?? mb_strtoupper($language);
+        return "\n_{$flagStr}Langue detectee : {$langName}_";
+    }
+
+    /**
+     * Estimate the spoken duration in seconds from word count.
+     * Uses an average speaking rate of 130 words per minute.
+     */
+    private function estimateDurationSeconds(int $wordCount): int
+    {
+        if ($wordCount === 0) {
+            return 0;
+        }
+        return (int) round($wordCount / self::WORDS_PER_MINUTE * 60);
     }
 
     /**
