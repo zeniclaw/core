@@ -258,6 +258,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Votez sur des taches, decidez en groupe',
         ],
+        'recipe' => [
+            'label' => 'Recipe AI',
+            'icon' => '👨‍🍳',
+            'color' => 'orange',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Suggestions de recettes par ingredients, regime, temps',
+        ],
     ];
 
     public function index(Request $request)
