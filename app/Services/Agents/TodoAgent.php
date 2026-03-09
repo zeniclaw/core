@@ -48,12 +48,15 @@ class TodoAgent extends BaseAgent
             'modifie', 'modifier', 'renomme', 'renommer', 'edite', 'editer', 'changer le titre',
             'cherche', 'recherche', 'trouve', 'find', 'search',
             'aide todo', 'help todo', 'aide taches',
+            'changer priorite', 'change priorite', 'mettre urgent', 'mettre en urgent', 'set priority',
+            'changer echeance', 'nouvelle echeance', 'modifier deadline', 'reporter', 'repousser echeance',
+            'changer la deadline', 'modifier echeance', 'nouvelle deadline',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -126,6 +129,13 @@ class TodoAgent extends BaseAgent
                         'items' => $items, 'list_name' => $listName, 'priority' => $priority,
                     ]);
                     return AgentResult::reply($reply, ['action' => 'todo_add']);
+                }
+                // Success: prepend confirmation before the refreshed list
+                if (!empty($items)) {
+                    $dest = $listName ? " dans *{$listName}*" : '';
+                    $confirmationPrefix = count($items) === 1
+                        ? "✅ *" . $items[0] . "* ajouté{$dest} !\n\n"
+                        : "✅ " . count($items) . " tâches ajoutées{$dest} !\n\n";
                 }
                 break;
 
@@ -246,6 +256,12 @@ class TodoAgent extends BaseAgent
                 $this->sendText($context->from, $reply);
                 $this->log($context, "Todo action: stats", ['todo_count' => $todos->count()]);
                 return AgentResult::reply($reply, ['action' => 'todo_stats']);
+
+            case 'set_priority':
+                return $this->handleSetPriority($context, $todos, $items, $listName, $priority);
+
+            case 'set_due':
+                return $this->handleSetDue($context, $todos, $items, $listName, $dueAt);
 
             case 'list':
                 break;
@@ -497,6 +513,110 @@ class TodoAgent extends BaseAgent
     }
 
     /**
+     * Change the priority of a single task.
+     */
+    private function handleSetPriority(AgentContext $context, $todos, array $items, ?string $listName, string $priority): AgentResult
+    {
+        if (empty($items)) {
+            $reply = "Précise le numéro de la tâche.\nEx: \"mets le 2 en urgent\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_priority_missing_params']);
+        }
+
+        if (!in_array($priority, ['high', 'normal', 'low'])) {
+            $reply = "Priorité invalide. Utilise : urgent (high), normal, ou pas urgent (low).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_priority_invalid']);
+        }
+
+        $filteredTodos = $this->filterByList($todos, $listName);
+        $num           = (int) $items[0];
+        $index         = $num - 1;
+        $todo          = $filteredTodos->values()[$index] ?? null;
+
+        if (!$todo) {
+            $reply = "⚠️ Tâche #{$num} introuvable. Tape \"ma liste\" pour voir les numéros.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_priority_not_found']);
+        }
+
+        $oldPriority = $todo->priority;
+        $todo->update(['priority' => $priority]);
+
+        $priorityLabel = match ($priority) {
+            'high'  => '🔴 Urgent',
+            'low'   => '🔵 Pas urgent',
+            default => '⬜ Normal',
+        };
+
+        $reply = "🎯 Priorité de *{$todo->title}* → *{$priorityLabel}*.";
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: set_priority", [
+            'num'          => $num,
+            'old_priority' => $oldPriority,
+            'new_priority' => $priority,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_set_priority']);
+    }
+
+    /**
+     * Change or remove the due date of a single task.
+     */
+    private function handleSetDue(AgentContext $context, $todos, array $items, ?string $listName, ?string $dueAt): AgentResult
+    {
+        if (empty($items)) {
+            $reply = "Précise le numéro de la tâche.\nEx: \"change l'échéance du 3 pour vendredi\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_due_missing_params']);
+        }
+
+        $filteredTodos = $this->filterByList($todos, $listName);
+        $num           = (int) $items[0];
+        $index         = $num - 1;
+        $todo          = $filteredTodos->values()[$index] ?? null;
+
+        if (!$todo) {
+            $reply = "⚠️ Tâche #{$num} introuvable. Tape \"ma liste\" pour voir les numéros.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_set_due_not_found']);
+        }
+
+        $newDueAt = null;
+        if ($dueAt) {
+            try {
+                $newDueAt = Carbon::parse($dueAt, AppSetting::timezone())->utc();
+            } catch (\Exception $e) {
+                Log::warning('[TodoAgent] Invalid due_at in set_due', ['due_at' => $dueAt, 'error' => $e->getMessage()]);
+                $reply = "⚠️ Date invalide : \"{$dueAt}\". Essaie \"pour vendredi\" ou \"2026-03-20\".";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'todo_set_due_invalid_date']);
+            }
+        }
+
+        $todo->update(['due_at' => $newDueAt]);
+
+        if ($newDueAt) {
+            $due     = $newDueAt->copy()->timezone(AppSetting::timezone());
+            $dateStr = $due->format('d/m/Y');
+            if ($due->format('H:i') !== '23:59' && $due->format('H:i') !== '00:00') {
+                $dateStr .= ' à ' . $due->format('H:i');
+            }
+            $reply = "📅 Échéance de *{$todo->title}* mise au *{$dateStr}*.";
+        } else {
+            $reply = "📅 Échéance de *{$todo->title}* supprimée.";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: set_due", [
+            'num'    => $num,
+            'due_at' => $dueAt,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_set_due']);
+    }
+
+    /**
      * Display usage help.
      */
     private function handleHelp(AgentContext $context): AgentResult
@@ -514,6 +634,12 @@ class TodoAgent extends BaseAgent
             . "\"décoche le 1\"\n\n"
             . "*Modifier une tâche :*\n"
             . "\"modifie le 2 : nouveau titre\"\n\n"
+            . "*Changer la priorité :*\n"
+            . "\"mets le 2 en urgent\"\n"
+            . "\"change priorité du 3 en normal\"\n\n"
+            . "*Changer l'échéance :*\n"
+            . "\"change l'échéance du 1 pour vendredi\"\n"
+            . "\"supprime la deadline du 2\"\n\n"
             . "*Rechercher :*\n"
             . "\"cherche pain\" / \"cherche lait dans courses\"\n\n"
             . "*Supprimer :*\n"
@@ -544,7 +670,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
@@ -560,6 +686,8 @@ ACTIONS:
 - "move": deplacer une ou plusieurs taches vers une autre liste. items = [numeros]. list_name = liste source (null = default). target_list = liste destination (null = default).
 - "edit": modifier le titre d'une tache. items = [numero]. new_title = nouveau titre (string). list_name = la liste concernee (null = liste par defaut).
 - "search": rechercher des taches par mot cle dans le titre. items = []. query = mot cle (string). list_name = null (global) ou nom de liste.
+- "set_priority": changer la priorite d'une tache existante. items = [numero]. priority = "high|normal|low". list_name = la liste concernee.
+- "set_due": changer ou supprimer l'echeance d'une tache existante. items = [numero]. due_at = "YYYY-MM-DD HH:MM" ou null pour supprimer l'echeance. list_name = la liste concernee.
 - "help": afficher l'aide des commandes disponibles. items = []. list_name = null.
 
 GESTION DES LISTES:
@@ -584,6 +712,21 @@ EDITION ET RECHERCHE:
 - "cherche pain" → search, query: "pain", list_name: null
 - "recherche lait dans courses" → search, query: "lait", list_name: "courses"
 - "trouve les taches avec urgent" → search, query: "urgent", list_name: null
+
+CHANGEMENT DE PRIORITE (set_priority):
+- "mets le 2 en urgent" → set_priority, items: [2], priority: "high", list_name: null
+- "change la priorite du 3 en normal" → set_priority, items: [3], priority: "normal", list_name: null
+- "met le 1 en basse priorite" → set_priority, items: [1], priority: "low", list_name: null
+- "tache 4 pas urgente" → set_priority, items: [4], priority: "low", list_name: null
+- "rend le 2 de courses urgent" → set_priority, items: [2], priority: "high", list_name: "courses"
+- IMPORTANT: set_priority ne modifie PAS le titre, seulement la priorite
+
+CHANGEMENT D'ECHEANCE (set_due):
+- "change l'echeance du 1 pour vendredi" → set_due, items: [1], due_at: "YYYY-MM-DD 23:59", list_name: null
+- "repousse le 3 au 20 mars" → set_due, items: [3], due_at: "2026-03-20 23:59", list_name: null
+- "supprime la deadline du 2" → set_due, items: [2], due_at: null, list_name: null
+- "change echeance tache 1 dans courses a lundi" → set_due, items: [1], due_at: "YYYY-MM-DD 23:59", list_name: "courses"
+- IMPORTANT: set_due ne modifie PAS le titre, seulement due_at
 
 FORMAT RECURRENCE (uniquement pour "add"):
 - "daily:HH:MM" — chaque jour a HH:MM
@@ -621,6 +764,10 @@ EXEMPLES:
 - "ma liste" → {"action": "list", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 - "mes stats" → {"action": "stats", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 - "aide" → {"action": "help", "items": [], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "mets le 2 en urgent" → {"action": "set_priority", "items": [2], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "high", "due_at": null}
+- "change priorite du 1 en normal" → {"action": "set_priority", "items": [1], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
+- "repousse le 3 au 20 mars" → {"action": "set_due", "items": [3], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": "2026-03-20 23:59"}
+- "supprime la deadline du 2" → {"action": "set_due", "items": [2], "list_name": null, "target_list": null, "new_title": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -920,7 +1067,7 @@ PROMPT;
         ];
 
         // Overdue count
-        $now     = now();
+        $now     = now(AppSetting::timezone());
         $overdue = $allTodos->where('is_done', false)
             ->filter(fn ($t) => $t->due_at && $t->due_at->lt($now))
             ->count();
