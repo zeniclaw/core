@@ -225,6 +225,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Memoire intelligente partagee inter-agents',
         ],
+        'game_master' => [
+            'label' => 'GameMaster',
+            'icon' => '🎮',
+            'color' => 'purple',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Jeux interactifs, trivia, enigmes avec scoring',
+        ],
     ];
 
     public function index(Request $request)
