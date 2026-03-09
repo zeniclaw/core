@@ -25,6 +25,12 @@ class ScreenshotAgentTest extends TestCase
         $this->assertEquals('screenshot', $agent->name());
     }
 
+    public function test_screenshot_agent_version_is_1_1_0(): void
+    {
+        $agent = new ScreenshotAgent();
+        $this->assertEquals('1.1.0', $agent->version());
+    }
+
     public function test_can_handle_screenshot_keywords(): void
     {
         $agent = new ScreenshotAgent();
@@ -105,7 +111,7 @@ class ScreenshotAgentTest extends TestCase
         $this->assertStringContainsString('image', $result->reply);
     }
 
-    public function test_compare_shows_instructions(): void
+    public function test_compare_without_media_shows_instructions(): void
     {
         $agent = new ScreenshotAgent();
         $context = $this->makeContext('compare images');
@@ -114,6 +120,51 @@ class ScreenshotAgentTest extends TestCase
 
         $this->assertEquals('reply', $result->action);
         $this->assertStringContainsString('Comparaison', $result->reply);
+    }
+
+    public function test_compare_with_image_sets_pending_context(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('compare', true, 'image/png');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Etape 1/2', $result->reply);
+        $this->assertStringContainsString('premiere image', mb_strtolower($result->reply));
+
+        // Verify pending context was set
+        $context->session->refresh();
+        $pending = $context->session->pending_agent_context;
+        $this->assertNotNull($pending);
+        $this->assertEquals('screenshot', $pending['agent']);
+        $this->assertEquals('compare_step2', $pending['type']);
+        $this->assertArrayHasKey('image1_url', $pending['data']);
+    }
+
+    public function test_compare_step2_without_media_clears_context_and_cancels(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('compare');
+
+        // Manually set pending context
+        $context->session->update([
+            'pending_agent_context' => [
+                'agent'      => 'screenshot',
+                'type'       => 'compare_step2',
+                'data'       => ['image1_url' => 'http://waha:3000/api/files/img1.png'],
+                'expires_at' => now()->addMinutes(10)->toIso8601String(),
+            ],
+        ]);
+
+        $result = $agent->handlePendingContext($context, [
+            'type' => 'compare_step2',
+            'data' => ['image1_url' => 'http://waha:3000/api/files/img1.png'],
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('annulee', mb_strtolower($result->reply));
     }
 
     public function test_capture_shows_capabilities(): void
@@ -125,6 +176,38 @@ class ScreenshotAgentTest extends TestCase
 
         $this->assertEquals('reply', $result->action);
         $this->assertStringContainsString("Capture d'ecran", $result->reply);
+    }
+
+    // ── Analyze (Claude Vision) ───────────────────────────────────────────────
+
+    public function test_analyze_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('analyse');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_analyze_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('analyse', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_analyze_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('analyse cette image', true, 'image/png')));
+        $this->assertTrue($agent->canHandle($this->makeContext('describe ce que tu vois', true, 'image/png')));
     }
 
     // ── ImageProcessor ───────────────────────────────────────────────────────
@@ -276,21 +359,25 @@ class ScreenshotAgentTest extends TestCase
         $this->assertEquals('cyan', $subAgents['screenshot']['color']);
     }
 
-    public function test_router_detects_screenshot_keywords(): void
+    public function test_screenshot_agent_can_handle_all_trigger_keywords(): void
     {
-        $router = new \App\Services\Agents\RouterAgent();
-        $reflection = new \ReflectionClass($router);
-        $method = $reflection->getMethod('detectScreenshotKeywords');
-        $method->setAccessible(true);
+        $agent = new ScreenshotAgent();
 
-        $this->assertTrue($method->invoke($router, 'screenshot'));
-        $this->assertTrue($method->invoke($router, 'extract-text'));
-        $this->assertTrue($method->invoke($router, 'ocr'));
-        $this->assertTrue($method->invoke($router, 'annotate'));
-        $this->assertTrue($method->invoke($router, 'extraire texte'));
-        $this->assertTrue($method->invoke($router, 'capture ecran'));
-        $this->assertFalse($method->invoke($router, 'bonjour'));
-        $this->assertFalse($method->invoke($router, 'rappelle-moi'));
+        // Explicit commands (no media needed)
+        $this->assertTrue($agent->canHandle($this->makeContext('screenshot')));
+        $this->assertTrue($agent->canHandle($this->makeContext('extract-text')));
+        $this->assertTrue($agent->canHandle($this->makeContext('ocr')));
+        $this->assertTrue($agent->canHandle($this->makeContext('annotate')));
+
+        // Analyse/describe keywords (require media+image to trigger)
+        $this->assertTrue($agent->canHandle($this->makeContext('analyse', true, 'image/png')));
+        $this->assertTrue($agent->canHandle($this->makeContext('describe', true, 'image/png')));
+        $this->assertTrue($agent->canHandle($this->makeContext('extraire texte', true, 'image/png')));
+        $this->assertTrue($agent->canHandle($this->makeContext('capture ecran')));
+
+        // Should NOT handle unrelated messages
+        $this->assertFalse($agent->canHandle($this->makeContext('bonjour')));
+        $this->assertFalse($agent->canHandle($this->makeContext('rappelle-moi')));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -300,8 +387,8 @@ class ScreenshotAgentTest extends TestCase
         $user = User::factory()->create();
         $agent = Agent::factory()->create(['user_id' => $user->id]);
         $session = AgentSession::create([
-            'agent_id' => $agent->id,
-            'phone' => $this->testPhone,
+            'agent_id'        => $agent->id,
+            'session_key'     => $this->testPhone . '_' . uniqid(),
             'last_message_at' => now(),
         ]);
 
