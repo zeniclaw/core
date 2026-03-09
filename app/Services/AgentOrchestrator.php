@@ -36,6 +36,7 @@ use App\Services\Agents\InteractiveQuizAgent;
 use App\Services\Agents\ContentCuratorAgent;
 use App\Services\Agents\ContextAgent;
 use App\Services\Agents\GameMasterAgent;
+use App\Services\Agents\BudgetTrackerAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -98,6 +99,7 @@ class AgentOrchestrator
             new ContentCuratorAgent(),
             new ContextAgent(),
             new GameMasterAgent(),
+            new BudgetTrackerAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

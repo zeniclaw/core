@@ -70,6 +70,9 @@ class RouterAgent
             => ['streamline', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
         '/\b(workflow|chain|enchainer|chainer|pipeline)\s+.*(then|puis|ensuite|etape)/iu'
             => ['streamline', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Budget tracker → budget_tracker
+        '/\b(d[eé]pense\s+\d|budget\s+\d|\d+\s*€|j[\'']ai\s+(?:d[eé]pens[eé]|pay[eé])\s+\d|r[eé]sum[eé]\s+budget|mes\s+d[eé]penses|reset\s+budget|cat[eé]gories\s+budget)\b/iu'
+            => ['budget_tracker', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
             => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
