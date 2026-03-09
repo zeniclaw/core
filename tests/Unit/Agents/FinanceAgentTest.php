@@ -26,9 +26,9 @@ class FinanceAgentTest extends TestCase
         $this->assertEquals('finance', (new FinanceAgent())->name());
     }
 
-    public function test_agent_version_is_1_4_0(): void
+    public function test_agent_version_is_1_5_0(): void
     {
-        $this->assertEquals('1.4.0', (new FinanceAgent())->version());
+        $this->assertEquals('1.5.0', (new FinanceAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -1101,6 +1101,274 @@ class FinanceAgentTest extends TestCase
 
         $this->assertStringContainsString('comparer mois', $help);
         $this->assertStringContainsString('chercher', $help);
+    }
+
+    // ── keywords v1.5.0 ──────────────────────────────────────────────────────
+
+    public function test_keywords_include_tendance(): void
+    {
+        $this->assertContains('tendance', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_recurrent(): void
+    {
+        $this->assertContains('recurrent', (new FinanceAgent())->keywords());
+    }
+
+    // ── canHandle v1.5.0 ─────────────────────────────────────────────────────
+
+    public function test_can_handle_tendance(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('tendance')));
+    }
+
+    public function test_can_handle_6_mois(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('6 mois')));
+    }
+
+    public function test_can_handle_recurrents(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('recurrents')));
+    }
+
+    public function test_can_handle_depenses_recurrentes(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('depenses recurrentes')));
+    }
+
+    // ── parseCommand v1.5.0 ──────────────────────────────────────────────────
+
+    public function test_parse_command_monthly_trend(): void
+    {
+        $cmd = $this->parseCommand('tendance');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('monthly_trend', $cmd['action']);
+    }
+
+    public function test_parse_command_monthly_trend_6_mois(): void
+    {
+        $cmd = $this->parseCommand('6 mois');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('monthly_trend', $cmd['action']);
+    }
+
+    public function test_parse_command_monthly_trend_evolution(): void
+    {
+        $cmd = $this->parseCommand('evolution mensuelle');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('monthly_trend', $cmd['action']);
+    }
+
+    public function test_parse_command_recurring_expenses(): void
+    {
+        $cmd = $this->parseCommand('recurrents');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('recurring_expenses', $cmd['action']);
+    }
+
+    public function test_parse_command_recurring_expenses_variant(): void
+    {
+        $cmd = $this->parseCommand('depenses recurrentes');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('recurring_expenses', $cmd['action']);
+    }
+
+    // ── getMonthlyTrend (via reflection) ─────────────────────────────────────
+
+    private function callGetMonthlyTrend(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getMonthlyTrend');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_monthly_trend_no_data(): void
+    {
+        $result = $this->callGetMonthlyTrend();
+        $this->assertStringContainsString('📈', $result);
+        $this->assertStringContainsString('Aucune donnee', $result);
+    }
+
+    public function test_monthly_trend_with_current_month_expense(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 120.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetMonthlyTrend();
+        $this->assertStringContainsString('📈', $result);
+        $this->assertStringContainsString('120', $result);
+        $this->assertStringContainsString('maintenant', $result);
+    }
+
+    public function test_monthly_trend_shows_average(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 200.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 100.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->subMonth()->toDateString(),
+        ]);
+
+        $result = $this->callGetMonthlyTrend();
+        $this->assertStringContainsString('Moyenne', $result);
+        $this->assertStringContainsString('mois', $result);
+    }
+
+    public function test_monthly_trend_shows_trend_direction(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 50.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->subMonth()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 150.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetMonthlyTrend();
+        // Should show hausse or baisse
+        $this->assertTrue(
+            str_contains($result, 'hausse') || str_contains($result, 'baisse') || str_contains($result, 'Stable'),
+            "Expected trend direction in: {$result}"
+        );
+    }
+
+    // ── getRecurringExpenses (via reflection) ─────────────────────────────────
+
+    private function callGetRecurringExpenses(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getRecurringExpenses');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_recurring_expenses_no_data(): void
+    {
+        $result = $this->callGetRecurringExpenses();
+        $this->assertStringContainsString('🔄', $result);
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_recurring_expenses_no_pattern(): void
+    {
+        // Only one month of data — not recurring
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 30.0,
+            'category'   => 'loisirs',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetRecurringExpenses();
+        $this->assertStringContainsString('🔄', $result);
+        $this->assertStringContainsString('pattern', $result);
+    }
+
+    public function test_recurring_expenses_detects_pattern(): void
+    {
+        // Same category in 2 different months = recurring
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 13.99,
+            'category'   => 'abonnements',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 13.99,
+            'category'   => 'abonnements',
+            'date'       => Carbon::now()->subMonth()->toDateString(),
+        ]);
+
+        $result = $this->callGetRecurringExpenses();
+        $this->assertStringContainsString('abonnements', $result);
+        $this->assertStringContainsString('📌', $result);
+        $this->assertStringContainsString('13.99', $result);
+    }
+
+    public function test_recurring_expenses_shows_monthly_cost(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 50.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 45.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->subMonth()->toDateString(),
+        ]);
+
+        $result = $this->callGetRecurringExpenses();
+        $this->assertStringContainsString('Cout mensuel estime', $result);
+    }
+
+    // ── buildTrendBar (via reflection) ───────────────────────────────────────
+
+    private function callBuildTrendBar(float $value, float $max): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildTrendBar');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $value, $max);
+    }
+
+    public function test_trend_bar_full_when_value_equals_max(): void
+    {
+        $bar = $this->callBuildTrendBar(100.0, 100.0);
+        $this->assertEquals(str_repeat('█', 8), $bar);
+    }
+
+    public function test_trend_bar_empty_when_value_zero(): void
+    {
+        $bar = $this->callBuildTrendBar(0.0, 100.0);
+        $this->assertEquals(str_repeat('░', 8), $bar);
+    }
+
+    public function test_trend_bar_half_when_value_half_max(): void
+    {
+        $bar = $this->callBuildTrendBar(50.0, 100.0);
+        $this->assertEquals(str_repeat('█', 4) . str_repeat('░', 4), $bar);
+    }
+
+    // ── getHelp v1.5.0 ────────────────────────────────────────────────────────
+
+    public function test_help_contains_tendance_command(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getHelp');
+        $method->setAccessible(true);
+        $help = $method->invoke($agent);
+
+        $this->assertStringContainsString('tendance', $help);
+        $this->assertStringContainsString('recurrents', $help);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

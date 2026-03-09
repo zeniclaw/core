@@ -49,12 +49,14 @@ class FinanceAgent extends BaseAgent
             'top depenses', 'grosses depenses', 'plus grosses depenses', 'grandes depenses', 'depenses importantes',
             'comparer mois', 'comparaison mois', 'compare mois', 'bilan comparatif', 'evolution depenses',
             'chercher depense', 'rechercher depense', 'trouver depense', 'search expense',
+            'tendance', 'trend', '6 mois', 'evolution mensuelle', 'historique mensuel', 'courbe depenses',
+            'recurrent', 'recurrents', 'recurrentes', 'abonnements actifs', 'depenses recurrentes', 'recurring',
         ];
     }
 
     public function version(): string
     {
-        return '1.4.0';
+        return '1.5.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -82,6 +84,8 @@ class FinanceAgent extends BaseAgent
             '/\b(grosses?|grandes?)\s+depenses?\b/iu',
             '/\b(comparer?\s+mois|comparaison|bilan\s+comparatif|evolution\s+depenses?)\b/iu',
             '/\b(chercher?|rechercher?|trouver|search)\s+\S+/iu',
+            '/\b(tendance|trend|6\s+mois|evolution\s+mensuelle|historique\s+mensuel)\b/iu',
+            '/\b(recurrents?|recurrentes?|abonnements?\s+actifs?|depenses?\s+recurrentes?)\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -215,6 +219,16 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'search_expenses', 'query' => trim($m[1])];
         }
 
+        // tendance / trend / 6 mois / evolution mensuelle
+        if (preg_match('/\b(tendance|trend|6\s+mois|evolution\s+mensuelle|historique\s+mensuel|courbe\s+depenses?)\b/iu', $lower)) {
+            return ['action' => 'monthly_trend'];
+        }
+
+        // depenses recurrentes / recurrents / abonnements actifs
+        if (preg_match('/\b(recurrents?|recurrentes?|abonnements?\s+actifs?|depenses?\s+recurrentes?|recurring)\b/iu', $lower)) {
+            return ['action' => 'recurring_expenses'];
+        }
+
         return null;
     }
 
@@ -239,9 +253,11 @@ class FinanceAgent extends BaseAgent
             'weekly_summary'  => $this->getWeeklySummary($context->from),
             'top_expenses'    => $this->getTopExpenses($context->from, $command['limit'] ?? 5),
             'compare_months'  => $this->compareMonths($context->from),
-            'search_expenses' => $this->searchExpenses($context->from, $command['query'] ?? ''),
-            'help'            => $this->getHelp(),
-            default           => null,
+            'search_expenses'    => $this->searchExpenses($context->from, $command['query'] ?? ''),
+            'monthly_trend'      => $this->getMonthlyTrend($context->from),
+            'recurring_expenses' => $this->getRecurringExpenses($context->from),
+            'help'               => $this->getHelp(),
+            default              => null,
         };
 
         if ($response) {
@@ -285,8 +301,10 @@ class FinanceAgent extends BaseAgent
             $this->buildSystemPrompt()
         );
 
-        if (!$response) {
-            $response = $this->getHelp();
+        if (!$response || trim($response) === '') {
+            $fallback = "❓ Je n'ai pas compris ta demande. Tape *aide finance* pour voir les commandes disponibles.";
+            $this->sendText($context->from, $fallback);
+            return AgentResult::reply($fallback);
         }
 
         // Extract expense from Claude's response if identified
@@ -375,6 +393,8 @@ COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
 - top depenses — top 5 depenses individuelles du mois
 - comparer mois — comparaison mois actuel vs mois precedent
 - chercher [terme] — rechercher dans les depenses
+- tendance — evolution des depenses sur 6 mois
+- recurrents — depenses et abonnements recurrents detectes
 - alertes — alertes de depassement
 - supprimer derniere depense — annuler la derniere depense
 
@@ -883,7 +903,9 @@ PROMPT;
             . "  `resume semaine` — depenses de la semaine\n"
             . "  `top depenses` — top 5 depenses du mois\n"
             . "  `comparer mois` — M vs M-1 par categorie\n"
-            . "  `chercher [terme]` — rechercher une depense\n\n"
+            . "  `chercher [terme]` — rechercher une depense\n"
+            . "  `tendance` — evolution depenses sur 6 mois\n"
+            . "  `recurrents` — depenses/abonnements recurrents\n\n"
             . "🗑️ *Annuler:*\n"
             . "  `supprimer derniere depense`\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
@@ -1090,6 +1112,130 @@ PROMPT;
         if ($count >= 10) {
             $response .= "\n_Affichage limite a 10 resultats._";
         }
+
+        return $response;
+    }
+
+    private function getMonthlyTrend(string $userPhone): string
+    {
+        $months = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month        = Carbon::now()->subMonths($i);
+            $total        = Expense::calculateTotalMonthlySpent($userPhone, $month);
+            $months[]     = [
+                'label'      => $month->translatedFormat('M Y'),
+                'total'      => $total,
+                'isCurrent'  => $i === 0,
+            ];
+        }
+
+        $nonEmpty = array_filter($months, fn($m) => $m['total'] > 0);
+
+        if (empty($nonEmpty)) {
+            return "📈 *Tendance sur 6 mois*\n\n_Aucune donnee disponible._\n"
+                . "Commence par enregistrer des depenses avec: *depense [montant] [categorie]*";
+        }
+
+        $maxTotal = max(array_column($months, 'total'));
+        $response = "📈 *Tendance des depenses — 6 mois*\n\n";
+
+        foreach ($months as $m) {
+            $label    = $m['label'];
+            $total    = $m['total'];
+            $bar      = $this->buildTrendBar($total, $maxTotal);
+            $marker   = $m['isCurrent'] ? ' ← maintenant' : '';
+            $totalStr = $total > 0 ? "*{$total}€*" : '—';
+            $response .= "{$label}: {$totalStr} {$bar}{$marker}\n";
+        }
+
+        // Trend direction: compare last two non-empty months
+        $nonEmptyValues = array_values($nonEmpty);
+        $count          = count($nonEmptyValues);
+        if ($count >= 2) {
+            $last = $nonEmptyValues[$count - 1];
+            $prev = $nonEmptyValues[$count - 2];
+            $diff = round($last['total'] - $prev['total'], 2);
+            $sign = $diff > 0 ? '+' : '';
+            if ($diff > 0) {
+                $trend = "📈 En hausse: {$sign}{$diff}€ vs mois precedent";
+            } elseif ($diff < 0) {
+                $trend = "📉 En baisse: {$diff}€ vs mois precedent";
+            } else {
+                $trend = "➡️ Stable vs mois precedent";
+            }
+            $response .= "\n{$trend}";
+        }
+
+        // Average over available months
+        $avg      = round(array_sum(array_column($nonEmptyValues, 'total')) / $count, 2);
+        $response .= "\n📊 Moyenne: *{$avg}€/mois* sur {$count} mois";
+
+        return $response;
+    }
+
+    private function buildTrendBar(float $value, float $max, int $width = 8): string
+    {
+        if ($max <= 0 || $value <= 0) {
+            return str_repeat('░', $width);
+        }
+        $filled = (int) round(min($value / $max, 1.0) * $width);
+        return str_repeat('█', $filled) . str_repeat('░', $width - $filled);
+    }
+
+    private function getRecurringExpenses(string $userPhone): string
+    {
+        $since = Carbon::now()->subMonths(2)->startOfMonth();
+
+        $expenses = Expense::where('user_phone', $userPhone)
+            ->where('date', '>=', $since->toDateString())
+            ->get(['category', 'amount', 'date']);
+
+        if ($expenses->isEmpty()) {
+            return "🔄 *Depenses recurrentes*\n\n_Aucune depense enregistree._\n"
+                . "Enregistre des depenses pour detecter les patterns recurrents.";
+        }
+
+        // Group totals by category across months (DB-agnostic)
+        $byCategoryMonth = [];
+        foreach ($expenses as $expense) {
+            $monthKey = Carbon::parse($expense->date)->format('Y-m');
+            $byCategoryMonth[$expense->category][$monthKey] =
+                ($byCategoryMonth[$expense->category][$monthKey] ?? 0) + (float) $expense->amount;
+        }
+
+        // Recurring = appears in 2+ months out of last 3
+        $recurring = [];
+        foreach ($byCategoryMonth as $category => $monthData) {
+            if (count($monthData) >= 2) {
+                $avgMonthly = round(array_sum($monthData) / count($monthData), 2);
+                $recurring[$category] = [
+                    'months'  => count($monthData),
+                    'avg'     => $avgMonthly,
+                    'total'   => round(array_sum($monthData), 2),
+                ];
+            }
+        }
+
+        if (empty($recurring)) {
+            return "🔄 *Depenses recurrentes*\n\n_Aucun pattern recurrent detecte sur 3 mois._\n"
+                . "_Reviens apres quelques mois de suivi._";
+        }
+
+        // Sort by avg desc
+        uasort($recurring, fn($a, $b) => $b['avg'] <=> $a['avg']);
+
+        $response     = "🔄 *Depenses recurrentes* (3 derniers mois)\n\n";
+        $totalMonthly = 0;
+
+        foreach ($recurring as $category => $data) {
+            $monthsLabel  = $data['months'] === 3 ? "3/3 mois" : "{$data['months']}/3 mois";
+            $response    .= "📌 *{$category}*: ~{$data['avg']}€/mois ({$monthsLabel})\n";
+            $totalMonthly += $data['avg'];
+        }
+
+        $totalMonthly = round($totalMonthly, 2);
+        $response    .= "\n💰 Cout mensuel estime: *{$totalMonthly}€*\n";
+        $response    .= "💡 _Verifie tes abonnements et charges fixes._";
 
         return $response;
     }
