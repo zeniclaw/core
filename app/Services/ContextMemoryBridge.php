@@ -76,6 +76,15 @@ class ContextMemoryBridge
     }
 
     /**
+     * Get the last agent that handled user's message.
+     */
+    public function getLastAgent(string $userId): ?string
+    {
+        $context = $this->getContext($userId);
+        return $context['lastAgent']['name'] ?? null;
+    }
+
+    /**
      * Add a tag to recent tags (deduped, max 20).
      */
     public function addTags(string $userId, array $tags): void

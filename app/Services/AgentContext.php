@@ -23,6 +23,7 @@ class AgentContext
         public readonly ?string $reasoning = null,
         public readonly ?string $autonomy = null,
         public readonly ?string $memoryContext = null,
+        public ?array $routingMetadata = null,
     ) {}
 
     public function phone(): string

@@ -27,3 +27,4 @@ Schedule::command('content:daily-digest')->dailyAt('07:30');
 Schedule::job(new PurgeStaleContext)->dailyAt('03:00');
 // Runs every minute; the job itself filters users whose brief_time matches the current HH:MM
 Schedule::job(new SendDailyBriefJob)->everyMinute()->between('5:00', '23:00');
+Schedule::command('assistant:send-tips')->weeklyOn(1, '10:00'); // Monday 10:00 AM

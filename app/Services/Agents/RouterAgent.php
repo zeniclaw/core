@@ -92,6 +92,9 @@ class RouterAgent
         // Time blocker → time_blocker
         '/\b(bloque[r]?\s+(ma|la)\s+journ[eé]e|organise[r]?\s+m(on|a)\s+temps|optimise[r]?\s+m(on|a)\s+(agenda|journ[eé]e)|time\s*block|blocs?\s+de\s+temps|planifie[r]?\s+(ma|la)\s+journ[eé]e|emploi\s+du\s+temps|planning\s+optimal|deep\s*work|bloc[s]?\s+focus|gestion\s+du\s+temps)\b/iu'
             => ['time_blocker', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // AI Assistant / coaching / stats → assistant
+        '/\b(mes\s+stats?|my\s+stats?|coaching|coach|quels?\s+agents?|tips?\s+hebdo|suggestions?\s+agents?|agents?\s+suggestions?|assistant\s+ia|fonctionnalit[eé]s\s+disponibles?|que\s+puis[\s-]je\s+faire|what\s+can\s+you\s+do|astuces?\s+agents?|progression|adoption\s+score|aide\s+agents?|help\s+agents?|recommandations?|upskilling|dashboard\s+stats?)\b/iu'
+            => ['assistant', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
     ];
 
     public function __construct()
@@ -112,6 +115,23 @@ class RouterAgent
 
     public function route(AgentContext $context): array
     {
+        // Enrich context with metadata: previous agent, timestamp, action type, estimated sentiment
+        try {
+            $bridge = ContextMemoryBridge::getInstance();
+            $previousAgent = $bridge->getLastAgent($context->from) ?? 'none';
+            $actionType = $this->detectActionType($context);
+            $sentiment = $this->estimateSentiment($context->body ?? '');
+
+            $context->routingMetadata = [
+                'previous_agent' => $previousAgent,
+                'timestamp' => now()->toIso8601String(),
+                'action_type' => $actionType,
+                'estimated_sentiment' => $sentiment,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('RouterAgent metadata enrichment failed: ' . $e->getMessage());
+        }
+
         // Silently run SmartContextAgent to extract and store user facts
         try {
             $this->smartContext->handle($context);
@@ -457,6 +477,7 @@ CATALOG;
                 'collaborative_task',
                 'recipe',
                 'time_blocker',
+                'assistant',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
@@ -610,5 +631,47 @@ CATALOG;
         if (!$mimetype) return false;
         $baseMime = explode(';', $mimetype)[0];
         return str_starts_with(trim($baseMime), 'audio/');
+    }
+
+    /**
+     * Detect the type of action: question, command, or file_upload.
+     */
+    private function detectActionType(AgentContext $context): string
+    {
+        if ($context->hasMedia) {
+            return 'file_upload';
+        }
+
+        $body = trim($context->body ?? '');
+
+        if (str_starts_with($body, '/')) {
+            return 'command';
+        }
+
+        if (preg_match('/\?\s*$/u', $body) || preg_match('/^(qu|comment|pourquoi|est[\s-]ce|who|what|where|when|why|how|combien|quel)/iu', $body)) {
+            return 'question';
+        }
+
+        return 'message';
+    }
+
+    /**
+     * Estimate sentiment from message text (simple heuristic).
+     */
+    private function estimateSentiment(string $body): string
+    {
+        $lower = mb_strtolower($body);
+
+        $positivePatterns = '/\b(merci|super|genial|parfait|excellent|top|nickel|bravo|cool|love|content|heureux|motivé)\b/iu';
+        $negativePatterns = '/\b(bug|erreur|nul|probleme|merde|chiant|enerve|triste|stress|fatigue|decu|frustre|pire|horrible)\b/iu';
+
+        if (preg_match($positivePatterns, $lower)) {
+            return 'positive';
+        }
+        if (preg_match($negativePatterns, $lower)) {
+            return 'negative';
+        }
+
+        return 'neutral';
     }
 }
