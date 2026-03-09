@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\ProcessEventRemindersJob;
+use App\Jobs\PurgeStaleContext;
 use App\Models\AppSetting;
 use Illuminate\Support\Facades\Schedule;
 
@@ -22,3 +23,4 @@ Schedule::command('zeniclaw:auto-improve-agents')->everyThirtyMinutes()->when(fu
 });
 Schedule::command('memories:cleanup')->dailyAt('02:00');
 Schedule::command('content:daily-digest')->dailyAt('07:30');
+Schedule::job(new PurgeStaleContext)->dailyAt('03:00');

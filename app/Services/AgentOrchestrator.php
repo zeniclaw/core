@@ -34,6 +34,7 @@ use App\Services\Agents\ConversationMemoryAgent;
 use App\Services\Agents\StreamlineAgent;
 use App\Services\Agents\InteractiveQuizAgent;
 use App\Services\Agents\ContentCuratorAgent;
+use App\Services\Agents\ContextAgent;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -94,6 +95,7 @@ class AgentOrchestrator
             new StreamlineAgent(),
             new InteractiveQuizAgent(),
             new ContentCuratorAgent(),
+            new ContextAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
@@ -225,6 +227,13 @@ class AgentOrchestrator
                 }
             } catch (\Throwable $e) {
                 Log::warning('ConversationMemory injection failed: ' . $e->getMessage());
+            }
+
+            // Track last agent in shared context bridge
+            try {
+                \App\Services\ContextMemoryBridge::getInstance()->setLastAgent($context->from, $routing['agent']);
+            } catch (\Throwable $e) {
+                Log::warning('ContextMemoryBridge setLastAgent failed: ' . $e->getMessage());
             }
 
             if ($debug) {

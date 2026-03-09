@@ -9,8 +9,10 @@ use App\Models\Todo;
 use App\Services\AgentContext;
 use App\Services\Agents\SmartContextAgent;
 use App\Services\Agents\ConversationMemoryAgent;
+use App\Services\Agents\ContextAgent;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
+use App\Services\ContextMemoryBridge;
 use App\Services\ConversationMemoryService;
 use Illuminate\Support\Facades\Log;
 
@@ -19,6 +21,7 @@ class RouterAgent
     private AnthropicClient $claude;
     private SmartContextAgent $smartContext;
     private ConversationMemoryAgent $conversationMemory;
+    private ContextAgent $contextAgent;
     private array $registeredAgents = [];
 
     /**
@@ -74,6 +77,7 @@ class RouterAgent
         $this->claude = new AnthropicClient();
         $this->smartContext = new SmartContextAgent();
         $this->conversationMemory = new ConversationMemoryAgent();
+        $this->contextAgent = new ContextAgent();
     }
 
     /**
@@ -98,6 +102,13 @@ class RouterAgent
             $this->conversationMemory->extractFactsInBackground($context);
         } catch (\Throwable $e) {
             Log::warning('ConversationMemoryAgent failed silently: ' . $e->getMessage());
+        }
+
+        // Silently run ContextAgent to extract entities and update shared context bridge
+        try {
+            $this->contextAgent->extractAndUpdate($context);
+        } catch (\Throwable $e) {
+            Log::warning('ContextAgent failed silently: ' . $e->getMessage());
         }
 
         // ── Only 2 unambiguous fast-paths ──
@@ -417,6 +428,7 @@ CATALOG;
                 'streamline',
                 'interactive_quiz',
                 'content_curator',
+                'context_memory_bridge',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
