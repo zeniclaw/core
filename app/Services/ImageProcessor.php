@@ -263,6 +263,99 @@ class ImageProcessor
         }
     }
 
+    /**
+     * Resize an image to the given dimensions, optionally keeping aspect ratio.
+     */
+    public function resizeImage(string $imagePath, int $targetWidth, int $targetHeight, bool $keepAspect = true): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for resize', ['path' => $imagePath]);
+            return null;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            $origW = imagesx($src);
+            $origH = imagesy($src);
+
+            if ($keepAspect && $origW > 0 && $origH > 0) {
+                $ratioW = $targetWidth / $origW;
+                $ratioH = $targetHeight / $origH;
+                $ratio  = min($ratioW, $ratioH);
+                $targetWidth  = (int) round($origW * $ratio);
+                $targetHeight = (int) round($origH * $ratio);
+            }
+
+            $dst = imagecreatetruecolor($targetWidth, $targetHeight);
+
+            // Preserve transparency for PNG
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
+            $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+            imagefill($dst, 0, 0, $transparent);
+
+            imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetWidth, $targetHeight, $origW, $origH);
+            imagedestroy($src);
+
+            $outputPath = $this->generateOutputPath('resized', 'png');
+            imagepng($dst, $outputPath);
+            imagedestroy($dst);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor resize failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Rotate an image by the given degrees (90, 180, 270 supported).
+     */
+    public function rotateImage(string $imagePath, int $degrees): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for rotate', ['path' => $imagePath]);
+            return null;
+        }
+
+        // Normalize to valid rotation
+        $degrees = ((int) round($degrees / 90) * 90) % 360;
+        if ($degrees <= 0) {
+            $degrees += 360;
+        }
+        if ($degrees === 360) {
+            $degrees = 0;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            // imagerotate rotates counter-clockwise; negate to rotate clockwise
+            $rotated = imagerotate($src, -$degrees, 0);
+            imagedestroy($src);
+
+            if (!$rotated) {
+                return null;
+            }
+
+            $outputPath = $this->generateOutputPath('rotated', 'png');
+            imagepng($rotated, $outputPath);
+            imagedestroy($rotated);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor rotate failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
     private function drawArrowHead($image, int $x1, int $y1, int $x2, int $y2, $color): void
     {
         $angle = atan2($y2 - $y1, $x2 - $x1);

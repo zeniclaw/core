@@ -25,10 +25,10 @@ class ScreenshotAgentTest extends TestCase
         $this->assertEquals('screenshot', $agent->name());
     }
 
-    public function test_screenshot_agent_version_is_1_1_0(): void
+    public function test_screenshot_agent_version_is_1_2_0(): void
     {
         $agent = new ScreenshotAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
     }
 
     public function test_can_handle_screenshot_keywords(): void
@@ -317,6 +317,112 @@ class ScreenshotAgentTest extends TestCase
         if ($result['diff_image']) @unlink($result['diff_image']);
     }
 
+    public function test_image_processor_resize_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->resizeImage('/nonexistent/file.png', 100, 100);
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_rotate_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->rotateImage('/nonexistent/file.png', 90);
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_resize_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(400, 300);
+        $white = imagecolorallocate($img, 255, 255, 255);
+        imagefill($img, 0, 0, $white);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        // Resize keeping aspect ratio: target 200x200 => should produce 200x150
+        $outputPath = $processor->resizeImage($tmpFile, 200, 200, true);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        $info = getimagesize($outputPath);
+        $this->assertEquals(200, $info[0]); // width fits target
+        $this->assertEquals(150, $info[1]); // height scaled proportionally
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_resize_exact_dimensions(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(400, 300);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->resizeImage($tmpFile, 100, 80, false);
+
+        $this->assertNotNull($outputPath);
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]);
+        $this->assertEquals(80, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_rotate_90_degrees(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(200, 100);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->rotateImage($tmpFile, 90);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        // After 90° rotation, width and height are swapped
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]); // was height
+        $this->assertEquals(200, $info[1]); // was width
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_rotate_180_degrees(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(200, 100);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->rotateImage($tmpFile, 180);
+
+        $this->assertNotNull($outputPath);
+
+        // 180° rotation keeps same dimensions
+        $info = getimagesize($outputPath);
+        $this->assertEquals(200, $info[0]);
+        $this->assertEquals(100, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
     public function test_image_processor_compare_different_images(): void
     {
         $processor = new ImageProcessor();
@@ -343,6 +449,71 @@ class ScreenshotAgentTest extends TestCase
         @unlink($tmpFile1);
         @unlink($tmpFile2);
         if ($result['diff_image']) @unlink($result['diff_image']);
+    }
+
+    // ── Resize ───────────────────────────────────────────────────────────────
+
+    public function test_resize_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('resize 800x600');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_resize_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('resize 800x600', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_resize_keyword(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('resize 800x600')));
+        $this->assertTrue($agent->canHandle($this->makeContext('redimensionner')));
+    }
+
+    // ── Rotate ───────────────────────────────────────────────────────────────
+
+    public function test_rotate_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('rotate 90');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_rotate_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('rotate 90', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_rotate_keyword(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('rotate 180')));
+        $this->assertTrue($agent->canHandle($this->makeContext('rotation image')));
+        $this->assertTrue($agent->canHandle($this->makeContext('pivoter')));
     }
 
     // ── Controller & Router integration ──────────────────────────────────────
