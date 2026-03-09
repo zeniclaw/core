@@ -41,7 +41,9 @@ use App\Services\Agents\DailyBriefAgent;
 use App\Services\Agents\CollaborativeTaskAgent;
 use App\Services\Agents\RecipeAgent;
 use App\Services\Agents\TimeBlockerAgent;
+use App\Services\Agents\AIAssistantAgent;
 use App\Models\CollaborativeVote;
+use App\Models\UserAgentAnalytic;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
@@ -109,6 +111,7 @@ class AgentOrchestrator
             new CollaborativeTaskAgent(),
             new RecipeAgent(),
             new TimeBlockerAgent(),
+            new AIAssistantAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
@@ -253,13 +256,52 @@ class AgentOrchestrator
                 $this->sendDebug($context, "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : ''));
             }
 
+            $dispatchStart = microtime(true);
             $result = $this->dispatch($routedContext, $dispatchAgent);
+            $dispatchDuration = (int) ((microtime(true) - $dispatchStart) * 1000);
 
-            // 4. Save memory for reply actions
+            // 4. Track interaction in user_agent_analytics
+            try {
+                $interactionType = $context->hasMedia ? 'file_upload' : ($this->isQuestion($context->body) ? 'question' : 'command');
+                UserAgentAnalytic::logInteraction(
+                    $context->from,
+                    $routing['agent'],
+                    $interactionType,
+                    $dispatchDuration,
+                    $result->action === 'reply' && !empty($result->reply),
+                    ['dispatched_to' => $dispatchAgent, 'model' => $routingModel]
+                );
+            } catch (\Throwable $e) {
+                Log::warning('UserAgentAnalytic tracking failed: ' . $e->getMessage());
+            }
+
+            // 4b. Detect significant agent change and notify AIAssistantAgent
+            try {
+                $previousAgent = \App\Services\ContextMemoryBridge::getInstance()->getLastAgent($context->from);
+                if ($previousAgent && $previousAgent !== $routing['agent']) {
+                    $prevCategory = $this->getAgentCategory($previousAgent);
+                    $newCategory = $this->getAgentCategory($routing['agent']);
+
+                    if ($prevCategory !== $newCategory) {
+                        $assistantAgent = $this->agents['assistant'] ?? null;
+                        if ($assistantAgent instanceof AIAssistantAgent) {
+                            Log::info('AIAssistant: significant agent change detected', [
+                                'user' => $context->from,
+                                'from' => "{$previousAgent} ({$prevCategory})",
+                                'to' => "{$routing['agent']} ({$newCategory})",
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Agent change detection failed: ' . $e->getMessage());
+            }
+
+            // 5. Save memory for reply actions
             if ($result->action === 'reply' && $result->reply) {
                 $this->saveMemory($context, $result->reply);
 
-                // 5. Dispatch self-improvement analysis in background
+                // 6. Dispatch self-improvement analysis in background
                 if ($context->body) {
                     AnalyzeSelfImprovementJob::dispatch(
                         $context->agent->id,
@@ -495,6 +537,42 @@ class AgentOrchestrator
             'qwen2.5-coder:7b' => 'qwen2.5-coder:7b',
             default => null,
         };
+    }
+
+    /**
+     * Detect if a message is a question based on simple heuristics.
+     */
+    private function isQuestion(?string $body): bool
+    {
+        if (!$body) return false;
+        $clean = trim($body);
+        return str_ends_with($clean, '?')
+            || (bool) preg_match('/^(qui|que|quoi|comment|pourquoi|combien|ou|quand|est[\s-]ce|what|how|why|where|when|who|which|is|are|do|does|can|could)\b/iu', $clean);
+    }
+
+    /**
+     * Categorize an agent for significant change detection.
+     */
+    private function getAgentCategory(string $agent): string
+    {
+        $categories = [
+            'productivity' => ['todo', 'reminder', 'pomodoro', 'time_blocker', 'habit', 'event_reminder', 'daily_brief'],
+            'dev' => ['dev', 'code_review', 'document', 'analysis'],
+            'fun' => ['hangman', 'game_master', 'interactive_quiz', 'music'],
+            'finance' => ['finance', 'budget_tracker'],
+            'learning' => ['flashcard', 'content_summarizer', 'content_curator', 'web_search'],
+            'wellbeing' => ['mood_check', 'recipe'],
+            'social' => ['collaborative_task', 'smart_meeting'],
+            'system' => ['chat', 'assistant', 'user_preferences', 'conversation_memory', 'smart_context', 'context_memory_bridge', 'streamline', 'voice_command', 'screenshot'],
+        ];
+
+        foreach ($categories as $category => $agents) {
+            if (in_array($agent, $agents)) {
+                return $category;
+            }
+        }
+
+        return 'other';
     }
 
     private function saveMemory(AgentContext $context, string $reply): void

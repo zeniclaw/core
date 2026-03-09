@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Agent;
 use App\Models\AgentLog;
 use App\Models\UserBriefPreference;
+use App\Models\UserAgentAnalytic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
 
@@ -274,6 +275,14 @@ class AgentController extends Controller
             'version' => '1.0.0',
             'updated_at' => '2026-03-09',
             'description' => 'Optimisation intelligente de votre agenda par blocs de temps',
+        ],
+        'assistant' => [
+            'label' => 'AI Assistant',
+            'icon' => '🤖',
+            'color' => 'purple',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Coaching personnalise & suggestions intelligentes',
         ],
     ];
 
@@ -577,6 +586,125 @@ class AgentController extends Controller
             'success' => true,
             'blocks_stored' => count($blocks),
             'reminders_created' => $createdReminders,
+        ]);
+    }
+
+    /**
+     * GET /api/agents/stats — User dashboard: most used agents, avg time, adoption score, recommendations.
+     */
+    public function agentStats(Request $request)
+    {
+        $phone = $request->query('phone');
+
+        if (!$phone) {
+            return response()->json(['error' => 'phone parameter required'], 422);
+        }
+
+        $analytics = UserAgentAnalytic::where('user_id', $phone)->get();
+
+        if ($analytics->isEmpty()) {
+            return response()->json([
+                'total_interactions' => 0,
+                'unique_agents' => 0,
+                'adoption_score' => 0,
+                'avg_duration_ms' => 0,
+                'top_agents' => [],
+                'recommendations' => ['Start using agents to see your stats!'],
+            ]);
+        }
+
+        $total = $analytics->count();
+        $agentCounts = $analytics->groupBy('agent_used')->map->count()->sortDesc();
+        $uniqueAgents = $agentCounts->count();
+        $totalAvailable = count(self::SUB_AGENTS);
+        $adoptionScore = min(100, round(($uniqueAgents / max(1, $totalAvailable)) * 100));
+
+        $avgDuration = (int) $analytics->whereNotNull('duration')->avg('duration');
+        $successCount = $analytics->where('success', true)->count();
+        $successRate = $total > 0 ? round(($successCount / $total) * 100) : 0;
+
+        $topAgents = $agentCounts->take(10)->map(function ($count, $agent) use ($total, $analytics) {
+            $agentAnalytics = $analytics->where('agent_used', $agent);
+            return [
+                'agent' => $agent,
+                'count' => $count,
+                'percentage' => round(($count / $total) * 100, 1),
+                'avg_duration_ms' => (int) $agentAnalytics->whereNotNull('duration')->avg('duration'),
+                'success_rate' => $agentAnalytics->count() > 0
+                    ? round(($agentAnalytics->where('success', true)->count() / $agentAnalytics->count()) * 100)
+                    : 0,
+            ];
+        })->values();
+
+        // Build detailed upskilling recommendations based on usage patterns
+        $recommendations = [];
+        $usedAgentKeys = $agentCounts->keys()->toArray();
+
+        // Pattern-based recommendations
+        if (in_array('dev', $usedAgentKeys) && !in_array('code_review', $usedAgentKeys)) {
+            $recommendations[] = [
+                'agent' => 'code_review',
+                'label' => 'Code Review',
+                'reason' => 'Tu codes souvent — fais reviewer ton code pour detecter bugs et failles',
+                'priority' => 'high',
+            ];
+        }
+        if (in_array('todo', $usedAgentKeys) && !in_array('pomodoro', $usedAgentKeys)) {
+            $recommendations[] = [
+                'agent' => 'pomodoro',
+                'label' => 'Pomodoro',
+                'reason' => 'Combine tes taches avec des sessions focus pour etre plus productif',
+                'priority' => 'medium',
+            ];
+        }
+        if (in_array('reminder', $usedAgentKeys) && !in_array('habit', $usedAgentKeys)) {
+            $recommendations[] = [
+                'agent' => 'habit',
+                'label' => 'HabitAgent',
+                'reason' => 'Transforme tes rappels en habitudes durables avec des streaks',
+                'priority' => 'medium',
+            ];
+        }
+
+        // Add popular unused agents
+        $popularUnused = array_diff(['todo', 'reminder', 'dev', 'pomodoro', 'habit', 'budget_tracker', 'time_blocker', 'daily_brief'], $usedAgentKeys);
+        foreach (array_slice($popularUnused, 0, max(0, 3 - count($recommendations))) as $agent) {
+            $meta = self::SUB_AGENTS[$agent] ?? null;
+            if ($meta) {
+                $recommendations[] = [
+                    'agent' => $agent,
+                    'label' => $meta['label'],
+                    'reason' => $meta['description'],
+                    'priority' => 'low',
+                ];
+            }
+        }
+
+        // Upskilling tips based on adoption score
+        $upskillingTips = [];
+        if ($adoptionScore < 30) {
+            $upskillingTips[] = 'Explore plus d\'agents pour booster ton score d\'adoption!';
+            $upskillingTips[] = 'Essaie "mes stats" dans le chat pour un coaching personnalise.';
+        } elseif ($adoptionScore < 60) {
+            $upskillingTips[] = 'Bonne progression! Essaie les agents de productivite comme Pomodoro et TimeBlocker.';
+        } else {
+            $upskillingTips[] = 'Excellent usage! Tu maitrises la plupart des agents.';
+        }
+
+        if ($successRate < 80 && $total > 10) {
+            $upskillingTips[] = 'Ton taux de succes peut s\'ameliorer — essaie des commandes plus precises.';
+        }
+
+        return response()->json([
+            'total_interactions' => $total,
+            'unique_agents' => $uniqueAgents,
+            'total_available' => $totalAvailable,
+            'adoption_score' => $adoptionScore,
+            'success_rate' => $successRate,
+            'avg_duration_ms' => $avgDuration,
+            'top_agents' => $topAgents,
+            'recommendations' => $recommendations,
+            'upskilling_tips' => $upskillingTips,
         ]);
     }
 
