@@ -34,9 +34,9 @@ class HabitAgentTest extends TestCase
         $this->assertEquals('habit', (new HabitAgent())->name());
     }
 
-    public function test_agent_version_is_1_5_0(): void
+    public function test_agent_version_is_1_6_0(): void
     {
-        $this->assertEquals('1.5.0', (new HabitAgent())->version());
+        $this->assertEquals('1.6.0', (new HabitAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -923,6 +923,163 @@ class HabitAgentTest extends TestCase
         $this->assertLessThanOrEqual(7, $result->metadata['best_dow']);
     }
 
+    // ── Log Multiple ─────────────────────────────────────────────────────────
+
+    public function test_log_multiple_logs_several_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai fait sport et meditation");
+        $habit1  = $this->createHabit($context, 'Meditation');
+        $habit2  = $this->createHabit($context, 'Sport');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleLogMultiple($agent, $context, $habits, [
+            'action' => 'log_multiple',
+            'items'  => [1, 2],
+        ]);
+
+        $this->assertEquals('habit_log_multiple', $result->metadata['action']);
+        $this->assertEquals(2, $result->metadata['logged']);
+        $this->assertDatabaseHas('habit_logs', ['habit_id' => $habit1->id]);
+        $this->assertDatabaseHas('habit_logs', ['habit_id' => $habit2->id]);
+    }
+
+    public function test_log_multiple_skips_already_logged(): void
+    {
+        $agent  = new HabitAgent();
+        $context = $this->makeContext("j'ai fait sport et meditation");
+        $habit  = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleLogMultiple($agent, $context, $habits, [
+            'action' => 'log_multiple',
+            'items'  => [1],
+        ]);
+
+        $this->assertEquals(0, $result->metadata['logged']);
+        $this->assertStringContainsString('Deja cochee', $result->reply);
+    }
+
+    public function test_log_multiple_no_items_returns_error(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai fait des trucs");
+        $habits  = collect();
+
+        $result = $this->callHandleLogMultiple($agent, $context, $habits, [
+            'action' => 'log_multiple',
+            'items'  => [],
+        ]);
+
+        $this->assertEquals('habit_log_multiple_no_items', $result->metadata['action']);
+    }
+
+    // ── Pause / Resume ───────────────────────────────────────────────────────
+
+    public function test_pause_pauses_an_active_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mettre en pause habitude 1');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandlePause($agent, $context, $habits, ['action' => 'pause', 'item' => 1]);
+
+        $this->assertEquals('habit_pause', $result->metadata['action']);
+        $this->assertStringContainsString('pause', $result->reply);
+        $this->assertDatabaseHas('habits', ['id' => $habit->id]);
+        $this->assertNotNull(Habit::find($habit->id)->paused_at);
+    }
+
+    public function test_pause_returns_error_if_already_paused(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mettre en pause habitude 1');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habit->update(['paused_at' => now()]);
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandlePause($agent, $context, $habits, ['action' => 'pause', 'item' => 1]);
+
+        $this->assertEquals('habit_pause_already_paused', $result->metadata['action']);
+    }
+
+    public function test_resume_reactivates_paused_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('reprendre habitude 1');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habit->update(['paused_at' => now()]);
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleResume($agent, $context, $habits, ['action' => 'resume', 'item' => 1]);
+
+        $this->assertEquals('habit_resume', $result->metadata['action']);
+        $this->assertStringContainsString('reactivee', $result->reply);
+        $this->assertNull(Habit::find($habit->id)->paused_at);
+    }
+
+    public function test_resume_returns_error_if_not_paused(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('reprendre habitude 1');
+        $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleResume($agent, $context, $habits, ['action' => 'resume', 'item' => 1]);
+
+        $this->assertEquals('habit_resume_not_paused', $result->metadata['action']);
+    }
+
+    public function test_log_auto_resumes_paused_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai medite");
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habit->update(['paused_at' => now()]);
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => 1]);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('reactivee', $result->reply);
+        $this->assertNull(Habit::find($habit->id)->paused_at);
+    }
+
+    public function test_today_excludes_paused_habits_from_pending(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("aujourd'hui");
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habit->update(['paused_at' => now()]);
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleToday($agent, $context, $habits);
+
+        $this->assertStringContainsString('[PAUSE]', $result->reply);
+        $this->assertStringNotContainsString('A faire', $result->reply);
+    }
+
+    public function test_list_shows_pause_status(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habit->update(['paused_at' => now()]);
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleList($agent, $context, $habits);
+
+        $this->assertStringContainsString('[PAUSE]', $result->reply);
+    }
+
     // ── Keywords ─────────────────────────────────────────────────────────────
 
     public function test_keywords_include_rapport_mensuel(): void
@@ -1230,5 +1387,26 @@ class HabitAgentTest extends TestCase
         $method = new \ReflectionMethod($agent, 'handleBestDay');
         $method->setAccessible(true);
         return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleLogMultiple(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleLogMultiple');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandlePause(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handlePause');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleResume(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleResume');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
     }
 }

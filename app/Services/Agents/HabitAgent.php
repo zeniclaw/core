@@ -22,7 +22,7 @@ class HabitAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks, le rapport hebdomadaire, le rapport mensuel des 30 derniers jours et analyser son meilleur jour de la semaine.';
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour (ou plusieurs a la fois), suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks, le rapport hebdomadaire, le rapport mensuel des 30 derniers jours, analyser son meilleur jour de la semaine, et mettre en pause/reprendre une habitude temporairement.';
     }
 
     public function keywords(): array
@@ -55,12 +55,15 @@ class HabitAgent extends BaseAgent
             'rapport semaine', 'bilan semaine', 'weekly report', 'rapport habitudes',
             'rapport mensuel', 'bilan mensuel', 'monthly report', 'bilan 30 jours', '30 jours habitudes', 'rapport 30j',
             'meilleur jour', 'best day', 'jour regulier', 'quel jour', 'analyse jour',
+            'pause habitude', 'pauser habitude', 'mettre en pause', 'suspendre habitude',
+            'reprendre habitude', 'reactiver habitude', 'resume habit',
+            'cocher plusieurs', 'log multiple', 'j\'ai fait sport et', 'j\'ai fait meditation et',
         ];
     }
 
     public function version(): string
     {
-        return '1.5.0';
+        return '1.6.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -119,6 +122,9 @@ class HabitAgent extends BaseAgent
             'weekly_report'    => $this->handleWeeklyReport($context, $habits),
             'monthly_report'   => $this->handleMonthlyReport($context, $habits),
             'best_day'         => $this->handleBestDay($context, $habits),
+            'log_multiple'     => $this->handleLogMultiple($context, $habits, $parsed),
+            'pause'            => $this->handlePause($context, $habits, $parsed),
+            'resume'           => $this->handleResume($context, $habits, $parsed),
             'help'             => $this->handleHelp($context),
             default            => $this->handleUnknown($context),
         };
@@ -186,6 +192,16 @@ Si l'utilisateur veut voir toutes les habitudes, item = null.
 17. MEILLEUR JOUR (analyse des jours de la semaine les plus productifs sur 90 jours):
 {"action": "best_day"}
 
+18. COCHER PLUSIEURS habitudes en une seule fois:
+{"action": "log_multiple", "items": [1, 3]}
+Utilise quand l'utilisateur mentionne plusieurs habitudes a la fois. 'items' = tableau de numeros.
+
+19. METTRE EN PAUSE une habitude temporairement (vacances, conge, etc.):
+{"action": "pause", "item": 1}
+
+20. REPRENDRE (reactiver) une habitude mise en pause:
+{"action": "resume", "item": 1}
+
 REGLES:
 - 'name' = nom court et clair de l'habitude (ex: "Meditation", "Sport", "Lecture")
 - 'frequency' = "daily" (quotidienne) ou "weekly" (hebdomadaire). Par defaut "daily".
@@ -217,6 +233,9 @@ EXEMPLES:
 - "Aide" ou "Comment ca marche" -> {"action": "help"}
 - "Rapport mensuel" ou "Bilan 30 jours" ou "Comment j'ai fait ce mois" -> {"action": "monthly_report"}
 - "Mon meilleur jour" ou "Quel jour suis-je le plus regulier" ou "Analyse par jour" -> {"action": "best_day"}
+- "J'ai fait sport et meditation" ou "Cocher 1 et 3" -> {"action": "log_multiple", "items": [X, Y]}
+- "Mettre en pause habitude 2" ou "Pause sport" ou "Je pars en vacances" -> {"action": "pause", "item": X}
+- "Reprendre habitude 2" ou "Reactiver sport" -> {"action": "resume", "item": X}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -338,6 +357,13 @@ PROMPT;
             }
         }
 
+        // Auto-resume if habit was paused
+        $wasResumed = false;
+        if ($habit->paused_at !== null) {
+            $habit->update(['paused_at' => null]);
+            $wasResumed = true;
+        }
+
         $oldBestStreak = $this->getBestStreak($habit->id);
         $streak        = $this->calculateStreak($habit->id, $habit->frequency);
         $newStreak     = $streak + 1;
@@ -359,6 +385,10 @@ PROMPT;
         $reply = "Habitude \"{$habit->name}\" cochee !\n"
             . "Streak : {$newStreak} {$unit} | Record : {$bestStreak} {$bUnit}";
 
+        if ($wasResumed) {
+            $reply .= "\n(Habitude reactivee automatiquement)";
+        }
+
         $milestone = $this->getMilestoneMessage($newStreak, $isNewRecord, $habit->frequency);
         if ($milestone) {
             $reply .= "\n\n{$milestone}";
@@ -369,6 +399,7 @@ PROMPT;
             'habit_id'    => $habit->id,
             'streak'      => $newStreak,
             'best_streak' => $bestStreak,
+            'auto_resumed' => $wasResumed,
         ]);
 
         return AgentResult::reply($reply, ['habit_id' => $habit->id, 'streak' => $newStreak]);
@@ -459,7 +490,11 @@ PROMPT;
                 ? in_array($habit->id, $doneThisWeekIds)
                 : in_array($habit->id, $doneTodayIds);
 
-            $status = $isDone ? '[FAIT]' : '[A FAIRE]';
+            if ($habit->paused_at !== null) {
+                $status = '[PAUSE]';
+            } else {
+                $status = $isDone ? '[FAIT]' : '[A FAIRE]';
+            }
 
             $lines[] = "\n{$num}. {$habit->name} {$status}";
             $lines[] = "   {$freqLabel} | Streak: {$streak}{$unit}";
@@ -511,8 +546,11 @@ PROMPT;
             ->unique()
             ->toArray();
 
-        $dailyHabits  = $habits->where('frequency', 'daily');
-        $weeklyHabits = $habits->where('frequency', 'weekly');
+        $activeHabits  = $habits->filter(fn($h) => $h->paused_at === null);
+        $pausedHabits  = $habits->filter(fn($h) => $h->paused_at !== null);
+
+        $dailyHabits  = $activeHabits->where('frequency', 'daily');
+        $weeklyHabits = $activeHabits->where('frequency', 'weekly');
 
         $doneDaily     = $dailyHabits->filter(fn($h) => in_array($h->id, $doneTodayIds));
         $pendingDaily  = $dailyHabits->filter(fn($h) => !in_array($h->id, $doneTodayIds));
@@ -549,14 +587,22 @@ PROMPT;
             }
         }
 
+        if ($pausedHabits->isNotEmpty()) {
+            $lines[] = "\nEn pause :";
+            foreach ($pausedHabits->values() as $habit) {
+                $num     = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+                $lines[] = "  {$num}. {$habit->name} [PAUSE]";
+            }
+        }
+
         $doneCount    = $doneDaily->count() + $doneWeekly->count();
         $pendingCount = $pendingDaily->count() + $pendingWeekly->count();
-        $total        = $habits->count();
+        $activeTotal  = $activeHabits->count();
 
-        $lines[] = "\n{$doneCount}/{$total} habitudes completees.";
+        $lines[] = "\n{$doneCount}/{$activeTotal} habitudes actives completees.";
 
-        if ($pendingCount === 0 && $total > 0) {
-            $lines[] = "Bravo, toutes les habitudes sont a jour !";
+        if ($pendingCount === 0 && $activeTotal > 0) {
+            $lines[] = "Bravo, toutes les habitudes actives sont a jour !";
         }
 
         $reply = implode("\n", $lines);
@@ -846,11 +892,17 @@ PROMPT;
         $atRisk     = [];
         $onTrack    = [];
         $notStarted = [];
+        $paused     = [];
 
         foreach ($habits->values() as $i => $habit) {
             $num    = $i + 1;
             $streak = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
             $unit   = $habit->frequency === 'weekly' ? 'sem' : 'j';
+
+            if ($habit->paused_at !== null) {
+                $paused[] = "  {$num}. {$habit->name} [PAUSE]";
+                continue;
+            }
 
             $isDone = $habit->frequency === 'weekly'
                 ? in_array($habit->id, $doneThisWeekIds)
@@ -890,13 +942,21 @@ PROMPT;
             $lines[] = "Le premier pas est le plus dur — lance-toi !";
         }
 
-        $doneCount = count($onTrack);
-        $total     = $habits->count();
+        if (!empty($paused)) {
+            $lines[] = "\nEn pause :";
+            foreach ($paused as $item) {
+                $lines[] = $item;
+            }
+        }
 
-        if ($doneCount === $total) {
-            $lines[] = "\nBravo ! Toutes tes habitudes sont a jour !";
-        } elseif ($doneCount >= (int) ceil($total / 2)) {
-            $lines[] = "\nBonne progression ! Plus que " . ($total - $doneCount) . " habitude(s) a cocher.";
+        $doneCount   = count($onTrack);
+        $activeTotal = $habits->filter(fn($h) => $h->paused_at === null)->count();
+        $total       = $habits->count();
+
+        if ($activeTotal > 0 && $doneCount === $activeTotal) {
+            $lines[] = "\nBravo ! Toutes tes habitudes actives sont a jour !";
+        } elseif ($activeTotal > 0 && $doneCount >= (int) ceil($activeTotal / 2)) {
+            $lines[] = "\nBonne progression ! Plus que " . ($activeTotal - $doneCount) . " habitude(s) a cocher.";
         } elseif (!empty($atRisk)) {
             $lines[] = "\nProtege tes streaks — chaque jour compte !";
         } else {
@@ -988,10 +1048,14 @@ PROMPT;
             . "  \"Nouvelle habitude: Sport, hebdo\"\n\n"
             . "COCHER (faire une habitude)\n"
             . "  \"J'ai medite\" / \"J'ai fait du sport\"\n"
-            . "  \"Cocher habitude 2\"\n\n"
+            . "  \"Cocher habitude 2\"\n"
+            . "  \"J'ai fait sport et meditation\" (plusieurs a la fois)\n\n"
             . "ANNULER un log\n"
             . "  \"Annuler mon log sport\"\n"
             . "  \"J'ai pas fait meditation finalement\"\n\n"
+            . "PAUSE / REPRISE\n"
+            . "  \"Mettre en pause habitude 2\" — suspend sans casser le streak\n"
+            . "  \"Reprendre habitude 2\" — reactive l'habitude\n\n"
             . "VOIR\n"
             . "  \"Mes habitudes\" — liste avec streaks\n"
             . "  \"Aujourd'hui\" — ce qu'il reste a faire\n"
@@ -1019,6 +1083,169 @@ PROMPT;
         $reply = "Action non reconnue. Dis \"aide habitudes\" pour voir toutes les commandes.";
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'habit_unknown_action']);
+    }
+
+    /**
+     * Log multiple habits in one shot.
+     * JSON: {"action": "log_multiple", "items": [1, 3]}
+     */
+    private function handleLogMultiple(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $items = $parsed['items'] ?? [];
+
+        if (empty($items) || !is_array($items) || $habits->isEmpty()) {
+            $reply = "Quelles habitudes veux-tu cocher ? Ex: \"J'ai fait sport et meditation\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_log_multiple_no_items']);
+        }
+
+        $tz    = AppSetting::timezone();
+        $today = now($tz)->toDateString();
+
+        $logged    = [];
+        $skipped   = [];
+        $notFound  = [];
+
+        foreach ($items as $itemNum) {
+            $habit = $habits->values()[(int) $itemNum - 1] ?? null;
+
+            if (!$habit) {
+                $notFound[] = "#{$itemNum}";
+                continue;
+            }
+
+            // Check already logged
+            if ($habit->frequency === 'weekly') {
+                $weekStart    = now($tz)->startOfWeek()->toDateString();
+                $alreadyDone  = HabitLog::where('habit_id', $habit->id)
+                    ->whereBetween('completed_date', [$weekStart, $today])
+                    ->exists();
+            } else {
+                $alreadyDone = HabitLog::where('habit_id', $habit->id)
+                    ->where('completed_date', $today)
+                    ->exists();
+            }
+
+            if ($alreadyDone) {
+                $skipped[] = $habit->name;
+                continue;
+            }
+
+            // Auto-resume if paused
+            if ($habit->paused_at !== null) {
+                $habit->update(['paused_at' => null]);
+            }
+
+            $oldBest    = $this->getBestStreak($habit->id);
+            $streak     = $this->calculateStreak($habit->id, $habit->frequency);
+            $newStreak  = $streak + 1;
+            $bestStreak = max($oldBest, $newStreak);
+
+            HabitLog::create([
+                'habit_id'       => $habit->id,
+                'completed_date' => $today,
+                'streak_count'   => $newStreak,
+                'best_streak'    => $bestStreak,
+            ]);
+
+            $this->cacheStreak($habit->id, $newStreak, $bestStreak);
+            $logged[] = "{$habit->name} (streak: {$newStreak})";
+        }
+
+        $lines = [];
+
+        if (!empty($logged)) {
+            $lines[] = "Cochees : " . implode(', ', $logged);
+        }
+        if (!empty($skipped)) {
+            $lines[] = "Deja cochees aujourd'hui : " . implode(', ', $skipped);
+        }
+        if (!empty($notFound)) {
+            $lines[] = "Introuvables : " . implode(', ', $notFound);
+        }
+        if (empty($logged) && empty($skipped)) {
+            $lines[] = "Aucune habitude cochee.";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit log multiple', ['logged' => count($logged), 'skipped' => count($skipped)]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_log_multiple', 'logged' => count($logged)]);
+    }
+
+    /**
+     * Pause an active habit (streak preserved, excluded from pending/at-risk views).
+     */
+    private function handlePause(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $item = $parsed['item'] ?? null;
+        if (!$item || $habits->isEmpty()) {
+            $reply = "Quelle habitude veux-tu mettre en pause ? Donne le numero.\nEx: \"Mettre en pause habitude 2\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_pause_no_item']);
+        }
+
+        $habit = $habits->values()[(int) $item - 1] ?? null;
+
+        if (!$habit) {
+            $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_pause_not_found']);
+        }
+
+        if ($habit->paused_at !== null) {
+            $reply = "\"{$habit->name}\" est deja en pause.\nDis \"reprendre habitude {$item}\" pour la reactiver.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_pause_already_paused']);
+        }
+
+        $streak = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
+        $habit->update(['paused_at' => now()]);
+
+        $reply = "Habitude \"{$habit->name}\" mise en pause.\n"
+            . "Streak preservee : {$streak}" . ($habit->frequency === 'weekly' ? ' sem' : 'j') . "\n"
+            . "Dis \"reprendre habitude {$item}\" quand tu es pret(e) !";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit paused', ['habit_id' => $habit->id, 'name' => $habit->name]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_pause', 'habit_id' => $habit->id]);
+    }
+
+    /**
+     * Resume a paused habit.
+     */
+    private function handleResume(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $item = $parsed['item'] ?? null;
+        if (!$item || $habits->isEmpty()) {
+            $reply = "Quelle habitude veux-tu reprendre ? Donne le numero.\nEx: \"Reprendre habitude 2\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_resume_no_item']);
+        }
+
+        $habit = $habits->values()[(int) $item - 1] ?? null;
+
+        if (!$habit) {
+            $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_resume_not_found']);
+        }
+
+        if ($habit->paused_at === null) {
+            $reply = "\"{$habit->name}\" n'est pas en pause, elle est deja active !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_resume_not_paused']);
+        }
+
+        $habit->update(['paused_at' => null]);
+
+        $reply = "Habitude \"{$habit->name}\" reactivee !\n"
+            . "Bienvenue de retour — continue sur ta lancee !";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit resumed', ['habit_id' => $habit->id, 'name' => $habit->name]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_resume', 'habit_id' => $habit->id]);
     }
 
     /**
@@ -1522,7 +1749,11 @@ PROMPT;
                 ? in_array($habit->id, $doneThisWeekIds)
                 : in_array($habit->id, $doneTodayIds);
 
-            $check   = $isDone ? '[FAIT]' : '[A FAIRE]';
+            if ($habit->paused_at !== null) {
+                $check = '[PAUSE]';
+            } else {
+                $check = $isDone ? '[FAIT]' : '[A FAIRE]';
+            }
             $lines[] = "#{$num} {$habit->name} ({$habit->frequency}) — streak: {$streak}{$unit} {$check}";
         }
 

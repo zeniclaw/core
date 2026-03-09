@@ -19,6 +19,11 @@ class Habit extends Model
         'name',
         'description',
         'frequency',
+        'paused_at',
+    ];
+
+    protected $casts = [
+        'paused_at' => 'datetime',
     ];
 
     public function agent(): BelongsTo
