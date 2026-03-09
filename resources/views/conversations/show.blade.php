@@ -168,6 +168,13 @@
                         <span class="px-1.5 py-0.5 rounded {{ ($routing['autonomy'] ?? '') === 'auto' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600' }}">
                             {{ $routing['autonomy'] ?? '?' }}
                         </span>
+                        @if(isset($routing['confidence']))
+                        <span class="px-1.5 py-0.5 rounded font-mono font-medium
+                            {{ ($routing['confidence'] ?? 0) >= 85 ? 'bg-green-100 text-green-700' :
+                               (($routing['confidence'] ?? 0) >= 65 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700') }}">
+                            {{ $routing['confidence'] }}%
+                        </span>
+                        @endif
                     </div>
                     <div class="text-gray-600 mb-1">
                         <span class="text-gray-400">Message:</span> {{ Str::limit($body, 150) }}

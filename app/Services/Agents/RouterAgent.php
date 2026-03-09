@@ -19,6 +19,37 @@ class RouterAgent
     private SmartContextAgent $smartContext;
     private array $registeredAgents = [];
 
+    /**
+     * Deterministic fast-path patterns: regex → [agent, model, complexity, autonomy].
+     * Checked BEFORE calling the LLM — saves a Sonnet call on obvious messages.
+     */
+    private array $fastPathPatterns = [
+        // Greetings / small talk → chat
+        '/^(hey|hi|hello|salut|bonjour|bonsoir|coucou|yo|wesh|slt|bjr|cc|bsr|re|merci|thanks|thx|ok merci)[\s!.?]*$/iu'
+            => ['chat', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Reminder with time marker → reminder
+        '/\b(rappel(le)?[\s-]?(moi)?|remind\s*me|dans\s+\d+\s*(min|minute|heure|hour|h|jour|day|j))\b/iu'
+            => ['reminder', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Explicit todo keywords → todo
+        '/^(ajoute|add|nouvelle?\s+t[aâ]che|new\s+task|todo\s*:)/iu'
+            => ['todo', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Music / Spotify → music
+        '/\b(joue|play|met[s]?\s+(de\s+la\s+)?musique|spotify|playlist|next\s*song|chanson\s+suivante|pause\s+musique)\b/iu'
+            => ['music', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // URL to summarize → content_summarizer
+        '/^(r[eé]sum[eé]|summarize|synth[eè]se|tldr|de\s+quoi\s+[cç]a\s+parle)\s+https?:\/\//iu'
+            => ['content_summarizer', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Pomodoro → pomodoro
+        '/\b(pomodoro|session\s+de\s+(travail|focus)|lance\s+(un\s+)?focus)\b/iu'
+            => ['pomodoro', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Mood → mood_check
+        '/^(je\s+(me\s+sens|suis)\s+(fatigu|stress|triste|heureux|bien|mal|nul|depress|anxieu|énervé|content|motivé))/iu'
+            => ['mood_check', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Hangman → hangman
+        '/\b(pendu|hangman|jouer\s+au\s+pendu)\b/iu'
+            => ['hangman', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+    ];
+
     public function __construct()
     {
         $this->claude = new AnthropicClient();
@@ -52,6 +83,7 @@ class RouterAgent
                 'model' => 'claude-haiku-4-5-20251001',
                 'complexity' => 'simple',
                 'autonomy' => 'auto',
+                'confidence' => 99,
                 'reasoning' => 'Audio message — transcription first',
             ];
         }
@@ -64,7 +96,41 @@ class RouterAgent
                 'complexity' => 'simple',
                 'autonomy' => 'confirm',
                 'reasoning' => 'GitLab URL detected',
+                'confidence' => 99,
             ];
+        }
+
+        // Image/document media without text → screenshot or document agent
+        if ($context->hasMedia && !$context->body) {
+            $mime = $effectiveMimetype ?? '';
+            if (str_starts_with($mime, 'image/')) {
+                return [
+                    'agent' => 'screenshot',
+                    'model' => 'claude-haiku-4-5-20251001',
+                    'complexity' => 'simple',
+                    'autonomy' => 'auto',
+                    'reasoning' => 'Image without text → OCR/screenshot',
+                    'confidence' => 90,
+                ];
+            }
+            if (str_contains($mime, 'pdf') || str_contains($mime, 'document') || str_contains($mime, 'spreadsheet')) {
+                return [
+                    'agent' => 'document',
+                    'model' => 'claude-haiku-4-5-20251001',
+                    'complexity' => 'simple',
+                    'autonomy' => 'auto',
+                    'reasoning' => 'Document without text → document agent',
+                    'confidence' => 90,
+                ];
+            }
+        }
+
+        // ── Deterministic fast-path patterns (no LLM call) ──
+        if ($context->body && !$context->hasMedia) {
+            $fastResult = $this->matchFastPath($context->body);
+            if ($fastResult) {
+                return $fastResult;
+            }
         }
 
         // ── Full LLM routing with dynamic agent catalog ──
@@ -84,9 +150,9 @@ class RouterAgent
             $memoryContext = "\n\nMEMOIRE CONTEXTUELLE:\n" . implode("\n", $lines);
         }
 
-        // Recent conversation history for contextual routing
+        // Recent conversation history for contextual routing (8 messages for better context)
         $conversationMemory = new ConversationMemoryService();
-        $recentHistory = $this->getRecentHistory($conversationMemory, $context, 5);
+        $recentHistory = $this->getRecentHistory($conversationMemory, $context, 8);
 
         $message = "Message: \"{$body}\"";
         if ($context->hasMedia) {
@@ -123,7 +189,7 @@ class RouterAgent
 Tu es un routeur IA. Tu analyses le MESSAGE, le CONTEXTE et la MEMOIRE pour choisir le bon agent.
 
 Reponds UNIQUEMENT en JSON:
-{"agent": "...", "model": "...", "complexity": "...", "autonomy": "auto|confirm", "reasoning": "..."}
+{"agent": "...", "model": "...", "complexity": "...", "autonomy": "auto|confirm", "confidence": 0-100, "reasoning": "..."}
 
 ════════════════════════════════════════
 CATALOGUE DES AGENTS:
@@ -160,6 +226,21 @@ INTELLIGENCE CONTEXTUELLE:
    - Un numero apres une liste = selection dans la liste → meme agent que celui qui a affiche la liste
    - "corrige X" apres avoir parle d'un projet = dev task sur ce projet
    - Tout message qui fait reference a un echange precedent doit aller vers l'agent concerne
+
+CONFIANCE (confidence):
+- 90-100 = certain (mot-cle explicite, contexte clair)
+- 70-89 = probable (intention claire mais pas de mot-cle exact)
+- 50-69 = incertain (message ambigu, pourrait aller a plusieurs agents)
+- 0-49 = tres incertain → utilise "chat" par defaut
+
+DESAMBIGUATION (agents souvent confondus):
+- "analyse ce code" → code_review (PAS analysis)
+- "analyse ce document/PDF" → analysis OU document (selon media)
+- "cree un rappel pour ma reunion" → reminder (PAS smart_meeting, PAS event_reminder)
+- "planifie un evenement le 15 mars" → event_reminder (PAS reminder — car date/lieu specifique)
+- "resume cet article/URL" → content_summarizer (PAS analysis)
+- "mes projets" / "liste les projets" → dev (PAS project)
+- "switch sur projet X" / "bosser sur X" → project
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -264,6 +345,7 @@ CATALOG;
             'model' => 'claude-haiku-4-5-20251001',
             'complexity' => 'simple',
             'autonomy' => 'confirm',
+            'confidence' => 0,
             'reasoning' => 'fallback to chat',
         ];
 
@@ -294,7 +376,7 @@ CATALOG;
                 'chat', 'dev', 'reminder', 'project', 'analysis', 'todo', 'music',
                 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard',
                 'voice_command', 'code_review', 'screenshot', 'content_summarizer',
-                'event_reminder', 'habit', 'pomodoro',
+                'event_reminder', 'habit', 'pomodoro', 'document',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
@@ -306,11 +388,26 @@ CATALOG;
             $autonomy = 'confirm';
         }
 
+        $confidence = (int) ($parsed['confidence'] ?? 75);
+        $confidence = max(0, min(100, $confidence));
+
+        // Low confidence → fallback to chat (safer than wrong agent)
+        if ($confidence < 50 && $parsed['agent'] !== 'chat') {
+            Log::info('RouterAgent: low confidence fallback', [
+                'original_agent' => $parsed['agent'],
+                'confidence' => $confidence,
+                'reasoning' => $parsed['reasoning'] ?? '',
+            ]);
+            $parsed['agent'] = 'chat';
+            $parsed['reasoning'] = ($parsed['reasoning'] ?? '') . ' [low confidence → chat fallback]';
+        }
+
         return [
             'agent' => $parsed['agent'],
             'model' => $parsed['model'] ?? $default['model'],
             'complexity' => $parsed['complexity'] ?? 'simple',
             'autonomy' => $autonomy,
+            'confidence' => $confidence,
             'reasoning' => $parsed['reasoning'] ?? '',
         ];
     }
@@ -371,6 +468,30 @@ CATALOG;
         return implode("\n\n", $parts);
     }
 
+    /**
+     * Try deterministic fast-path patterns before calling the LLM.
+     */
+    private function matchFastPath(string $body): ?array
+    {
+        $clean = trim($body);
+
+        foreach ($this->fastPathPatterns as $pattern => [$agent, $model, $complexity, $autonomy]) {
+            if (preg_match($pattern, $clean)) {
+                Log::info('RouterAgent: fast-path match', ['agent' => $agent, 'pattern' => $pattern, 'body' => mb_substr($clean, 0, 60)]);
+                return [
+                    'agent' => $agent,
+                    'model' => $model,
+                    'complexity' => $complexity,
+                    'autonomy' => $autonomy,
+                    'confidence' => 95,
+                    'reasoning' => "Fast-path: pattern match → {$agent}",
+                ];
+            }
+        }
+
+        return null;
+    }
+
     private function detectGitlabUrl(string $body): bool
     {
         return (bool) preg_match('#https?://gitlab\.[^\s]+#i', $body);
@@ -394,8 +515,8 @@ CATALOG;
         $recent = array_slice($entries, -$count);
         $lines = ['HISTORIQUE RECENT:'];
         foreach ($recent as $entry) {
-            $msg = mb_substr($entry['sender_message'] ?? '', 0, 150);
-            $reply = mb_substr($entry['agent_reply'] ?? '', 0, 200);
+            $msg = mb_substr($entry['sender_message'] ?? '', 0, 250);
+            $reply = mb_substr($entry['agent_reply'] ?? '', 0, 350);
             $lines[] = "User: {$msg}";
             $lines[] = "ZeniClaw: {$reply}";
             $lines[] = "";

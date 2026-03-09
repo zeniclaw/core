@@ -104,10 +104,12 @@ class AgentOrchestrator
             $routing = $this->router->route($context);
 
             if ($debug) {
+                $confidence = $routing['confidence'] ?? '?';
                 $this->sendDebug($context,
                     "[DEBUG ROUTER]\n"
                     . "Message: " . mb_substr($context->body ?? '', 0, 80) . "\n"
                     . "Agent: {$routing['agent']}\n"
+                    . "Confidence: {$confidence}%\n"
                     . "Model: {$routing['model']}\n"
                     . "Complexity: {$routing['complexity']}\n"
                     . "Autonomy: {$routing['autonomy']}\n"
