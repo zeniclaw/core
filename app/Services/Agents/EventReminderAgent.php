@@ -47,18 +47,22 @@ class EventReminderAgent extends BaseAgent
             'show event', 'voir event', 'detail event', 'details event',
             'month events', 'evenements du mois', 'ce mois', 'this month',
             'postpone event', 'reporter evenement', 'decaler evenement', 'reschedule event',
+            'next event', 'prochain evenement', 'prochain événement', 'prochaine réunion',
+            'stats', 'statistiques', 'statistics', 'bilan calendrier',
+            'done event', 'terminer evenement', 'evenement termine', 'mark done',
+            'marquer fait', 'marquer termine',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
-        return (bool) preg_match('/\b(event|evenement|événement|calendrier|calendar|agenda|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|modifier\s+evenement|event\s+on|rdv|rendez-vous|rendez\s+vous|appointment|planifier|search\s+event|chercher\s+evenement|week\s+events?|cette\s+semaine|this\s+week|duplicate\s+event|dupliquer|copier\s+evenement|copy\s+event|show\s+event|detail\s+event|month\s+events?|ce\s+mois|this\s+month|postpone|reporter\s+evenement|decaler)\b/iu', $context->body);
+        return (bool) preg_match('/\b(event|evenement|événement|calendrier|calendar|agenda|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|modifier\s+evenement|event\s+on|rdv|rendez-vous|rendez\s+vous|appointment|planifier|search\s+event|chercher\s+evenement|week\s+events?|cette\s+semaine|this\s+week|duplicate\s+event|dupliquer|copier\s+evenement|copy\s+event|show\s+event|detail\s+event|month\s+events?|ce\s+mois|this\s+month|postpone|reporter\s+evenement|decaler|next\s+event|prochain\s+evenement|prochain\s+événement|stats\s+events?|statistiques|done\s+event|terminer\s+evenement|mark\s+done|marquer\s+fait)\b/iu', $context->body);
     }
 
     public function handle(AgentContext $context): AgentResult
@@ -71,6 +75,21 @@ class EventReminderAgent extends BaseAgent
         // Show event details by ID
         if (preg_match('/\b(show|voir|detail|details|afficher)\s*(?:event|evenement)?\s*#?(\d+)/iu', $lower, $m)) {
             return $this->showEventDetails($context, (int) $m[2]);
+        }
+
+        // Mark event as done
+        if (preg_match('/\b(done|terminer|termine|fait|completed?|mark\s+done|marquer\s+(?:fait|termine))\s*(?:event|evenement)?\s*#?(\d+)/iu', $lower, $m)) {
+            return $this->markEventDone($context, (int) $m[2]);
+        }
+
+        // Stats
+        if (preg_match('/\b(stats?|statistiques?|statistics?|bilan)\s*(?:events?|evenements?|calendrier)?/iu', $lower)) {
+            return $this->statsEvents($context);
+        }
+
+        // Next event
+        if (preg_match('/\b(next\s+event|prochain\s+evenement|prochain\s+(?:événement|evenement)|prochaine?\s+(?:reunion|rdv|seance|seance))\b/iu', $lower)) {
+            return $this->nextEvent($context);
         }
 
         // Month events
@@ -170,6 +189,8 @@ class EventReminderAgent extends BaseAgent
             'today'     => $this->todayEvents($context),
             'week'      => $this->weekEvents($context),
             'month'     => $this->monthEvents($context),
+            'next'      => $this->nextEvent($context),
+            'stats'     => $this->statsEvents($context),
             'show'      => isset($parsed['event_id'])
                 ? $this->showEventDetails($context, (int) $parsed['event_id'])
                 : $this->showHelp($context),
@@ -188,6 +209,9 @@ class EventReminderAgent extends BaseAgent
             'postpone'  => isset($parsed['event_id'], $parsed['days'])
                 ? $this->postponeEvent($context, (int) $parsed['event_id'], (int) $parsed['days'] . ' days')
                 : $this->showHelp($context),
+            'done'      => isset($parsed['event_id'])
+                ? $this->markEventDone($context, (int) $parsed['event_id'])
+                : $this->showHelp($context),
             'help'      => $this->showHelp($context),
             default     => $this->showHelp($context),
         };
@@ -203,7 +227,7 @@ class EventReminderAgent extends BaseAgent
 Tu es un assistant de gestion d'evenements. Analyse le message et reponds UNIQUEMENT en JSON valide, sans markdown.
 
 FORMAT JSON:
-{"action": "create|list|today|week|month|show|remove|update|search|duplicate|postpone|help", ...champs selon action}
+{"action": "create|list|today|week|month|show|remove|update|search|duplicate|postpone|next|stats|done|help", ...champs selon action}
 
 ACTIONS:
 
@@ -222,28 +246,37 @@ ACTIONS:
 5. VOIR les evenements DU MOIS:
 {"action": "month"}
 
-6. VOIR le detail d'un evenement:
+6. VOIR LE PROCHAIN evenement a venir:
+{"action": "next"}
+
+7. STATISTIQUES du calendrier:
+{"action": "stats"}
+
+8. VOIR le detail d'un evenement:
 {"action": "show", "event_id": 5}
 
-7. SUPPRIMER un evenement (demande confirmation):
+9. SUPPRIMER un evenement (demande confirmation):
 {"action": "remove", "event_id": 5}
 
-8. MODIFIER un evenement:
+10. MODIFIER un evenement:
 {"action": "update", "event_id": 5, "field": "event_name|event_date|event_time|location|description|participants|reminder_minutes", "value": "nouvelle valeur"}
 Pour participants, value est une liste JSON: ["Alice", "Bob"]
 Pour reminder_minutes, value est une liste JSON: [15, 60, 1440]
 
-9. RECHERCHER par mot-cle:
+11. RECHERCHER par mot-cle:
 {"action": "search", "keyword": "mot cle"}
 
-10. DUPLIQUER un evenement:
+12. DUPLIQUER un evenement:
 {"action": "duplicate", "event_id": 3, "new_date": "YYYY-MM-DD"}
 
-11. REPORTER/DECALER un evenement:
+13. REPORTER/DECALER un evenement:
 {"action": "postpone", "event_id": 3, "days": 7}
 days = nombre de jours entier positif (1 semaine = 7, 2 semaines = 14, 1 mois ≈ 30)
 
-12. AIDE:
+14. MARQUER un evenement comme TERMINE:
+{"action": "done", "event_id": 5}
+
+15. AIDE:
 {"action": "help"}
 
 REGLES:
@@ -261,6 +294,9 @@ REGLES:
 - 'cette semaine' / 'week events' → week
 - 'ce mois' / 'month events' → month
 - 'show event #5' / 'detail evenement 5' / 'voir event 5' → show
+- 'prochain event' / 'next event' / 'c\'est quoi le prochain' → next
+- 'stats events' / 'statistiques' / 'bilan' → stats
+- 'event #5 done' / 'mark event #5 done' / 'terminer event #5' → done
 - Ne mets que les champs pertinents pour l'action
 
 EXEMPLES:
@@ -270,6 +306,8 @@ EXEMPLES:
 - "evenements aujourd'hui" → {"action":"today"}
 - "evenements cette semaine" → {"action":"week"}
 - "evenements ce mois" → {"action":"month"}
+- "c'est quoi mon prochain event ?" → {"action":"next"}
+- "stats de mon calendrier" → {"action":"stats"}
 - "montre-moi l'event #5" → {"action":"show","event_id":5}
 - "supprime evenement #3" → {"action":"remove","event_id":3}
 - "change le lieu de l'event #5 a Paris" → {"action":"update","event_id":5,"field":"location","value":"Paris"}
@@ -278,6 +316,7 @@ EXEMPLES:
 - "duplique l'event #3 au {$nextWeek}" → {"action":"duplicate","event_id":3,"new_date":"{$nextWeek}"}
 - "reporte l'event #3 de 1 semaine" → {"action":"postpone","event_id":3,"days":7}
 - "postpone event #2 by 3 days" → {"action":"postpone","event_id":2,"days":3}
+- "l'event #4 est termine" → {"action":"done","event_id":4}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -366,29 +405,31 @@ PROMPT;
         if ($events->isEmpty()) {
             $reply = "Aucun evenement a venir !\n\n"
                 . "Ajoute-en un avec :\n"
-                . "*remind me about [evenement] on [date] at [heure]*";
+                . "*remind me about [evenement] on [date] at [heure]*\n\n"
+                . "Tape *help events* pour voir toutes les commandes.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        $reply = "*Tes evenements a venir ({$events->count()}) :*\n\n";
+        $total = $events->count();
+        $reply = "*Tes evenements a venir ({$total}) :*\n";
+
+        $currentDay = null;
         foreach ($events as $event) {
+            $dayLabel = $event->event_date->translatedFormat('l j F Y');
+            if ($dayLabel !== $currentDay) {
+                $reply     .= "\n_{$dayLabel}_\n";
+                $currentDay = $dayLabel;
+            }
             $reply .= $this->formatEventLine($event) . "\n";
         }
 
-        $reply .= "\nCommandes :\n"
-            . "- *show event #ID* — Voir le detail\n"
-            . "- *remove event #ID* — Supprimer\n"
-            . "- *update event #ID champ valeur* — Modifier\n"
-            . "- *postpone event #ID by [duree]* — Reporter\n"
-            . "- *duplicate event #ID to [date]* — Dupliquer\n"
-            . "- *search event [mot-cle]* — Rechercher\n"
-            . "- *week events* / *month events*";
+        $reply .= "\n_Commandes : show/remove/update/postpone/duplicate event #ID_";
 
         $this->sendText($context->from, $reply);
-        $this->log($context, 'Events listed', ['count' => $events->count()]);
+        $this->log($context, 'Events listed', ['count' => $total]);
 
-        return AgentResult::reply($reply, ['count' => $events->count()]);
+        return AgentResult::reply($reply, ['count' => $total]);
     }
 
     private function todayEvents(AgentContext $context): AgentResult
@@ -396,7 +437,7 @@ PROMPT;
         $today = Carbon::today(AppSetting::timezone());
 
         $events = EventReminder::where('user_phone', $context->from)
-            ->where('status', 'active')
+            ->active()
             ->whereDate('event_date', $today->format('Y-m-d'))
             ->orderBy('event_time')
             ->get();
@@ -425,7 +466,7 @@ PROMPT;
         $endWeek = $today->copy()->addDays(6)->endOfDay();
 
         $events = EventReminder::where('user_phone', $context->from)
-            ->where('status', 'active')
+            ->active()
             ->whereBetween('event_date', [$today->format('Y-m-d'), $endWeek->format('Y-m-d')])
             ->orderBy('event_date')
             ->orderBy('event_time')
@@ -464,7 +505,7 @@ PROMPT;
         $endMonth   = $today->copy()->endOfMonth();
 
         $events = EventReminder::where('user_phone', $context->from)
-            ->where('status', 'active')
+            ->active()
             ->whereBetween('event_date', [$startMonth->format('Y-m-d'), $endMonth->format('Y-m-d')])
             ->orderBy('event_date')
             ->orderBy('event_time')
@@ -662,6 +703,147 @@ PROMPT;
         return AgentResult::reply($reply, ['event_id' => $newEvent->id, 'source_id' => $eventId]);
     }
 
+    private function nextEvent(AgentContext $context): AgentResult
+    {
+        $event = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->upcoming()
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->first();
+
+        if (!$event) {
+            $reply = "Aucun evenement a venir dans ton calendrier.\n\n"
+                . "Ajoute-en un avec :\n"
+                . "*remind me about [evenement] on [date] at [heure]*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $dateFormatted = $event->event_date->translatedFormat('l j F Y');
+        $timeFormatted = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : 'heure non definie';
+        $timeUntil     = $event->timeUntilEvent();
+
+        $reply  = "*Prochain evenement :*\n\n";
+        $reply .= "*{$event->event_name}* (#{$event->id})\n";
+        $reply .= "Date : {$dateFormatted}\n";
+        $reply .= "Heure : {$timeFormatted}\n";
+
+        if ($event->location) {
+            $reply .= "Lieu : {$event->location}\n";
+        }
+        if (!empty($event->participants)) {
+            $reply .= "Participants : " . implode(', ', $event->participants) . "\n";
+        }
+
+        $reply .= "\nDans : *{$timeUntil}*\n";
+        $reply .= "\n_Tape *show event #{$event->id}* pour plus de details._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Next event shown', ['event_id' => $event->id]);
+
+        return AgentResult::reply($reply, ['event_id' => $event->id]);
+    }
+
+    private function statsEvents(AgentContext $context): AgentResult
+    {
+        $tz    = AppSetting::timezone();
+        $today = Carbon::today($tz);
+
+        $totalActive = EventReminder::where('user_phone', $context->from)
+            ->active()->count();
+
+        $upcoming = EventReminder::where('user_phone', $context->from)
+            ->active()->upcoming()->count();
+
+        $todayCount = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', $today->format('Y-m-d'))
+            ->count();
+
+        $weekCount = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [
+                $today->format('Y-m-d'),
+                $today->copy()->addDays(6)->format('Y-m-d'),
+            ])
+            ->count();
+
+        $monthCount = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [
+                $today->copy()->startOfMonth()->format('Y-m-d'),
+                $today->copy()->endOfMonth()->format('Y-m-d'),
+            ])
+            ->count();
+
+        $cancelledCount = EventReminder::where('user_phone', $context->from)
+            ->where('status', 'cancelled')->count();
+
+        $doneCount = EventReminder::where('user_phone', $context->from)
+            ->where('status', 'done')->count();
+
+        $monthLabel = $today->translatedFormat('F Y');
+
+        $reply  = "*Statistiques de ton calendrier :*\n\n";
+        $reply .= "Actifs a venir : *{$upcoming}*\n";
+        $reply .= "Aujourd'hui : *{$todayCount}*\n";
+        $reply .= "Cette semaine (7j) : *{$weekCount}*\n";
+        $reply .= "Ce mois ({$monthLabel}) : *{$monthCount}*\n";
+        $reply .= "\nTermines : *{$doneCount}*\n";
+        $reply .= "Annules : *{$cancelledCount}*\n";
+        $reply .= "Total actifs : *{$totalActive}*";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Stats shown', [
+            'upcoming' => $upcoming,
+            'today'    => $todayCount,
+            'week'     => $weekCount,
+            'month'    => $monthCount,
+        ]);
+
+        return AgentResult::reply($reply, [
+            'upcoming'   => $upcoming,
+            'today'      => $todayCount,
+            'week'       => $weekCount,
+            'month'      => $monthCount,
+            'cancelled'  => $cancelledCount,
+            'done'       => $doneCount,
+        ]);
+    }
+
+    private function markEventDone(AgentContext $context, int $eventId): AgentResult
+    {
+        $event = EventReminder::where('id', $eventId)
+            ->where('user_phone', $context->from)
+            ->first();
+
+        if (!$event) {
+            $reply = "Evenement #{$eventId} introuvable. Tape *list events* pour voir tes evenements.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        if ($event->status === 'done') {
+            $reply = "L'evenement *{$event->event_name}* (#{$eventId}) est deja marque comme termine.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $event->update(['status' => 'done']);
+
+        $dateStr = $event->event_date->translatedFormat('l j F Y');
+        $reply   = "Evenement marque comme termine !\n\n"
+            . "*{$event->event_name}* (#{$event->id})\n"
+            . "Date : {$dateStr}\n\n"
+            . "_Bravo ! L'evenement est archive._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Event marked done', ['event_id' => $eventId]);
+
+        return AgentResult::reply($reply, ['event_id' => $eventId]);
+    }
+
     private function searchEvents(AgentContext $context, string $keyword): AgentResult
     {
         $keyword = trim($keyword);
@@ -678,7 +860,7 @@ PROMPT;
                 $q->where('event_name', 'like', "%{$keyword}%")
                     ->orWhere('description', 'like', "%{$keyword}%")
                     ->orWhere('location', 'like', "%{$keyword}%")
-                    ->orWhere('participants', 'like', "%{$keyword}%");
+                    ->orWhereRaw('LOWER(CAST(participants AS CHAR)) LIKE ?', ['%' . mb_strtolower($keyword) . '%']);
             })
             ->orderBy('event_date')
             ->orderBy('event_time')
@@ -1049,17 +1231,20 @@ PROMPT;
 
     private function showHelp(AgentContext $context): AgentResult
     {
-        $reply = "*Event Reminder v1.3 — Gestion d'evenements :*\n\n"
+        $reply = "*Event Reminder v1.4 — Gestion d'evenements :*\n\n"
             . "*Creer :*\n"
             . "remind me about [evenement] on [date] at [heure]\n"
             . "add event [nom] [date] [heure]\n\n"
             . "*Consulter :*\n"
             . "list events — Tous les evenements a venir\n"
+            . "next event — Prochain evenement\n"
             . "today events — Evenements du jour\n"
             . "week events — Evenements de la semaine\n"
             . "month events — Evenements du mois\n"
-            . "show event #ID — Detail d'un evenement\n\n"
+            . "show event #ID — Detail d'un evenement\n"
+            . "stats events — Statistiques du calendrier\n\n"
             . "*Gerer :*\n"
+            . "done event #ID — Marquer comme termine\n"
             . "remove event #ID — Supprimer (avec confirmation)\n"
             . "update event #ID [champ] [valeur] — Modifier\n"
             . "postpone event #ID by [duree] — Reporter\n"
@@ -1068,7 +1253,10 @@ PROMPT;
             . "*Exemples :*\n"
             . "- remind me about Reunion equipe on 2026-03-15 at 14:00\n"
             . "- add event Dentiste demain a 10h\n"
+            . "- next event\n"
+            . "- stats events\n"
             . "- show event #5\n"
+            . "- done event #5\n"
             . "- month events\n"
             . "- postpone event #3 by 1 semaine\n"
             . "- update event #3 location Salle A\n"
