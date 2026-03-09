@@ -7,6 +7,7 @@ use App\Services\AgentContext;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
 use App\Services\ConversationMemoryService;
+use App\Services\PreferencesManager;
 use Illuminate\Support\Facades\Http;
 
 abstract class BaseAgent implements AgentInterface
@@ -17,11 +18,18 @@ abstract class BaseAgent implements AgentInterface
 
     protected AnthropicClient $claude;
     protected ConversationMemoryService $memory;
+    protected PreferencesManager $preferencesManager;
 
     public function __construct()
     {
         $this->claude = new AnthropicClient();
         $this->memory = new ConversationMemoryService();
+        $this->preferencesManager = new PreferencesManager();
+    }
+
+    protected function getUserPrefs(AgentContext $context): array
+    {
+        return PreferencesManager::getPreferences($context->from);
     }
 
     public function description(): string

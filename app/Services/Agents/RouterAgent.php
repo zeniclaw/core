@@ -48,6 +48,9 @@ class RouterAgent
         // Hangman → hangman
         '/\b(pendu|hangman|jouer\s+au\s+pendu)\b/iu'
             => ['hangman', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Preferences / profile → user_preferences
+        '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
+            => ['user_preferences', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
     ];
 
     public function __construct()
@@ -380,6 +383,7 @@ CATALOG;
                 'mood_check', 'finance', 'smart_meeting', 'hangman', 'flashcard',
                 'voice_command', 'code_review', 'screenshot', 'content_summarizer',
                 'event_reminder', 'habit', 'pomodoro', 'document', 'web_search',
+                'user_preferences',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
