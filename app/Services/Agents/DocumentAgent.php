@@ -42,12 +42,14 @@ class DocumentAgent extends BaseAgent
             'tableau excel', 'feuille de calcul',
             'contrat', 'attestation', 'certificat',
             'liste numerotee', 'liste ordonnee',
+            'note encadree', 'callout', 'encadre', 'avertissement', 'alerte document',
+            'note importante', 'mise en evidence', 'encart',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -152,6 +154,7 @@ FORMAT DOCX (lettres, contrats, CV, rapports editables):
             {"type": "heading", "text": "Experience Professionnelle", "level": 1},
             {"type": "heading", "text": "Developpeur Senior — ACME Corp (2022-2026)", "level": 2},
             {"type": "list", "items": ["Developpement d'API REST avec Laravel 12", "Management d'une equipe de 3 developpeurs"]},
+            {"type": "callout", "text": "Disponible immediatement — Permis B — Mobilite nationale", "style": "info"},
             {"type": "separator"},
             {"type": "heading", "text": "Competences Techniques", "level": 1},
             {"type": "ordered_list", "items": ["PHP / Laravel (Expert)", "JavaScript / Vue.js (Avance)", "Docker / CI-CD (Intermediaire)"]},
@@ -165,6 +168,12 @@ FORMAT DOCX (lettres, contrats, CV, rapports editables):
         ]
     }
 }
+
+---
+TYPE CALLOUT (encart visuel — fonctionne dans PDF et DOCX):
+{"type": "callout", "text": "Texte de la note ou de l'avertissement", "style": "info"}
+  style: "info" (bleu, pour des informations), "warning" (orange, pour des avertissements), "success" (vert, pour des confirmations)
+  Utilise pour: conditions importantes dans les contrats, notes legales dans les factures, conseils dans les rapports, points cles dans les CV.
 
 ---
 REGLES STRICTES:
@@ -324,9 +333,20 @@ PROMPT;
                     ->getStartColor()->setRGB('4472C4');
             }
 
-            // Write data rows with alternating background
+            // Freeze top row so headers stay visible when scrolling
+            if (!empty($headers)) {
+                $sheet->freezePane('A2');
+            }
+
+            // Write data rows with alternating background + auto-bold for TOTAL rows
             foreach ($rows as $rowIndex => $row) {
-                $bgColor = ($rowIndex % 2 === 1) ? 'EEF2FB' : 'FFFFFF';
+                $firstCellValue = strtoupper(trim((string) ($row[0] ?? '')));
+                $isTotalRow     = str_starts_with($firstCellValue, 'TOTAL')
+                    || str_starts_with($firstCellValue, 'SOUS-TOTAL')
+                    || str_starts_with($firstCellValue, 'SUBTOTAL')
+                    || str_starts_with($firstCellValue, 'GRAND TOTAL');
+                $bgColor = $isTotalRow ? 'D9E1F2' : (($rowIndex % 2 === 1) ? 'EEF2FB' : 'FFFFFF');
+
                 foreach ($row as $col => $value) {
                     $colLetter = Coordinate::stringFromColumnIndex($col + 1);
                     $cellRef   = "{$colLetter}" . ($rowIndex + 2);
@@ -340,8 +360,15 @@ PROMPT;
                         $cell->setValue($strValue);
                     }
 
-                    // Alternating row background
-                    $cell->getStyle()->getFill()
+                    $style = $cell->getStyle();
+
+                    // Bold total rows
+                    if ($isTotalRow) {
+                        $style->getFont()->setBold(true);
+                    }
+
+                    // Alternating row background (or total row highlight)
+                    $style->getFill()
                         ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
                         ->getStartColor()->setRGB($bgColor);
                 }
@@ -482,6 +509,19 @@ PROMPT;
                     $body .= '</ol>';
                     break;
 
+                case 'callout':
+                    $style = $section['style'] ?? 'info';
+                    $bgColors     = ['info' => '#EBF5FB', 'warning' => '#FEF9E7', 'success' => '#EAFAF1'];
+                    $borderColors = ['info' => '#3498DB', 'warning' => '#F39C12', 'success' => '#27AE60'];
+                    $icons        = ['info' => 'i', 'warning' => '!', 'success' => 'v'];
+                    $bg           = $bgColors[$style]     ?? '#EBF5FB';
+                    $border       = $borderColors[$style] ?? '#3498DB';
+                    $icon         = $icons[$style]        ?? 'i';
+                    $body .= "<div style=\"background:{$bg};border-left:4px solid {$border};"
+                           . "padding:10px 14px;margin:10px 0;border-radius:2px;\">"
+                           . "<strong>[{$icon}]</strong> {$text}</div>";
+                    break;
+
                 case 'separator':
                     $body .= '<hr>';
                     break;
@@ -594,6 +634,23 @@ HTML;
                         }
                     }
 
+                    $section->addTextBreak();
+                    break;
+
+                case 'callout':
+                    $callStyle = $item['style'] ?? 'info';
+                    $bgMap     = ['info' => 'D6EAF8', 'warning' => 'FEF9E7', 'success' => 'D5F5E3'];
+                    $bgColor   = $bgMap[$callStyle] ?? 'D6EAF8';
+                    $callTable = $section->addTable([
+                        'borderSize'  => 8,
+                        'borderColor' => 'AAAAAA',
+                        'cellMargin'  => 120,
+                        'width'       => 100 * 50,
+                        'unit'        => 'pct',
+                    ]);
+                    $callTable->addRow();
+                    $callCell = $callTable->addCell(null, ['bgColor' => $bgColor]);
+                    $callCell->addText((string) ($item['text'] ?? ''), ['size' => 11, 'italic' => true]);
                     $section->addTextBreak();
                     break;
 

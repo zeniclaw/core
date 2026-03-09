@@ -24,10 +24,10 @@ class DocumentAgentTest extends TestCase
         $this->assertEquals('document', $agent->name());
     }
 
-    public function test_agent_version_is_1_1_0(): void
+    public function test_agent_version_is_1_2_0(): void
     {
         $agent = new DocumentAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
     }
 
     public function test_agent_has_description(): void
@@ -521,6 +521,164 @@ class DocumentAgentTest extends TestCase
 
         $this->assertFileExists($path);
         @unlink($path);
+    }
+
+    // ── callout: PDF ──────────────────────────────────────────────────────────
+
+    public function test_build_pdf_html_callout_info(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'callout', 'text' => 'Information importante', 'style' => 'info']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Information importante', $html);
+        $this->assertStringContainsString('#EBF5FB', $html);
+        $this->assertStringContainsString('#3498DB', $html);
+    }
+
+    public function test_build_pdf_html_callout_warning(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'callout', 'text' => 'Attention!', 'style' => 'warning']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Attention!', $html);
+        $this->assertStringContainsString('#FEF9E7', $html);
+        $this->assertStringContainsString('#F39C12', $html);
+    }
+
+    public function test_build_pdf_html_callout_success(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'callout', 'text' => 'Confirmation', 'style' => 'success']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Confirmation', $html);
+        $this->assertStringContainsString('#EAFAF1', $html);
+        $this->assertStringContainsString('#27AE60', $html);
+    }
+
+    public function test_build_pdf_html_callout_defaults_to_info(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        // Missing style should default to info colors
+        $sections = [['type' => 'callout', 'text' => 'Note sans style']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Note sans style', $html);
+        $this->assertStringContainsString('#EBF5FB', $html);
+    }
+
+    // ── callout: DOCX ─────────────────────────────────────────────────────────
+
+    public function test_generate_docx_with_callout(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Contrat', 'level' => 1],
+                ['type' => 'callout', 'text' => 'Clause importante: lire attentivement.', 'style' => 'warning'],
+                ['type' => 'paragraph', 'text' => 'Suite du document.'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_callout_' . uniqid(), 'Contrat Test', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+
+        @unlink($path);
+    }
+
+    // ── XLSX: freeze pane + total rows ────────────────────────────────────────
+
+    public function test_generate_xlsx_with_total_row(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateXlsx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sheets' => [[
+                'name'    => 'Budget',
+                'headers' => ['Poste', 'Jan', 'Feb', 'Total'],
+                'rows'    => [
+                    ['Loyer', 1000, 1000, 2000],
+                    ['Salaires', 5000, 5000, 10000],
+                    ['TOTAL', 6000, 6000, 12000],
+                ],
+            ]],
+        ];
+
+        $path = $method->invoke($agent, 'test_xlsx_total_' . uniqid(), 'Budget Total', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+
+        @unlink($path);
+    }
+
+    public function test_generate_xlsx_with_sous_total_row(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateXlsx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sheets' => [[
+                'name'    => 'Facture',
+                'headers' => ['Description', 'Montant'],
+                'rows'    => [
+                    ['Prestation A', 500],
+                    ['SOUS-TOTAL', 500],
+                    ['TVA 20%', 100],
+                    ['TOTAL TTC', 600],
+                ],
+            ]],
+        ];
+
+        $path = $method->invoke($agent, 'test_xlsx_sous_total_' . uniqid(), 'Facture', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+
+        @unlink($path);
+    }
+
+    // ── Keywords: nouvelles entrees v1.2.0 ───────────────────────────────────
+
+    public function test_keywords_include_callout(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('callout', $agent->keywords());
+    }
+
+    public function test_keywords_include_note_encadree(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('note encadree', $agent->keywords());
     }
 
     // ── Filename sanitization ─────────────────────────────────────────────────
