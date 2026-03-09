@@ -6,6 +6,7 @@ use App\Models\AgentLog;
 use App\Services\AgentContext;
 use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
+use App\Services\ContextMemoryBridge;
 use App\Services\ConversationMemoryService;
 use App\Services\PreferencesManager;
 use Illuminate\Support\Facades\Http;
@@ -134,6 +135,23 @@ abstract class BaseAgent implements AgentInterface
     {
         $store = new ContextStore();
         return $store->retrieve($userId);
+    }
+
+    /**
+     * Get shared inter-agent context from ContextMemoryBridge.
+     * All agents can call this to access the hot Redis context cache.
+     */
+    protected function getSharedContext(string $userId): array
+    {
+        return ContextMemoryBridge::getInstance()->getContext($userId);
+    }
+
+    /**
+     * Get shared context formatted as a prompt string.
+     */
+    protected function getSharedContextForPrompt(string $userId): string
+    {
+        return ContextMemoryBridge::getInstance()->formatForPrompt($userId);
     }
 
     /**

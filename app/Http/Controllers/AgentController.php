@@ -217,6 +217,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Agregez et organisez l\'actualite selon vos interets',
         ],
+        'context_memory_bridge' => [
+            'label' => 'Context Memory',
+            'icon' => '🧠',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Memoire intelligente partagee inter-agents',
+        ],
     ];
 
     public function index(Request $request)
@@ -425,5 +433,19 @@ class AgentController extends Controller
         $this->authorize('delete', $agent);
         $agent->delete();
         return redirect()->route('agents.index')->with('success', 'Agent deleted.');
+    }
+
+    /**
+     * GET /api/context/{userId} — Debug endpoint for ContextMemoryBridge.
+     */
+    public function showContext(Request $request, string $userId)
+    {
+        $bridge = \App\Services\ContextMemoryBridge::getInstance();
+
+        return response()->json([
+            'userId' => $userId,
+            'context' => $bridge->getContext($userId),
+            'hasContext' => $bridge->hasContext($userId),
+        ]);
     }
 }
