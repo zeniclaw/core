@@ -177,6 +177,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-06',
             'description' => 'Creation de fichiers Excel, PDF et Word',
         ],
+        'user_preferences' => [
+            'label' => 'Mes Preferences',
+            'icon' => '⚙️',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Langue, fuseau horaire, format, style communication',
+        ],
     ];
 
     public function index(Request $request)
