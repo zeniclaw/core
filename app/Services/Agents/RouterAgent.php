@@ -50,6 +50,9 @@ class RouterAgent
         // Hangman → hangman
         '/\b(pendu|hangman|jouer\s+au\s+pendu)\b/iu'
             => ['hangman', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Quiz / trivia / challenge → interactive_quiz
+        '/\b(quiz|quizz|trivia|qcm|challenge)\b/iu'
+            => ['interactive_quiz', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
             => ['user_preferences', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -361,6 +364,9 @@ PROMPT;
 
 ■ "web_search" — Recherche web en temps reel, actualites, definitions, meteo, comparaisons, stats API
   Mots-cles: cherche, recherche, google, search, trouve, actualite, news, c'est quoi, definition, meteo, weather, compare, vs, prix de, stats api
+
+■ "interactive_quiz" — Quizz ludiques avec scoring, categories variees et classement
+  Mots-cles: quiz, quizz, trivia, qcm, challenge, culture generale, devinette, question
 CATALOG;
     }
 
@@ -406,6 +412,7 @@ CATALOG;
                 'user_preferences',
                 'conversation_memory',
                 'streamline',
+                'interactive_quiz',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
