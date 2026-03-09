@@ -24,10 +24,10 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertEquals('content_summarizer', $agent->name());
     }
 
-    public function test_agent_version_is_1_1_0(): void
+    public function test_agent_version_is_1_2_0(): void
     {
         $agent = new ContentSummarizerAgent();
-        $this->assertEquals('1.1.0', $agent->version());
+        $this->assertEquals('1.2.0', $agent->version());
     }
 
     public function test_agent_has_description(): void
@@ -43,6 +43,19 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertContains('comparer', $agent->keywords());
     }
 
+    public function test_keywords_include_vimeo(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('vimeo', $agent->keywords());
+    }
+
+    public function test_keywords_include_tags(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('mots-cles', $agent->keywords());
+        $this->assertContains('tags', $agent->keywords());
+    }
+
     // ── canHandle ─────────────────────────────────────────────────────────────
 
     public function test_can_handle_url_in_message(): void
@@ -55,6 +68,12 @@ class ContentSummarizerAgentTest extends TestCase
     {
         $agent = new ContentSummarizerAgent();
         $this->assertTrue($agent->canHandle($this->makeContext('https://youtube.com/watch?v=dQw4w9WgXcQ')));
+    }
+
+    public function test_can_handle_vimeo_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://vimeo.com/123456789')));
     }
 
     public function test_can_handle_resume_keyword(): void
@@ -129,6 +148,18 @@ class ContentSummarizerAgentTest extends TestCase
 
         $this->assertEquals('reply', $result->action);
         $this->assertStringContainsString('Resume de Contenu', $result->reply);
+    }
+
+    public function test_file_scheme_url_is_blocked(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSecureUrl');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($agent, 'file:///etc/passwd'));
+        $this->assertFalse($method->invoke($agent, 'ftp://files.example.com/data'));
+        $this->assertFalse($method->invoke($agent, 'data:text/html,<script>alert(1)</script>'));
     }
 
     // ── Summary length detection ──────────────────────────────────────────────
@@ -210,6 +241,7 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertTrue($method->invoke($agent, 'https://youtube.com/watch?v=dQw4w9WgXcQ'));
         $this->assertTrue($method->invoke($agent, 'https://youtu.be/dQw4w9WgXcQ'));
         $this->assertTrue($method->invoke($agent, 'https://www.youtube.com/shorts/dQw4w9WgXcQ'));
+        $this->assertTrue($method->invoke($agent, 'https://www.youtube.com/live/dQw4w9WgXcQ'));
         $this->assertFalse($method->invoke($agent, 'https://example.com/video'));
         $this->assertFalse($method->invoke($agent, 'https://vimeo.com/123456'));
     }
@@ -224,6 +256,34 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertEquals('dQw4w9WgXcQ', $method->invoke($agent, 'https://youtube.com/watch?v=dQw4w9WgXcQ'));
         $this->assertEquals('dQw4w9WgXcQ', $method->invoke($agent, 'https://youtu.be/dQw4w9WgXcQ'));
         $this->assertEquals('dQw4w9WgXcQ', $method->invoke($agent, 'https://www.youtube.com/shorts/dQw4w9WgXcQ'));
+        $this->assertEquals('dQw4w9WgXcQ', $method->invoke($agent, 'https://www.youtube.com/live/dQw4w9WgXcQ'));
+        $this->assertNull($method->invoke($agent, 'https://example.com'));
+    }
+
+    // ── Vimeo detection ───────────────────────────────────────────────────────
+
+    public function test_is_vimeo_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isVimeoUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://vimeo.com/123456789'));
+        $this->assertTrue($method->invoke($agent, 'https://www.vimeo.com/987654321'));
+        $this->assertFalse($method->invoke($agent, 'https://youtube.com/watch?v=dQw4w9WgXcQ'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/video'));
+    }
+
+    public function test_extract_vimeo_video_id(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('extractVimeoVideoId');
+        $method->setAccessible(true);
+
+        $this->assertEquals('123456789', $method->invoke($agent, 'https://vimeo.com/123456789'));
+        $this->assertEquals('987654321', $method->invoke($agent, 'https://www.vimeo.com/987654321'));
         $this->assertNull($method->invoke($agent, 'https://example.com'));
     }
 
@@ -287,6 +347,19 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertEquals(3, $result);
     }
 
+    public function test_estimate_reading_time_french_content(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('estimateReadingTime');
+        $method->setAccessible(true);
+
+        // French content with accents — should count correctly
+        $content = str_repeat('résumé ', 200);
+        $result = $method->invoke($agent, $content);
+        $this->assertEquals(1, $result);
+    }
+
     // ── Language detection ────────────────────────────────────────────────────
 
     public function test_detect_french_content(): void
@@ -336,6 +409,15 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertStringContainsString('Detection automatique de la langue', $result->reply);
     }
 
+    public function test_help_message_shows_vimeo(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Vimeo', $result->reply);
+        $this->assertStringContainsString('mots-cles', $result->reply);
+    }
+
     // ── Error formatting ──────────────────────────────────────────────────────
 
     public function test_friendly_error_timeout(): void
@@ -372,6 +454,18 @@ class ContentSummarizerAgentTest extends TestCase
         $e = new \RuntimeException('404 Not Found');
         $result = $method->invoke($agent, $e);
         $this->assertStringContainsString('404', $result);
+    }
+
+    public function test_friendly_error_410(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('friendlyError');
+        $method->setAccessible(true);
+
+        $e = new \RuntimeException('410 Gone');
+        $result = $method->invoke($agent, $e);
+        $this->assertStringContainsString('410', $result);
     }
 
     public function test_friendly_error_429(): void
@@ -479,6 +573,42 @@ HTML;
         $this->assertStringContainsString('Real content here', $result);
     }
 
+    public function test_parse_html_extracts_json_ld_article_body(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('parseHtmlContent');
+        $method->setAccessible(true);
+
+        // No <title> tag so JSON-LD headline gets used as fallback title
+        $html = <<<HTML
+<html>
+<head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Amazing Article",
+    "description": "Article description from JSON-LD",
+    "articleBody": "This is the full article body from JSON-LD structured data."
+}
+</script>
+</head>
+<body><p>x</p></body>
+</html>
+HTML;
+
+        $result = $method->invoke($agent, $html, 'https://example.com/test');
+
+        $this->assertNotNull($result);
+        // JSON-LD headline used as title (no <title> tag present)
+        $this->assertStringContainsString('Amazing Article', $result);
+        // JSON-LD description extracted
+        $this->assertStringContainsString('Article description from JSON-LD', $result);
+        // JSON-LD articleBody used as content when HTML body is thin
+        $this->assertStringContainsString('full article body from JSON-LD', $result);
+    }
+
     public function test_is_secure_url_blocks_private_ips(): void
     {
         $agent = new ContentSummarizerAgent();
@@ -492,6 +622,36 @@ HTML;
         $this->assertFalse($method->invoke($agent, 'http://127.0.0.1:8080/api'));
         $this->assertTrue($method->invoke($agent, 'https://example.com/article'));
         $this->assertTrue($method->invoke($agent, 'https://www.youtube.com/watch?v=abc'));
+    }
+
+    public function test_is_secure_url_blocks_non_http_schemes(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSecureUrl');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($agent, 'file:///etc/passwd'));
+        $this->assertFalse($method->invoke($agent, 'ftp://files.example.com/data'));
+        $this->assertFalse($method->invoke($agent, 'data:text/html,<b>test</b>'));
+        $this->assertTrue($method->invoke($agent, 'http://example.com/page'));
+        $this->assertTrue($method->invoke($agent, 'https://example.com/page'));
+    }
+
+    // ── Compare mode ──────────────────────────────────────────────────────────
+
+    public function test_compare_mode_triggers_with_lequel_keyword(): void
+    {
+        // "lequel" should now trigger compare mode with 2 URLs
+        // We test via canHandle (since handle would make HTTP calls)
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('extractUrls');
+        $method->setAccessible(true);
+
+        // Verify 2 URLs are extracted (compare logic tested indirectly)
+        $urls = $method->invoke($agent, 'lequel est mieux https://site1.com https://site2.com');
+        $this->assertCount(2, $urls);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

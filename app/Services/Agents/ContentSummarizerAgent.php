@@ -9,9 +9,10 @@ use Illuminate\Support\Facades\Log;
 class ContentSummarizerAgent extends BaseAgent
 {
     private const URL_PATTERN = '#https?://[^\s<>\[\]"\']+#i';
-    private const YOUTUBE_PATTERN = '#(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})#i';
+    private const YOUTUBE_PATTERN = '#(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/|live/)|youtu\.be/)([a-zA-Z0-9_-]{11})#i';
+    private const VIMEO_PATTERN = '#(?:https?://)?(?:www\.)?vimeo\.com/(\d+)#i';
     private const KEYWORD_PATTERN = '/\b(r[eé]sum[eé]r?|summarize|summary|synth[eè]se|synthetiser|tldr|tl;?dr|de\s+quoi\s+parle|lire\s+pour\s+moi|read\s+for\s+me|compare[rz]?|comparaison|vs\.?)\b/iu';
-    private const COMPARE_PATTERN = '/\b(compar[eé]r?|compare|vs\.?|versus|diff[eé]rence|entre\s+ces|between\s+these)\b/iu';
+    private const COMPARE_PATTERN = '/\b(compar[eé]r?|compare|vs\.?|versus|diff[eé]rence|entre\s+ces|between\s+these|lequel|laquelle|meilleur|mieux|pr[eé]f[eé]rer|choisir|which|better|best|prefer|choose)\b/iu';
 
     // Private IP ranges to block for URL security
     private const PRIVATE_IP_PATTERN = '/^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i';
@@ -28,7 +29,7 @@ class ContentSummarizerAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de resume de contenu web. Resume automatiquement les articles, pages web et videos YouTube (avec transcription). Supporte les resumes courts, standards et detailles. Peut comparer deux contenus et estimer le temps de lecture.';
+        return 'Agent de resume de contenu web. Resume automatiquement les articles, pages web et videos YouTube/Vimeo (avec transcription). Supporte les resumes courts, standards et detailles. Peut comparer deux contenus, extraire des mots-cles, detecter le ton et estimer le temps de lecture.';
     }
 
     public function keywords(): array
@@ -36,7 +37,7 @@ class ContentSummarizerAgent extends BaseAgent
         return [
             'resume', 'résumé', 'resumer', 'résumer', 'summarize', 'summary',
             'resume article', 'resume lien', 'resume url', 'resume page',
-            'resume video', 'resume youtube',
+            'resume video', 'resume youtube', 'resume vimeo',
             'tldr', 'tl;dr', 'TL;DR',
             'synthese', 'synthèse', 'synthetiser',
             'resume court', 'resume detaille', 'resume bref',
@@ -44,14 +45,15 @@ class ContentSummarizerAgent extends BaseAgent
             'de quoi parle', 'what is this about',
             'lire pour moi', 'read for me',
             'contenu', 'content', 'article', 'lien', 'link', 'url',
-            'youtube', 'video', 'vidéo',
+            'youtube', 'video', 'vidéo', 'vimeo',
             'compare', 'comparer', 'comparaison', 'vs',
+            'mots-cles', 'tags', 'keywords', 'ton', 'sentiment',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -80,7 +82,7 @@ class ContentSummarizerAgent extends BaseAgent
         // Detect summary length preference
         $length = $this->detectSummaryLength($body);
 
-        // Detect comparison mode (2 URLs + compare keyword)
+        // Detect comparison mode (2 URLs + compare/choice keyword)
         $compareMode = count($urls) === 2 && (bool) preg_match(self::COMPARE_PATTERN, $body);
 
         $this->log($context, 'Content summarization requested', [
@@ -99,6 +101,8 @@ class ContentSummarizerAgent extends BaseAgent
             try {
                 if ($this->isYouTubeUrl($url)) {
                     $content = $this->extractYouTubeContent($url);
+                } elseif ($this->isVimeoUrl($url)) {
+                    $content = $this->extractVimeoContent($url);
                 } else {
                     $content = $this->extractWebContent($url);
                 }
@@ -134,6 +138,8 @@ class ContentSummarizerAgent extends BaseAgent
             try {
                 if ($this->isYouTubeUrl($url)) {
                     $content = $this->extractYouTubeContent($url);
+                } elseif ($this->isVimeoUrl($url)) {
+                    $content = $this->extractVimeoContent($url);
                 } else {
                     $content = $this->extractWebContent($url);
                 }
@@ -178,6 +184,8 @@ FORMAT DE REPONSE (pour WhatsApp):
 *Quelle source privilegier ?*
 [Recommandation courte et objective selon le contexte]
 
+*Mots-cles communs :* #[tag1] #[tag2] #[tag3]
+
 REGLES:
 - Sois factuel et neutre
 - Mets en avant les differences les plus importantes
@@ -218,13 +226,19 @@ PROMPT;
 
     private function isSecureUrl(string $url): bool
     {
+        // Block non-HTTP schemes (file://, ftp://, data://, etc.)
+        if (!preg_match('#^https?://#i', $url)) {
+            Log::info("[content_summarizer] Blocked non-HTTP URL scheme: {$url}");
+            return false;
+        }
+
         // Block private IPs and localhost
         if (preg_match(self::PRIVATE_IP_PATTERN, $url)) {
             Log::info("[content_summarizer] Blocked private/local URL: {$url}");
             return false;
         }
 
-        // Must have a valid TLD-like structure
+        // Must have a valid host
         $parsed = parse_url($url);
         if (!isset($parsed['host']) || empty($parsed['host'])) {
             return false;
@@ -238,9 +252,22 @@ PROMPT;
         return (bool) preg_match(self::YOUTUBE_PATTERN, $url);
     }
 
+    private function isVimeoUrl(string $url): bool
+    {
+        return (bool) preg_match(self::VIMEO_PATTERN, $url);
+    }
+
     private function extractYouTubeVideoId(string $url): ?string
     {
         if (preg_match(self::YOUTUBE_PATTERN, $url, $matches)) {
+            return $matches[1];
+        }
+        return null;
+    }
+
+    private function extractVimeoVideoId(string $url): ?string
+    {
+        if (preg_match(self::VIMEO_PATTERN, $url, $matches)) {
             return $matches[1];
         }
         return null;
@@ -250,7 +277,7 @@ PROMPT;
     {
         $bodyLower = mb_strtolower($body);
 
-        if (preg_match('/\b(detaille|detailed|complet|full|long|approfondi|in[- ]?depth|exhaustif|complet)\b/iu', $bodyLower)) {
+        if (preg_match('/\b(detaille|detailed|complet|full|long|approfondi|in[- ]?depth|exhaustif)\b/iu', $bodyLower)) {
             return 'detailed';
         }
 
@@ -263,9 +290,10 @@ PROMPT;
 
     private function estimateReadingTime(string $content): int
     {
-        // Average reading speed: 200 words/min in French/English
-        $wordCount = str_word_count(strip_tags($content));
-        return (int) ceil($wordCount / 200);
+        // Unicode-aware word counting (handles French accents properly)
+        $text = strip_tags($content);
+        $wordCount = preg_match_all('/\S+/', $text, $matches);
+        return (int) ceil(($wordCount ?: 1) / 200);
     }
 
     private function detectContentLanguage(string $content): string
@@ -294,17 +322,53 @@ PROMPT;
         $videoId = $this->extractYouTubeVideoId($url);
         if (!$videoId) return null;
 
+        // Detect if it's a live stream URL
+        $isLive = str_contains($url, '/live/');
+
         // Try to get transcript via yt-dlp (subtitles)
         $transcript = $this->getYouTubeTranscript($videoId);
 
         if ($transcript) {
-            return $transcript;
+            $prefix = $isLive ? '[VIDEO YOUTUBE LIVE]' : '[VIDEO YOUTUBE]';
+            return "{$prefix}\n{$transcript}";
         }
 
         // Fallback: get video metadata via oEmbed
-        $metadata = $this->getYouTubeMetadata($videoId);
+        $metadata = $this->getYouTubeMetadata($videoId, $isLive);
         if ($metadata) {
             return $metadata;
+        }
+
+        return null;
+    }
+
+    private function extractVimeoContent(string $url): ?string
+    {
+        $videoId = $this->extractVimeoVideoId($url);
+        if (!$videoId) return null;
+
+        try {
+            $response = Http::timeout(10)->get('https://vimeo.com/api/oembed.json', [
+                'url' => $url,
+            ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $title = $data['title'] ?? 'Titre inconnu';
+                $author = $data['author_name'] ?? 'Auteur inconnu';
+                $description = $data['description'] ?? '';
+                $duration = $data['duration'] ?? 0;
+                $durationStr = $duration > 0 ? gmdate('H:i:s', $duration) : 'duree inconnue';
+
+                $content = "[VIDEO VIMEO] Titre: {$title} | Auteur/Chaine: {$author} | Duree: {$durationStr}";
+                if ($description) {
+                    $content .= "\nDescription: " . mb_substr($description, 0, 1000);
+                }
+                $content .= "\n(Transcription non disponible - resume base sur les metadonnees)";
+                return $content;
+            }
+        } catch (\Throwable $e) {
+            Log::debug("[content_summarizer] Vimeo oEmbed failed for {$videoId}: " . $e->getMessage());
         }
 
         return null;
@@ -384,7 +448,7 @@ PROMPT;
         return mb_substr($transcript, 0, 10000);
     }
 
-    private function getYouTubeMetadata(string $videoId): ?string
+    private function getYouTubeMetadata(string $videoId, bool $isLive = false): ?string
     {
         try {
             $response = Http::timeout(10)->get("https://www.youtube.com/oembed", [
@@ -396,7 +460,8 @@ PROMPT;
                 $data = $response->json();
                 $title = $data['title'] ?? 'Titre inconnu';
                 $author = $data['author_name'] ?? 'Auteur inconnu';
-                return "[VIDEO YOUTUBE] Titre: {$title} | Auteur/Chaine: {$author}\n(Transcription non disponible - resume base sur le titre et les metadonnees)";
+                $type = $isLive ? 'VIDEO YOUTUBE LIVE' : 'VIDEO YOUTUBE';
+                return "[{$type}] Titre: {$title} | Auteur/Chaine: {$author}\n(Transcription non disponible - resume base sur le titre et les metadonnees)";
             }
         } catch (\Throwable $e) {
             Log::debug("[content_summarizer] YouTube oEmbed failed: " . $e->getMessage());
@@ -423,8 +488,12 @@ PROMPT;
                 return "[ACCES REFUSE] URL: {$url}\n(Le site requiert une authentification ou bloque les bots)";
             }
 
-            if ($response->status() === 404) {
+            if ($response->status() === 404 || $response->status() === 410) {
                 return null;
+            }
+
+            if ($response->status() === 429) {
+                return "[RATE LIMIT] URL: {$url}\n(Le site limite les acces automatiques. Reessaie dans quelques minutes.)";
             }
 
             if (!$response->successful()) {
@@ -464,6 +533,28 @@ PROMPT;
             $title = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
         }
 
+        // Extract JSON-LD structured data (Article, NewsArticle, BlogPosting)
+        $jsonLdBody = '';
+        if (preg_match_all('/<script[^>]*type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si', $html, $ldMatches)) {
+            foreach ($ldMatches[1] as $ldJson) {
+                $ldDecoded = json_decode(trim($ldJson), true);
+                if (!$ldDecoded) continue;
+
+                $ldType = $ldDecoded['@type'] ?? '';
+                if (in_array($ldType, ['Article', 'NewsArticle', 'BlogPosting', 'WebPage', 'TechArticle'])) {
+                    if (!$title && isset($ldDecoded['headline'])) {
+                        $title = $ldDecoded['headline'];
+                    }
+                    if (!$metaDesc && isset($ldDecoded['description'])) {
+                        $metaDesc = $ldDecoded['description'];
+                    }
+                    if (isset($ldDecoded['articleBody']) && empty($jsonLdBody)) {
+                        $jsonLdBody = mb_substr($ldDecoded['articleBody'], 0, 5000);
+                    }
+                }
+            }
+        }
+
         // Remove non-content tags
         $cleanHtml = preg_replace('/<(script|style|nav|footer|header|aside|iframe|noscript|form|button|select|input|textarea|svg|canvas)[^>]*>.*?<\/\1>/si', '', $html);
         // Remove comments
@@ -500,7 +591,10 @@ PROMPT;
         $text = preg_replace('/\n{3,}/', "\n\n", $text);
         $text = trim($text);
 
-        if (mb_strlen($text) < 50 && $metaDesc) {
+        // Prefer JSON-LD articleBody if regular extraction is thin
+        if (mb_strlen($text) < 200 && !empty($jsonLdBody)) {
+            $text = $jsonLdBody;
+        } elseif (mb_strlen($text) < 50 && $metaDesc) {
             $text = $metaDesc;
         }
 
@@ -530,7 +624,7 @@ PROMPT;
         $readingTimeStr = $readingMinutes <= 1 ? '< 1 min de lecture' : "{$readingMinutes} min de lecture";
 
         $lengthInstructions = match ($length) {
-            'short' => "RESUME COURT: 2-3 phrases maximum. Va droit a l'essentiel. Pas de liste de points.",
+            'short' => "RESUME COURT: 2-3 phrases maximum. Va droit a l'essentiel. Pas de liste de points. Inclure quand meme le ton et 2-3 mots-cles.",
             'detailed' => "RESUME DETAILLE: Resume complet de 10-15 lignes couvrant tous les arguments, points importants, exemples cles et conclusions. Inclus une liste de 5-8 points cles.",
             default => "RESUME STANDARD: 3-5 lignes de resume concis + liste de 3-5 points cles essentiels.",
         };
@@ -541,7 +635,7 @@ Tu es un expert en synthese de contenu pour WhatsApp. Resume le contenu fourni d
 {$lengthInstructions}
 
 FORMAT DE REPONSE (optimise WhatsApp):
-*[Titre ou source]* — [type: Article / Video / Page web]
+*[Titre ou source]* — [type: Article / Video YouTube / Video Vimeo / Page web]
 [Ton resume ici]
 
 *Points cles :*
@@ -549,15 +643,20 @@ FORMAT DE REPONSE (optimise WhatsApp):
 - [point 2]
 - [point 3]
 
+*Ton :* [Informatif | Positif | Critique | Neutre | Alarmiste | Technique | Educatif]
+
+*Mots-cles :* #[tag1] #[tag2] #[tag3]
+
 REGLES:
 - {$langInstruction}
 - Sois factuel et objectif — n'invente RIEN
 - Base-toi uniquement sur le contenu fourni
-- Si c'est une video YouTube, mentionne la chaine/auteur
+- Si c'est une video YouTube ou Vimeo, mentionne la chaine/auteur
 - Si le contenu est insuffisant (metadonnees seulement), precise-le
 - Pour les articles techniques, mets en avant les concepts cles
 - Utilise *gras* pour mettre en valeur les elements importants
-- Pas de #hashtags, pas de mentions @
+- Les mots-cles doivent etre en minuscules, sans espaces, pertinents pour la recherche
+- Pas de #hashtags parasites, pas de mentions @
 PROMPT;
 
         if ($memoryPrompt) {
@@ -578,7 +677,12 @@ PROMPT;
             return $this->formatErrorResult($url, 'Impossible de generer le resume. Verifie ta connexion et reessaie.');
         }
 
-        $icon = $this->isYouTubeUrl($url) ? '🎬' : '📰';
+        $icon = match (true) {
+            $this->isYouTubeUrl($url) => '🎬',
+            $this->isVimeoUrl($url) => '🎥',
+            default => '📰',
+        };
+
         $lengthLabel = match ($length) {
             'short' => 'court',
             'detailed' => 'detaille',
@@ -610,6 +714,10 @@ PROMPT;
 
         if (str_contains($message, '404') || str_contains($message, 'Not Found')) {
             return 'Page introuvable (404). Verifie que le lien est correct.';
+        }
+
+        if (str_contains($message, '410') || str_contains($message, 'Gone')) {
+            return 'Cette page n\'existe plus (410). Le contenu a ete supprime definitivement.';
         }
 
         if (str_contains($message, '429') || str_contains($message, 'Too Many Requests')) {
@@ -644,6 +752,7 @@ PROMPT;
             . "*Exemples :*\n"
             . "- https://example.com/article\n"
             . "- https://youtube.com/watch?v=xxx\n"
+            . "- https://vimeo.com/123456789\n"
             . "- _resume court_ https://example.com/article\n"
             . "- _resume detaille_ https://youtube.com/watch?v=xxx\n"
             . "- _compare_ https://site1.com https://site2.com\n\n"
@@ -654,11 +763,13 @@ PROMPT;
             . "*Contenus supportes :*\n"
             . "🌐 Articles web & blogs\n"
             . "🎬 Videos YouTube (avec transcription si disponible)\n"
+            . "🎥 Videos Vimeo (metadonnees + description)\n"
             . "📄 Pages web generales\n\n"
-            . "*Nouvelles fonctionnalites :*\n"
+            . "*Fonctionnalites :*\n"
             . "⏱ Estimation du temps de lecture\n"
             . "🔍 Comparaison de 2 liens (_compare_ + 2 URLs)\n"
-            . "🌍 Detection automatique de la langue"
+            . "🌍 Detection automatique de la langue\n"
+            . "🏷 Extraction de mots-cles et detection du ton"
         );
     }
 }
