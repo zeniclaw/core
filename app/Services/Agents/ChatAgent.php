@@ -21,7 +21,7 @@ class ChatAgent extends BaseAgent
     private const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
     /** Quick commands resolved without agentic loop. */
-    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer', '/resume'];
+    private const QUICK_COMMANDS = ['/aide', '/help', '/capacites', '/capabilities', '/status', '/effacer', '/resume', '/ping', '/memoire'];
 
     /** Supported languages for the /langue command. */
     private const SUPPORTED_LANGUAGES = [
@@ -54,12 +54,15 @@ class ChatAgent extends BaseAgent
             'qui es-tu', 'tu fais quoi', 'what can you do', 'capable de',
             'langue', 'langage', 'language', 'resume', 'historique',
             'pourquoi', 'comment', 'quand', 'ou', 'combien', 'lequel',
+            'ping', 'memoire', 'status', 'effacer', 'traduis', 'traduit',
+            'calcule', 'convertis', 'definis', 'definition', 'synonyme',
+            'ecris', 'redige', 'resume', 'analyse', 'compare', 'liste',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -182,33 +185,35 @@ class ChatAgent extends BaseAgent
 
         $systemPrompt =
             "Tu es ZeniClaw, un assistant WhatsApp autonome et intelligent. "
-            . "Tu as acces a des outils (tools) que tu peux utiliser librement pour aider l'utilisateur. "
-            . "Tu n'as PAS besoin de demander permission — utilise les outils quand c'est pertinent. "
-            . "Par exemple, si l'utilisateur dit 'rappelle-moi d'appeler Jean demain a 10h', "
-            . "utilise directement l'outil create_reminder sans demander confirmation. "
-            . "Si l'utilisateur parle de sa todo list, utilise les outils todo directement. "
-            . "Si l'utilisateur partage une info importante (email, numero, preference, donnee cle), "
-            . "stocke-la avec store_knowledge pour ne pas l'oublier. "
-            . "Tu es proactif : si tu peux resoudre le probleme avec un outil, fais-le. "
+            . "Tu as acces a des outils (tools) que tu dois utiliser proactivement et sans hesitation. "
+            . "\n\n"
+            . "UTILISATION DES OUTILS (OBLIGATOIRE — agis, ne demande pas):\n"
+            . "- Rappel: \"rappelle-moi d'appeler Jean demain a 10h\" → utilise create_reminder immediatement\n"
+            . "- Todo: \"ajoute 'acheter du pain' a ma liste\" → utilise add_todo immediatement\n"
+            . "- Connaissance: l'utilisateur partage son email/numero/preference → utilise store_knowledge\n"
+            . "- Recherche: question sur un fait/actualite → utilise web_search si disponible\n"
+            . "- Code: l'utilisateur demande de modifier du code → utilise les outils gitlab/git\n"
+            . "Ne JAMAIS dire 'je vais essayer de ...' ou 'je peux ... si tu veux' — FAIS directement.\n"
             . "\n\n"
             . "MEMOIRE PERSISTANTE (CRITIQUE):\n"
-            . "- AVANT de demander une info a l'utilisateur ou de faire un appel API, utilise TOUJOURS recall_knowledge ou list_knowledge pour verifier si tu n'as pas deja cette info.\n"
-            . "- Quand tu obtiens des donnees importantes (listes de clients, resultats API, infos financieres, etc.), utilise store_knowledge pour les sauvegarder.\n"
-            . "- Les donnees sont stockees PAR UTILISATEUR et persistent entre les conversations.\n"
-            . "- Ne redemande JAMAIS une info que tu as deja stockee.\n"
+            . "- AVANT de demander une info, utilise recall_knowledge/list_knowledge pour verifier si tu l'as deja.\n"
+            . "- Quand tu obtiens des donnees importantes, utilise store_knowledge pour les sauvegarder.\n"
+            . "- Les donnees persistent PAR UTILISATEUR entre toutes les conversations.\n"
+            . "- Ne redemande JAMAIS une info deja stockee. Si tu trouves une info en memoire, utilise-la directement.\n"
             . "\n\n"
             . "STYLE: Tu parles comme un ami ou un collegue decontracte. "
             . "Tu tutoies, tu es direct, drole et bienveillant. "
-            . "Tu utilises un langage naturel et detendu (pas trop formel). "
-            . "Tu peux utiliser des emojis avec moderation. "
+            . "Langage naturel et detendu (pas trop formel). "
+            . "Emojis avec moderation (max 2-3 par message). "
             . $langInstruction . " "
             . $this->buildLengthDirective($context->complexity)
-            . "\n\nFORMATAGE WHATSAPP: "
-            . "Utilise *texte* pour le gras, _texte_ pour l'italique, ~texte~ pour le barre. "
-            . "Pour les listes, utilise des tirets (-) ou des numeros (1. 2. 3.). "
-            . "Evite le Markdown classique (##, **, etc.) — utilise exclusivement le formatage WhatsApp natif. "
-            . "Pour les separateurs visuels, utilise ---. "
-            . "Si tu affiches du code, encadre-le avec des backticks (`) ou triple backticks (```)."
+            . "\n\nFORMATAGE WHATSAPP STRICT:\n"
+            . "- Gras: *texte* | Italique: _texte_ | Barre: ~texte~\n"
+            . "- Listes: tirets (-) ou numeros (1. 2. 3.) — PAS de puces (•)\n"
+            . "- INTERDIT: ## pour les titres, ** pour le gras, __italique__ — utilise UNIQUEMENT le format WhatsApp ci-dessus\n"
+            . "- Separateurs visuels: --- (tres rarement, seulement pour sections longues)\n"
+            . "- Code: backticks simples (`) pour inline, triple (```) pour blocs\n"
+            . "- Tables: evite les tables HTML/Markdown, prefere des listes formatees\n"
             . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
             . "\nLe message vient de {$context->senderName}.";
 
@@ -353,11 +358,12 @@ class ChatAgent extends BaseAgent
         foreach ($olderEntries as $entry) {
             $summary = $entry['summary'] ?? '';
             if ($summary) {
-                $topics[] = $summary;
+                // Truncate long summaries
+                $topics[] = mb_strlen($summary) > 100 ? mb_substr($summary, 0, 100) . '...' : $summary;
             } else {
-                $msg = mb_substr($entry['sender_message'] ?? '', 0, 80);
+                $msg = $entry['sender_message'] ?? '';
                 if ($msg) {
-                    $topics[] = $msg;
+                    $topics[] = mb_strlen($msg) > 80 ? mb_substr($msg, 0, 80) . '...' : $msg;
                 }
             }
         }
@@ -366,9 +372,10 @@ class ChatAgent extends BaseAgent
             return '';
         }
 
-        $topics = array_slice($topics, -30);
+        // Keep only last 30 topics to avoid prompt bloat
+        $topics = array_unique(array_slice($topics, -30));
         $count = count($olderEntries);
-        return "Sujets abordes dans les {$count} echanges precedents :\n- " . implode("\n- ", $topics);
+        return "Sujets abordes dans les {$count} echanges precedents (resume) :\n- " . implode("\n- ", $topics);
     }
 
     private function buildMessageContent(AgentContext $context): string|array
@@ -580,6 +587,8 @@ class ChatAgent extends BaseAgent
             '/status'  => $this->handleStatusCommand($context),
             '/effacer' => $this->handleEffacerCommand($context),
             '/resume'  => $this->handleResumeCommand($context),
+            '/ping'    => $this->handlePingCommand($context),
+            '/memoire' => $this->handleMemoireCommand($context),
             default    => $this->handleHelpCommand($context),
         };
     }
@@ -594,7 +603,8 @@ class ChatAgent extends BaseAgent
             . "*Messages & conversation*\n"
             . "- Discuter librement, repondre a tes questions\n"
             . "- Analyser une image ou lire un PDF\n"
-            . "- Transcrire et comprendre un message vocal\n\n"
+            . "- Transcrire et comprendre un message vocal\n"
+            . "- Traduire, resumer, rediger, expliquer\n\n"
             . "*Rappels*\n"
             . "- \"Rappelle-moi d'appeler Jean demain a 10h\"\n"
             . "- \"Rappel chaque lundi a 9h : reunion equipe\"\n"
@@ -610,13 +620,16 @@ class ChatAgent extends BaseAgent
             . "- \"Cherche Hotel California\"\n"
             . "- \"Recommande-moi de la musique chill\"\n\n"
             . "*Memoire*\n"
-            . "- Je me souviens de tes preferences et donnees entre conversations\n\n"
+            . "- Je me souviens de tes preferences et donnees entre conversations\n"
+            . "- \"Souviens-toi que mon email pro est ...\"\n\n"
             . "*Commandes rapides*\n"
             . "- /aide ou /help → cette aide\n"
-            . "- /status → ton tableau de bord (todos, rappels, memoire)\n"
+            . "- /status → tableau de bord (todos, rappels, memoire)\n"
             . "- /resume → resume de la conversation recente\n"
-            . "- /langue [fr|en|es|de|it|pt] → definir ta langue preferee\n"
-            . "- /effacer → effacer ta memoire de conversation\n\n"
+            . "- /memoire → voir ta memoire persistante stockee\n"
+            . "- /langue [fr|en|es|de|it|pt|ar|nl|ru] → definir ta langue preferee\n"
+            . "- /effacer → effacer l'historique de conversation\n"
+            . "- /ping → tester que je reponds bien\n\n"
             . "_Tape simplement ce que tu veux faire, je comprends le langage naturel !_";
 
         $this->sendText($context->from, $reply);
@@ -725,7 +738,7 @@ class ChatAgent extends BaseAgent
     }
 
     /**
-     * New Feature: /resume — Shows a formatted summary of recent conversation exchanges.
+     * Quick command: /resume — Shows a formatted summary of recent conversation exchanges.
      */
     private function handleResumeCommand(AgentContext $context): AgentResult
     {
@@ -743,23 +756,39 @@ class ChatAgent extends BaseAgent
         $total = count($entries);
         $shown = count($recent);
 
-        $lines = ["*Resume de la conversation* _{$shown} derniers echanges sur {$total}_\n"];
+        $suffix = $total > $shown ? " _{$shown} derniers sur {$total}_" : " _{$shown} echange(s)_";
+        $lines = ["*Resume de la conversation*{$suffix}\n"];
 
         foreach ($recent as $i => $entry) {
             $num = $i + 1;
-            $userMsg = mb_substr($entry['sender_message'] ?? '', 0, 80);
-            $botMsg = mb_substr($entry['bot_reply'] ?? $entry['summary'] ?? '', 0, 100);
+            $userMsg = $entry['sender_message'] ?? '';
+            $botMsg = $entry['bot_reply'] ?? $entry['summary'] ?? '';
 
-            if ($userMsg) {
-                $lines[] = "*{$num}. Toi :* {$userMsg}" . (mb_strlen($entry['sender_message'] ?? '') > 80 ? '...' : '');
+            // Timestamp if available
+            $ts = '';
+            if (!empty($entry['created_at'])) {
+                try {
+                    $ts = ' _(' . \Illuminate\Support\Carbon::parse($entry['created_at'])
+                        ->setTimezone(AppSetting::timezone())
+                        ->format('d/m H:i') . ')_';
+                } catch (\Throwable) {}
             }
-            if ($botMsg) {
-                $lines[] = "   _ZeniClaw :_ {$botMsg}" . (mb_strlen($entry['bot_reply'] ?? $entry['summary'] ?? '') > 100 ? '...' : '');
+
+            $truncatedUser = mb_strlen($userMsg) > 80 ? mb_substr($userMsg, 0, 80) . '...' : $userMsg;
+            $truncatedBot  = mb_strlen($botMsg) > 100 ? mb_substr($botMsg, 0, 100) . '...' : $botMsg;
+
+            if ($truncatedUser) {
+                $lines[] = "*{$num}. Toi{$ts}:* {$truncatedUser}";
+            }
+            if ($truncatedBot) {
+                $lines[] = "   _ZeniClaw :_ {$truncatedBot}";
             }
         }
 
         if ($total > 10) {
-            $lines[] = "\n_({$total} echanges au total — /effacer pour tout reinitialiser)_";
+            $lines[] = "\n_({$total} echanges au total — /effacer pour reinitialiser)_";
+        } else {
+            $lines[] = "\n_/effacer pour reinitialiser l'historique_";
         }
 
         $reply = implode("\n", $lines);
@@ -770,7 +799,75 @@ class ChatAgent extends BaseAgent
     }
 
     /**
-     * New Feature: /langue [code] — Sets or displays the user's preferred response language.
+     * Quick command: /ping — Heartbeat test; confirms the agent is alive and responsive.
+     */
+    private function handlePingCommand(AgentContext $context): AgentResult
+    {
+        $now = now(AppSetting::timezone())->format('H:i:s');
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $memoryCount = count($memoryData['entries'] ?? []);
+        $lang = $this->resolvePreferredLanguage($context->from);
+
+        $reply = "*Pong !* Je suis bien la. \n\n"
+            . "- Heure: *{$now}*\n"
+            . "- Historique: *{$memoryCount}* echange(s)\n"
+            . "- Langue: *" . ($lang ?? 'auto') . "*\n"
+            . "- Version agent: *" . $this->version() . "*\n\n"
+            . "_Tout fonctionne correctement._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /ping handled');
+
+        return AgentResult::reply($reply, ['quick_command' => '/ping', 'version' => $this->version()]);
+    }
+
+    /**
+     * Quick command: /memoire — Shows all stored persistent knowledge entries for the user.
+     */
+    private function handleMemoireCommand(AgentContext $context): AgentResult
+    {
+        $allEntries = \App\Models\UserKnowledge::allFor($context->from);
+
+        if ($allEntries->isEmpty()) {
+            $reply = "*Memoire persistante*\n\nAucune donnee stockee pour l'instant.\n\n"
+                . "_Dis-moi des infos importantes (email, preferences, contacts...) "
+                . "et je les retiendrai pour toujours !_";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['quick_command' => '/memoire', 'count' => 0]);
+        }
+
+        $total = $allEntries->count();
+        $displayed = $allEntries->take(25);
+        $suffix = $total > 25 ? " _(25 sur {$total} affichees)_" : " _({$total} entree(s))_";
+
+        $lines = ["*Memoire persistante*{$suffix}\n"];
+
+        $grouped = $displayed->groupBy('source');
+        foreach ($grouped as $source => $entries) {
+            $lines[] = "\n*[{$source}]*";
+            foreach ($entries as $entry) {
+                $label = $entry->label ?? $entry->topic_key;
+                $age = $entry->updated_at->diffForHumans();
+                $key = $entry->topic_key;
+                $lines[] = "- *{$label}* (`{$key}`, {$age})";
+            }
+        }
+
+        if ($total > 25) {
+            $lines[] = "\n_Pour acceder a toutes les entrees, demande-moi de lister ma memoire._";
+        } else {
+            $lines[] = "\n_Dis 'oublie [sujet]' pour supprimer une entree._";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Quick command /memoire handled', ['count' => $total]);
+
+        return AgentResult::reply($reply, ['quick_command' => '/memoire', 'count' => $total]);
+    }
+
+    /**
+     * Quick command: /langue [code] — Sets or displays the user's preferred response language.
      */
     private function handleLangueCommand(AgentContext $context, string $langCode): AgentResult
     {
@@ -838,8 +935,17 @@ class ChatAgent extends BaseAgent
             default                    => 'Salut',
         };
 
-        $reply = "{$greeting} ! Tu m'as envoye un message vide. "
-            . "Ecris-moi quelque chose, envoie une image, un PDF ou un vocal — je suis la !";
+        // Vary the nudge to avoid repetitive messages
+        $nudges = [
+            "{$greeting} ! Tu m'as envoye un message vide. Ecris-moi quelque chose, envoie une image, un PDF ou un vocal — je suis la !",
+            "{$greeting} {$context->senderName} ! Message vide recu. Tu peux m'ecrire, m'envoyer une image ou un vocal.",
+            "{$greeting} ! Il me semble que ton message est arrive vide. Reessaie ou tape /aide pour voir ce que je sais faire.",
+        ];
+
+        // Pick based on memory count to vary across sessions
+        $memoryData = $this->memory->read($context->agent->id, $context->from);
+        $idx = count($memoryData['entries'] ?? []) % count($nudges);
+        $reply = $nudges[$idx];
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Empty message received — nudge sent');
