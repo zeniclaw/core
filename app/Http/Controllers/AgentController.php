@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\AgentLog;
 use App\Models\UserBriefPreference;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Redis;
 
 class AgentController extends Controller
 {
@@ -266,6 +267,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Suggestions de recettes par ingredients, regime, temps',
         ],
+        'time_blocker' => [
+            'label' => 'Time Blocker',
+            'icon' => '⏰',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Optimisation intelligente de votre agenda par blocs de temps',
+        ],
     ];
 
     public function index(Request $request)
@@ -507,6 +516,68 @@ class AgentController extends Controller
         }
 
         return response()->json($pref);
+    }
+
+    /**
+     * POST /api/agents/time-blocker/apply-block
+     * Persist accepted time blocks in Redis and sync with ReminderAgent.
+     */
+    public function applyTimeBlock(Request $request)
+    {
+        $validated = $request->validate([
+            'phone' => 'required|string',
+            'blocks' => 'required|array',
+            'blocks.*.start' => 'required|string|regex:/^\d{2}:\d{2}$/',
+            'blocks.*.end' => 'required|string|regex:/^\d{2}:\d{2}$/',
+            'blocks.*.type' => 'required|string|in:focus,pause,reunion,admin,dejeuner,sport',
+            'blocks.*.label' => 'required|string|max:255',
+        ]);
+
+        $phone = $validated['phone'];
+        $blocks = $validated['blocks'];
+
+        // Store blocks in Redis with end-of-day expiration
+        $ttl = now()->endOfDay()->diffInSeconds(now());
+        $redisKey = "time_blocks:{$phone}";
+        Redis::setex($redisKey, max($ttl, 60), json_encode($blocks));
+
+        // Create reminders for actionable blocks
+        $createdReminders = 0;
+        $agent = $request->user()?->agents()->first();
+
+        if ($agent) {
+            foreach ($blocks as $block) {
+                if (in_array($block['type'], ['focus', 'reunion', 'admin'])) {
+                    try {
+                        $startTime = now()->setTimeFromTimeString($block['start']);
+                        if ($startTime->isFuture()) {
+                            $emoji = match ($block['type']) {
+                                'focus' => '🎯',
+                                'reunion' => '📞',
+                                'admin' => '📧',
+                                default => '⏰',
+                            };
+                            \App\Models\Reminder::create([
+                                'requester_phone' => $phone,
+                                'agent_id' => $agent->id,
+                                'message' => "{$emoji} Bloc: {$block['label']} ({$block['start']} - {$block['end']})",
+                                'scheduled_at' => $startTime->setTimezone('UTC'),
+                                'status' => 'pending',
+                            ]);
+                            $createdReminders++;
+                        }
+                    } catch (\Throwable $e) {
+                        // Skip invalid blocks
+                    }
+                }
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'blocks_stored' => count($blocks),
+            'reminders_created' => $createdReminders,
+        ]);
     }
 
     /**

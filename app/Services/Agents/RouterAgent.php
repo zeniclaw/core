@@ -89,6 +89,9 @@ class RouterAgent
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
             => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Time blocker → time_blocker
+        '/\b(bloque[r]?\s+(ma|la)\s+journ[eé]e|organise[r]?\s+m(on|a)\s+temps|optimise[r]?\s+m(on|a)\s+(agenda|journ[eé]e)|time\s*block|blocs?\s+de\s+temps|planifie[r]?\s+(ma|la)\s+journ[eé]e|emploi\s+du\s+temps|planning\s+optimal|deep\s*work|bloc[s]?\s+focus|gestion\s+du\s+temps)\b/iu'
+            => ['time_blocker', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
     ];
 
     public function __construct()
@@ -453,6 +456,7 @@ CATALOG;
                 'daily_brief',
                 'collaborative_task',
                 'recipe',
+                'time_blocker',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
