@@ -1,0 +1,1056 @@
+<?php
+
+namespace Tests\Unit\Agents;
+
+use App\Models\Agent;
+use App\Models\AgentSession;
+use App\Models\Habit;
+use App\Models\HabitLog;
+use App\Models\User;
+use App\Services\AgentContext;
+use App\Services\Agents\HabitAgent;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class HabitAgentTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private string $testPhone = '33612345678@s.whatsapp.net';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Mock WAHA endpoint to avoid real HTTP calls in tests
+        Http::fake(['*' => Http::response(['success' => true], 200)]);
+    }
+
+    // ── Basics ────────────────────────────────────────────────────────────────
+
+    public function test_agent_name_is_habit(): void
+    {
+        $this->assertEquals('habit', (new HabitAgent())->name());
+    }
+
+    public function test_agent_version_is_1_4_0(): void
+    {
+        $this->assertEquals('1.4.0', (new HabitAgent())->version());
+    }
+
+    public function test_agent_has_description(): void
+    {
+        $this->assertNotEmpty((new HabitAgent())->description());
+    }
+
+    public function test_keywords_include_habitude(): void
+    {
+        $this->assertContains('habitude', (new HabitAgent())->keywords());
+    }
+
+    public function test_keywords_include_streak(): void
+    {
+        $this->assertContains('streak', (new HabitAgent())->keywords());
+    }
+
+    public function test_keywords_include_classement_streak(): void
+    {
+        $this->assertContains('classement streak', (new HabitAgent())->keywords());
+    }
+
+    public function test_keywords_include_rapport_semaine(): void
+    {
+        $this->assertContains('rapport semaine', (new HabitAgent())->keywords());
+    }
+
+    public function test_can_handle_returns_true_when_routed_to_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes', routedAgent: 'habit');
+        $this->assertTrue($agent->canHandle($context));
+    }
+
+    public function test_can_handle_returns_false_when_not_routed_to_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes', routedAgent: 'finance');
+        $this->assertFalse($agent->canHandle($context));
+    }
+
+    // ── Add ──────────────────────────────────────────────────────────────────
+
+    public function test_add_creates_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude Meditation');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'      => 'add',
+            'name'        => 'Meditation',
+            'frequency'   => 'daily',
+            'description' => null,
+        ]);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Meditation', $result->reply);
+
+        $this->assertDatabaseHas('habits', [
+            'user_phone' => $this->testPhone,
+            'agent_id'   => $context->agent->id,
+            'name'       => 'Meditation',
+            'frequency'  => 'daily',
+        ]);
+    }
+
+    public function test_add_creates_weekly_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude Sport hebdo');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'      => 'add',
+            'name'        => 'Sport',
+            'frequency'   => 'weekly',
+            'description' => null,
+        ]);
+
+        $this->assertDatabaseHas('habits', [
+            'user_phone' => $this->testPhone,
+            'frequency'  => 'weekly',
+        ]);
+        $this->assertStringContainsString('hebdomadaire', $result->reply);
+    }
+
+    public function test_add_rejects_empty_name(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude');
+
+        $result = $this->callHandleAdd($agent, $context, ['action' => 'add', 'name' => '']);
+
+        $this->assertEquals('habit_add_no_name', $result->metadata['action']);
+    }
+
+    public function test_add_rejects_name_too_long(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action' => 'add',
+            'name'   => str_repeat('a', 51),
+        ]);
+
+        $this->assertEquals('habit_add_name_too_long', $result->metadata['action']);
+    }
+
+    public function test_add_accepts_name_at_max_length(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'    => 'add',
+            'name'      => str_repeat('a', 50),
+            'frequency' => 'daily',
+        ]);
+
+        $this->assertDatabaseHas('habits', ['user_phone' => $this->testPhone]);
+    }
+
+    public function test_add_rejects_duplicate_name(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude Meditation');
+
+        $this->createHabit($context, 'Meditation');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'    => 'add',
+            'name'      => 'Meditation',
+            'frequency' => 'daily',
+        ]);
+
+        $this->assertEquals('habit_add_duplicate', $result->metadata['action']);
+    }
+
+    public function test_add_rejects_duplicate_name_case_insensitive(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude meditation');
+
+        $this->createHabit($context, 'Meditation');
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'    => 'add',
+            'name'      => 'meditation',
+            'frequency' => 'daily',
+        ]);
+
+        $this->assertEquals('habit_add_duplicate', $result->metadata['action']);
+    }
+
+    public function test_add_enforces_max_habits_limit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('ajouter habitude Test');
+
+        for ($i = 1; $i <= 20; $i++) {
+            $this->createHabit($context, "Habitude {$i}");
+        }
+
+        $result = $this->callHandleAdd($agent, $context, [
+            'action'    => 'add',
+            'name'      => 'Nouvelle',
+            'frequency' => 'daily',
+        ]);
+
+        $this->assertEquals('habit_add_limit_reached', $result->metadata['action']);
+    }
+
+    // ── Log ──────────────────────────────────────────────────────────────────
+
+    public function test_log_checks_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai medite");
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => 1]);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Meditation', $result->reply);
+        $this->assertStringContainsString('cochee', $result->reply);
+
+        $this->assertDatabaseHas('habit_logs', ['habit_id' => $habit->id]);
+    }
+
+    public function test_log_returns_streak(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai medite");
+        $this->createHabit($context, 'Meditation');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => 1]);
+
+        $this->assertStringContainsString('Streak', $result->reply);
+    }
+
+    public function test_log_prevents_double_log_daily(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai medite");
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => 1]);
+
+        $this->assertEquals('habit_already_logged', $result->metadata['action']);
+    }
+
+    public function test_log_no_item_returns_error(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("j'ai fait quelque chose");
+        $habits  = collect();
+
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => null]);
+
+        $this->assertEquals('habit_log_no_item', $result->metadata['action']);
+    }
+
+    public function test_log_invalid_item_returns_error(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("cocher habitude 99");
+        $this->createHabit($context, 'Meditation');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleLog($agent, $context, $habits, ['action' => 'log', 'item' => 99]);
+
+        $this->assertEquals('habit_log_not_found', $result->metadata['action']);
+    }
+
+    // ── Unlog ────────────────────────────────────────────────────────────────
+
+    public function test_unlog_removes_todays_log(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("annuler log meditation");
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleUnlog($agent, $context, $habits, ['action' => 'unlog', 'item' => 1]);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertDatabaseMissing('habit_logs', ['habit_id' => $habit->id]);
+    }
+
+    public function test_unlog_returns_error_when_not_logged_today(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("annuler log meditation");
+        $this->createHabit($context, 'Meditation');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleUnlog($agent, $context, $habits, ['action' => 'unlog', 'item' => 1]);
+
+        $this->assertEquals('habit_unlog_not_logged', $result->metadata['action']);
+    }
+
+    // ── List ─────────────────────────────────────────────────────────────────
+
+    public function test_list_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes');
+        $habits  = collect();
+
+        $result = $this->callHandleList($agent, $context, $habits);
+
+        $this->assertEquals('habit_list_empty', $result->metadata['action']);
+        $this->assertStringContainsString('aucune habitude', $result->reply);
+    }
+
+    public function test_list_shows_habits_with_streaks(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes');
+        $this->createHabit($context, 'Meditation');
+        $this->createHabit($context, 'Sport');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleList($agent, $context, $habits);
+
+        $this->assertStringContainsString('Meditation', $result->reply);
+        $this->assertStringContainsString('Sport', $result->reply);
+        $this->assertStringContainsString('Streak', $result->reply);
+    }
+
+    public function test_list_shows_done_status(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('mes habitudes');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleList($agent, $context, $habits);
+
+        $this->assertStringContainsString('[FAIT]', $result->reply);
+    }
+
+    // ── Today ────────────────────────────────────────────────────────────────
+
+    public function test_today_shows_pending_and_done_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("aujourd'hui");
+        $habit1  = $this->createHabit($context, 'Lecture');
+        $habit2  = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit1->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleToday($agent, $context, $habits);
+
+        $this->assertStringContainsString('Faites', $result->reply);
+        $this->assertStringContainsString('A faire', $result->reply);
+        $this->assertStringContainsString('Lecture', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+    }
+
+    public function test_today_shows_congratulations_when_all_done(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext("aujourd'hui");
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleToday($agent, $context, $habits);
+
+        $this->assertStringContainsString('Bravo', $result->reply);
+    }
+
+    // ── Stats ────────────────────────────────────────────────────────────────
+
+    public function test_stats_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('stats');
+        $habits  = collect();
+
+        $result = $this->callHandleStats($agent, $context, $habits);
+
+        $this->assertEquals('habit_stats_empty', $result->metadata['action']);
+    }
+
+    public function test_stats_shows_completion_rate(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('stats habitudes');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleStats($agent, $context, $habits);
+
+        $this->assertStringContainsString('Taux 30j', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+    }
+
+    // ── Delete ───────────────────────────────────────────────────────────────
+
+    public function test_delete_removes_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('supprimer habitude 1');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleDelete($agent, $context, $habits, ['action' => 'delete', 'item' => 1]);
+
+        $this->assertStringContainsString('supprimee', $result->reply);
+        $this->assertDatabaseMissing('habits', ['id' => $habit->id, 'deleted_at' => null]);
+    }
+
+    public function test_delete_returns_error_for_invalid_item(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('supprimer habitude 99');
+        $this->createHabit($context, 'Meditation');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleDelete($agent, $context, $habits, ['action' => 'delete', 'item' => 99]);
+
+        $this->assertEquals('habit_delete_not_found', $result->metadata['action']);
+    }
+
+    // ── Reset ────────────────────────────────────────────────────────────────
+
+    public function test_reset_clears_logs_and_cache(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('reset habitude 1');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 5,
+            'best_streak'    => 5,
+        ]);
+        Cache::put("habit_streak:{$habit->id}", 5, 3600);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleReset($agent, $context, $habits, ['action' => 'reset', 'item' => 1]);
+
+        $this->assertStringContainsString('reinitialisee', $result->reply);
+        $this->assertDatabaseMissing('habit_logs', ['habit_id' => $habit->id]);
+        $this->assertNull(Cache::get("habit_streak:{$habit->id}"));
+    }
+
+    // ── Rename ───────────────────────────────────────────────────────────────
+
+    public function test_rename_updates_habit_name(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('renommer habitude 1 en Course a pied');
+        $this->createHabit($context, 'Sport');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleRename($agent, $context, $habits, [
+            'action' => 'rename',
+            'item'   => 1,
+            'name'   => 'Course a pied',
+        ]);
+
+        $this->assertStringContainsString('Course a pied', $result->reply);
+        $this->assertDatabaseHas('habits', ['name' => 'Course a pied']);
+    }
+
+    public function test_rename_rejects_duplicate_name(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('renommer habitude 1 en Lecture');
+        $this->createHabit($context, 'Sport');
+        $this->createHabit($context, 'Lecture');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleRename($agent, $context, $habits, [
+            'action' => 'rename',
+            'item'   => 2,
+            'name'   => 'Lecture',
+        ]);
+
+        $this->assertEquals('habit_rename_duplicate', $result->metadata['action']);
+    }
+
+    // ── Change Frequency ─────────────────────────────────────────────────────
+
+    public function test_change_frequency_switches_daily_to_weekly(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('passer habitude 1 en hebdo');
+        $this->createHabit($context, 'Sport', 'daily');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleChangeFrequency($agent, $context, $habits, [
+            'action'    => 'change_frequency',
+            'item'      => 1,
+            'frequency' => 'weekly',
+        ]);
+
+        $this->assertStringContainsString('hebdomadaire', $result->reply);
+        $this->assertDatabaseHas('habits', ['name' => 'Sport', 'frequency' => 'weekly']);
+    }
+
+    public function test_change_frequency_rejects_same_frequency(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('passer habitude 1 en daily');
+        $this->createHabit($context, 'Sport', 'daily');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleChangeFrequency($agent, $context, $habits, [
+            'action'    => 'change_frequency',
+            'item'      => 1,
+            'frequency' => 'daily',
+        ]);
+
+        $this->assertEquals('habit_change_freq_same', $result->metadata['action']);
+    }
+
+    // ── History ──────────────────────────────────────────────────────────────
+
+    public function test_history_shows_7_days_for_one_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('historique meditation');
+        $habit   = $this->createHabit($context, 'Meditation');
+        $habits  = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleHistory($agent, $context, $habits, ['action' => 'history', 'item' => 1]);
+
+        $this->assertStringContainsString('7 derniers jours', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+    }
+
+    public function test_history_shows_all_habits_when_item_null(): void
+    {
+        $agent = new HabitAgent();
+        $context = $this->makeContext('historique toutes habitudes');
+        $this->createHabit($context, 'Lecture');
+        $this->createHabit($context, 'Meditation');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleHistory($agent, $context, $habits, ['action' => 'history', 'item' => null]);
+
+        $this->assertStringContainsString('Lecture', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+    }
+
+    // ── Motivate ─────────────────────────────────────────────────────────────
+
+    public function test_motivate_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('motivation');
+        $habits  = collect();
+
+        $result = $this->callHandleMotivate($agent, $context, $habits);
+
+        $this->assertEquals('habit_motivate_empty', $result->metadata['action']);
+    }
+
+    public function test_motivate_shows_at_risk_streaks(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('motivation');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        // Log yesterday to create a streak of 1 (at risk today)
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->subDay()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleMotivate($agent, $context, $habits);
+
+        $this->assertStringContainsString('en jeu', $result->reply);
+    }
+
+    public function test_motivate_shows_congrats_when_all_done(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('motivation');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleMotivate($agent, $context, $habits);
+
+        $this->assertStringContainsString('Bravo', $result->reply);
+    }
+
+    // ── Streak Board ─────────────────────────────────────────────────────────
+
+    public function test_streak_board_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('classement streaks');
+        $habits  = collect();
+
+        $result = $this->callHandleStreakBoard($agent, $context, $habits);
+
+        $this->assertEquals('habit_streak_board_empty', $result->metadata['action']);
+    }
+
+    public function test_streak_board_ranks_habits_by_streak(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('classement streaks');
+        $habitA  = $this->createHabit($context, 'Lecture');
+        $habitB  = $this->createHabit($context, 'Sport');
+
+        // Sport has streak of 3, Lecture has streak of 1
+        for ($i = 3; $i >= 1; $i--) {
+            HabitLog::create([
+                'habit_id'       => $habitB->id,
+                'completed_date' => now()->subDays($i - 1)->toDateString(),
+                'streak_count'   => 4 - $i,
+                'best_streak'    => 3,
+            ]);
+        }
+        HabitLog::create([
+            'habit_id'       => $habitA->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleStreakBoard($agent, $context, $habits);
+
+        $this->assertEquals('habit_streak_board', $result->metadata['action']);
+        $this->assertStringContainsString('Classement', $result->reply);
+        $this->assertStringContainsString('1er', $result->reply);
+        $this->assertStringContainsString('Total streaks', $result->reply);
+    }
+
+    public function test_streak_board_shows_all_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('classement streaks');
+        $this->createHabit($context, 'Lecture');
+        $this->createHabit($context, 'Meditation');
+        $this->createHabit($context, 'Sport');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleStreakBoard($agent, $context, $habits);
+
+        $this->assertStringContainsString('Lecture', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+        $this->assertStringContainsString('Sport', $result->reply);
+    }
+
+    // ── Weekly Report ────────────────────────────────────────────────────────
+
+    public function test_weekly_report_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport semaine');
+        $habits  = collect();
+
+        $result = $this->callHandleWeeklyReport($agent, $context, $habits);
+
+        $this->assertEquals('habit_weekly_report_empty', $result->metadata['action']);
+    }
+
+    public function test_weekly_report_shows_completion_for_daily_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport semaine');
+        $habit   = $this->createHabit($context, 'Meditation', 'daily');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleWeeklyReport($agent, $context, $habits);
+
+        $this->assertEquals('habit_weekly_report', $result->metadata['action']);
+        $this->assertStringContainsString('Rapport semaine', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+        $this->assertStringContainsString('Bilan semaine', $result->reply);
+    }
+
+    public function test_weekly_report_shows_completion_for_weekly_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport semaine');
+        $habit   = $this->createHabit($context, 'Sport', 'weekly');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleWeeklyReport($agent, $context, $habits);
+
+        $this->assertStringContainsString('hebdo', $result->reply);
+        $this->assertStringContainsString('1/1', $result->reply);
+    }
+
+    public function test_weekly_report_shows_perfect_message_when_all_done(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport semaine');
+        $habit   = $this->createHabit($context, 'Meditation', 'weekly');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleWeeklyReport($agent, $context, $habits);
+
+        $this->assertStringContainsString('parfaite', $result->reply);
+    }
+
+    // ── Calculate Streak ─────────────────────────────────────────────────────
+
+    public function test_calculate_streak_returns_0_when_no_logs(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('streak');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        $streak = $agent->calculateStreak($habit->id, 'daily');
+
+        $this->assertEquals(0, $streak);
+    }
+
+    public function test_calculate_streak_returns_1_for_today_log(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('streak');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        Cache::forget("habit_streak:{$habit->id}");
+        $streak = $agent->calculateStreak($habit->id, 'daily');
+
+        $this->assertEquals(1, $streak);
+    }
+
+    public function test_calculate_streak_counts_consecutive_days(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('streak');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        for ($i = 0; $i <= 4; $i++) {
+            HabitLog::create([
+                'habit_id'       => $habit->id,
+                'completed_date' => now()->subDays($i)->toDateString(),
+                'streak_count'   => 5 - $i,
+                'best_streak'    => 5,
+            ]);
+        }
+
+        Cache::forget("habit_streak:{$habit->id}");
+        $streak = $agent->calculateStreak($habit->id, 'daily');
+
+        $this->assertEquals(5, $streak);
+    }
+
+    public function test_calculate_streak_breaks_on_gap(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('streak');
+        $habit   = $this->createHabit($context, 'Meditation');
+
+        // Log today and 3 days ago (gap on day 1 and 2)
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->subDays(3)->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        Cache::forget("habit_streak:{$habit->id}");
+        $streak = $agent->calculateStreak($habit->id, 'daily');
+
+        $this->assertEquals(1, $streak);
+    }
+
+    // ── Mini Bar ─────────────────────────────────────────────────────────────
+
+    public function test_build_mini_bar_is_empty_for_zero_done(): void
+    {
+        $agent = new HabitAgent();
+        $bar   = $this->callBuildMiniBar($agent, 0, 5);
+        $this->assertEquals('-----', $bar);
+    }
+
+    public function test_build_mini_bar_is_full_when_complete(): void
+    {
+        $agent = new HabitAgent();
+        $bar   = $this->callBuildMiniBar($agent, 5, 5);
+        $this->assertEquals('#####', $bar);
+    }
+
+    public function test_build_mini_bar_handles_zero_total(): void
+    {
+        $agent = new HabitAgent();
+        $bar   = $this->callBuildMiniBar($agent, 0, 0);
+        $this->assertEquals('-----', $bar);
+    }
+
+    public function test_build_mini_bar_partial(): void
+    {
+        $agent = new HabitAgent();
+        $bar   = $this->callBuildMiniBar($agent, 2, 4);
+        // 2/4 = 50% = 3 filled out of 5 (rounded)
+        $this->assertStringContainsString('#', $bar);
+        $this->assertStringContainsString('-', $bar);
+        $this->assertEquals(5, strlen($bar));
+    }
+
+    // ── Help ─────────────────────────────────────────────────────────────────
+
+    public function test_help_shows_all_commands(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('aide habitudes');
+
+        $result = $this->callHandleHelp($agent, $context);
+
+        $this->assertEquals('habit_help', $result->metadata['action']);
+        $this->assertStringContainsString('AJOUTER', $result->reply);
+        $this->assertStringContainsString('COCHER', $result->reply);
+        $this->assertStringContainsString('VOIR', $result->reply);
+        $this->assertStringContainsString('GERER', $result->reply);
+        $this->assertStringContainsString('Classement streaks', $result->reply);
+        $this->assertStringContainsString('Rapport semaine', $result->reply);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private function makeContext(string $body, string $routedAgent = 'habit'): AgentContext
+    {
+        $user    = User::factory()->create();
+        $agentDb = Agent::factory()->create(['user_id' => $user->id]);
+        $session = AgentSession::create([
+            'agent_id'        => $agentDb->id,
+            'session_key'     => AgentSession::keyFor($agentDb->id, 'whatsapp', $this->testPhone),
+            'channel'         => 'whatsapp',
+            'peer_id'         => $this->testPhone,
+            'last_message_at' => now(),
+        ]);
+
+        return new AgentContext(
+            agent:       $agentDb,
+            session:     $session,
+            from:        $this->testPhone,
+            senderName:  'Test User',
+            body:        $body,
+            hasMedia:    false,
+            mediaUrl:    null,
+            mimetype:    null,
+            media:       null,
+            routedAgent: $routedAgent,
+        );
+    }
+
+    private function createHabit(AgentContext $context, string $name, string $frequency = 'daily'): Habit
+    {
+        return Habit::create([
+            'agent_id'       => $context->agent->id,
+            'user_phone'     => $this->testPhone,
+            'requester_name' => 'Test User',
+            'name'           => $name,
+            'frequency'      => $frequency,
+        ]);
+    }
+
+    // ── Private method callers via Reflection ──────────────────────────────
+
+    private function callHandleAdd(HabitAgent $agent, AgentContext $context, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleAdd');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $parsed);
+    }
+
+    private function callHandleLog(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleLog');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleUnlog(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleUnlog');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleList(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleList');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleToday(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleToday');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleStats(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleStats');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleDelete(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleDelete');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleReset(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleReset');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleRename(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleRename');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleChangeFrequency(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleChangeFrequency');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleHistory(HabitAgent $agent, AgentContext $context, $habits, array $parsed): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleHistory');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits, $parsed);
+    }
+
+    private function callHandleMotivate(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleMotivate');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleStreakBoard(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleStreakBoard');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleWeeklyReport(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleWeeklyReport');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callBuildMiniBar(HabitAgent $agent, int $done, int $total): string
+    {
+        $method = new \ReflectionMethod($agent, 'buildMiniBar');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $done, $total);
+    }
+
+    private function callHandleHelp(HabitAgent $agent, AgentContext $context): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleHelp');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context);
+    }
+}

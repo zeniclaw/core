@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 class HabitAgent extends BaseAgent
 {
     private const MAX_HABITS = 20;
+    private const MAX_NAME_LENGTH = 50;
 
     public function name(): string
     {
@@ -21,7 +22,7 @@ class HabitAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, et recevoir de la motivation.';
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks et le rapport hebdomadaire.';
     }
 
     public function keywords(): array
@@ -50,12 +51,14 @@ class HabitAgent extends BaseAgent
             'annuler log', 'decocher habitude', 'unlog habit', 'undo habit',
             'motivation habitude', 'motiver', 'encouragement habitude', 'motivate',
             'aide habitude', 'help habit',
+            'classement streak', 'streak board', 'meilleur streak', 'top streak',
+            'rapport semaine', 'bilan semaine', 'weekly report', 'rapport habitudes',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -88,7 +91,8 @@ class HabitAgent extends BaseAgent
                 . "- \"Mes habitudes\" / \"Stats habitudes\"\n"
                 . "- \"Aujourd'hui\" pour voir ce qu'il reste\n"
                 . "- \"Historique habitude 1\" pour les 7 derniers jours\n"
-                . "- \"Motivation\" pour ton bilan motivation\n"
+                . "- \"Classement streaks\" pour le top streaks\n"
+                . "- \"Rapport semaine\" pour le bilan hebdo\n"
                 . "- \"Aide habitudes\" pour le guide complet";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'habit_parse_failed']);
@@ -109,6 +113,8 @@ class HabitAgent extends BaseAgent
             'history'          => $this->handleHistory($context, $habits, $parsed),
             'change_frequency' => $this->handleChangeFrequency($context, $habits, $parsed),
             'motivate'         => $this->handleMotivate($context, $habits),
+            'streak_board'     => $this->handleStreakBoard($context, $habits),
+            'weekly_report'    => $this->handleWeeklyReport($context, $habits),
             'help'             => $this->handleHelp($context),
             default            => $this->handleUnknown($context),
         };
@@ -161,7 +167,13 @@ Si l'utilisateur veut voir toutes les habitudes, item = null.
 12. MOTIVATION / BILAN MOTIVATION (streaks en jeu, habitudes faites ou non):
 {"action": "motivate"}
 
-13. AIDE / GUIDE d'utilisation:
+13. CLASSEMENT DES STREAKS (top streaks de toutes les habitudes, classement):
+{"action": "streak_board"}
+
+14. RAPPORT HEBDOMADAIRE (bilan de la semaine en cours, taux de completion par habitude):
+{"action": "weekly_report"}
+
+15. AIDE / GUIDE d'utilisation:
 {"action": "help"}
 
 REGLES:
@@ -190,6 +202,8 @@ EXEMPLES:
 - "Historique de toutes mes habitudes" -> {"action": "history", "item": null}
 - "Passer habitude 2 en hebdo" ou "Changer frequence meditation en quotidien" -> {"action": "change_frequency", "item": X, "frequency": "weekly|daily"}
 - "Motivation" ou "Mes streaks en jeu" ou "Encourage-moi" -> {"action": "motivate"}
+- "Classement streaks" ou "Top streaks" ou "Meilleur streak" ou "Streak board" -> {"action": "streak_board"}
+- "Rapport semaine" ou "Bilan semaine" ou "Comment j'ai fait cette semaine" -> {"action": "weekly_report"}
 - "Aide" ou "Comment ca marche" -> {"action": "help"}
 
 Reponds UNIQUEMENT avec le JSON.
@@ -203,6 +217,12 @@ PROMPT;
             $reply = "Donne-moi le nom de l'habitude a ajouter.\nEx: \"Ajouter habitude Meditation\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'habit_add_no_name']);
+        }
+
+        if (mb_strlen($name) > self::MAX_NAME_LENGTH) {
+            $reply = "Le nom de l'habitude est trop long (max " . self::MAX_NAME_LENGTH . " caracteres). Essaie un nom plus court.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_add_name_too_long']);
         }
 
         $count = Habit::where('user_phone', $context->from)
@@ -965,7 +985,9 @@ PROMPT;
             . "  \"Aujourd'hui\" — ce qu'il reste a faire\n"
             . "  \"Stats habitudes\" — statistiques completes\n"
             . "  \"Historique habitude 2\" — 7 derniers jours\n"
-            . "  \"Motivation\" — bilan streaks en jeu\n\n"
+            . "  \"Motivation\" — bilan streaks en jeu\n"
+            . "  \"Classement streaks\" — top streaks de tes habitudes\n"
+            . "  \"Rapport semaine\" — bilan de la semaine en cours\n\n"
             . "GERER\n"
             . "  \"Renommer habitude 2 en Course a pied\"\n"
             . "  \"Passer habitude 2 en hebdo\" (changer frequence)\n"
@@ -983,6 +1005,149 @@ PROMPT;
         $reply = "Action non reconnue. Dis \"aide habitudes\" pour voir toutes les commandes.";
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'habit_unknown_action']);
+    }
+
+    /**
+     * NEW: Show habits ranked by current streak descending.
+     */
+    private function handleStreakBoard(AgentContext $context, $habits): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_streak_board_empty']);
+        }
+
+        $ranked = [];
+        foreach ($habits->values() as $i => $habit) {
+            $streak     = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
+            $bestStreak = $this->getBestStreak($habit->id);
+            $unit       = $habit->frequency === 'weekly' ? 'sem' : 'j';
+            $ranked[]   = [
+                'num'        => $i + 1,
+                'name'       => $habit->name,
+                'streak'     => $streak,
+                'bestStreak' => $bestStreak,
+                'unit'       => $unit,
+            ];
+        }
+
+        usort($ranked, fn($a, $b) => $b['streak'] <=> $a['streak']);
+
+        $medals = ['1' => '1er', '2' => '2eme', '3' => '3eme'];
+        $lines  = ["Classement des streaks :"];
+
+        foreach ($ranked as $rank => $data) {
+            $pos     = $rank + 1;
+            $prefix  = $medals[(string) $pos] ?? "{$pos}eme";
+            $lines[] = "\n{$prefix}. {$data['name']}";
+            $lines[] = "   Streak: {$data['streak']}{$data['unit']} | Record: {$data['bestStreak']}{$data['unit']}";
+        }
+
+        $totalStreak = array_sum(array_column($ranked, 'streak'));
+        $lines[]     = "\n---";
+        $lines[]     = "Total streaks cumules : {$totalStreak}";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit streak board viewed', ['count' => count($ranked)]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_streak_board']);
+    }
+
+    /**
+     * NEW: Weekly report — completion rate per habit for the current week.
+     */
+    private function handleWeeklyReport(AgentContext $context, $habits): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_weekly_report_empty']);
+        }
+
+        $tz        = AppSetting::timezone();
+        $now       = now($tz);
+        $weekStart = $now->copy()->startOfWeek()->toDateString();
+        $weekEnd   = $now->copy()->endOfWeek()->toDateString();
+        $today     = $now->toDateString();
+        $habitIds  = $habits->pluck('id')->toArray();
+
+        // Build list of days from Monday to today (within the current week)
+        $days   = [];
+        $cursor = Carbon::parse($weekStart, $tz);
+        $limit  = Carbon::parse(min($today, $weekEnd), $tz);
+        while ($cursor->lte($limit)) {
+            $days[] = $cursor->toDateString();
+            $cursor->addDay();
+        }
+        $elapsedDays = count($days);
+
+        $logsByHabit = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$weekStart, $today])
+            ->get()
+            ->groupBy('habit_id');
+
+        $totalDone     = 0;
+        $totalPossible = 0;
+        $weekLabel     = Carbon::parse($weekStart, $tz)->format('d/m') . ' - ' . Carbon::parse($weekEnd, $tz)->format('d/m');
+        $lines         = ["Rapport semaine ({$weekLabel}) :"];
+
+        foreach ($habits->values() as $i => $habit) {
+            $num       = $i + 1;
+            $habitLogs = $logsByHabit->get($habit->id, collect());
+
+            if ($habit->frequency === 'daily') {
+                $possible  = $elapsedDays;
+                $doneCount = $habitLogs->count();
+            } else {
+                // Weekly: 1 expected per week, count as 0 or 1
+                $possible  = 1;
+                $doneCount = $habitLogs->isNotEmpty() ? 1 : 0;
+            }
+
+            $rate = $possible > 0 ? round(($doneCount / $possible) * 100) : 0;
+            $totalDone     += $doneCount;
+            $totalPossible += $possible;
+
+            $bar     = $this->buildMiniBar($doneCount, $possible);
+            $freq    = $habit->frequency === 'daily' ? 'daily' : 'hebdo';
+            $lines[] = "\n{$num}. {$habit->name} [{$freq}]";
+            $lines[] = "   {$bar} {$doneCount}/{$possible} ({$rate}%)";
+        }
+
+        $globalRate = $totalPossible > 0 ? (int) round(($totalDone / $totalPossible) * 100) : 0;
+        $lines[]    = "\n---";
+        $lines[]    = "Bilan semaine : {$totalDone}/{$totalPossible} ({$globalRate}%)";
+
+        if ($globalRate === 100) {
+            $lines[] = "Semaine parfaite ! Continue comme ca !";
+        } elseif ($globalRate >= 75) {
+            $lines[] = "Tres bonne semaine !";
+        } elseif ($globalRate >= 50) {
+            $lines[] = "Bonne progression, on peut faire mieux !";
+        } else {
+            $lines[] = "Il reste du chemin — la semaine n'est pas finie !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit weekly report viewed', ['global_rate' => $globalRate]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_weekly_report']);
+    }
+
+    /**
+     * Build a simple mini progress bar (e.g. "###--" for 3/5).
+     */
+    private function buildMiniBar(int $done, int $total, int $width = 5): string
+    {
+        if ($total <= 0) {
+            return str_repeat('-', $width);
+        }
+        $filled = (int) round(($done / $total) * $width);
+        $filled = max(0, min($width, $filled));
+        return str_repeat('#', $filled) . str_repeat('-', $width - $filled);
     }
 
     /**
@@ -1109,7 +1274,8 @@ PROMPT;
             return "(aucune habitude enregistree)";
         }
 
-        $today    = now(AppSetting::timezone())->toDateString();
+        $tz       = AppSetting::timezone();
+        $today    = now($tz)->toDateString();
         $habitIds = $habits->pluck('id')->toArray();
 
         $doneTodayIds = HabitLog::whereIn('habit_id', $habitIds)
@@ -1117,15 +1283,26 @@ PROMPT;
             ->pluck('habit_id')
             ->toArray();
 
+        $weekStart       = now($tz)->startOfWeek()->toDateString();
+        $doneThisWeekIds = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$weekStart, $today])
+            ->pluck('habit_id')
+            ->unique()
+            ->toArray();
+
         $lines = [];
 
         foreach ($habits->values() as $i => $habit) {
-            $num       = $i + 1;
-            $streak    = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
-            $unit      = $habit->frequency === 'weekly' ? 'sem' : 'j';
-            $doneToday = in_array($habit->id, $doneTodayIds);
-            $check     = $doneToday ? '[FAIT]' : '[A FAIRE]';
-            $lines[]   = "#{$num} {$habit->name} ({$habit->frequency}) — streak: {$streak}{$unit} {$check}";
+            $num    = $i + 1;
+            $streak = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
+            $unit   = $habit->frequency === 'weekly' ? 'sem' : 'j';
+
+            $isDone = $habit->frequency === 'weekly'
+                ? in_array($habit->id, $doneThisWeekIds)
+                : in_array($habit->id, $doneTodayIds);
+
+            $check   = $isDone ? '[FAIT]' : '[A FAIRE]';
+            $lines[] = "#{$num} {$habit->name} ({$habit->frequency}) — streak: {$streak}{$unit} {$check}";
         }
 
         return implode("\n", $lines);
@@ -1186,6 +1363,11 @@ PROMPT;
 
         Log::debug("HabitAgent parse - cleaned: {$clean}");
 
-        return json_decode($clean, true);
+        $decoded = json_decode($clean, true);
+        if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
+            Log::warning("HabitAgent JSON parse error: " . json_last_error_msg() . " | raw: {$clean}");
+        }
+
+        return $decoded;
     }
 }
