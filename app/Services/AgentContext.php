@@ -22,6 +22,7 @@ class AgentContext
         public readonly ?string $complexity = null,
         public readonly ?string $reasoning = null,
         public readonly ?string $autonomy = null,
+        public readonly ?string $memoryContext = null,
     ) {}
 
     public function phone(): string
@@ -51,6 +52,28 @@ class AgentContext
             complexity: $complexity,
             reasoning: $reasoning,
             autonomy: $autonomy,
+            memoryContext: $this->memoryContext,
+        );
+    }
+
+    public function withMemoryContext(string $memoryContext): self
+    {
+        return new self(
+            agent: $this->agent,
+            session: $this->session,
+            from: $this->from,
+            senderName: $this->senderName,
+            body: $this->body,
+            hasMedia: $this->hasMedia,
+            mediaUrl: $this->mediaUrl,
+            mimetype: $this->mimetype,
+            media: $this->media,
+            routedAgent: $this->routedAgent,
+            routedModel: $this->routedModel,
+            complexity: $this->complexity,
+            reasoning: $this->reasoning,
+            autonomy: $this->autonomy,
+            memoryContext: $memoryContext,
         );
     }
 }

@@ -167,20 +167,26 @@ abstract class BaseAgent implements AgentInterface
         return null;
     }
 
-    protected function formatContextMemoryForPrompt(string $userId): string
+    protected function formatContextMemoryForPrompt(string $userId, ?AgentContext $context = null): string
     {
+        $parts = [];
+
         $facts = $this->getContextMemory($userId);
-        if (empty($facts)) {
-            return '';
+        if (!empty($facts)) {
+            $lines = ['PROFIL UTILISATEUR (memoire contextuelle):'];
+            foreach ($facts as $fact) {
+                $category = $fact['category'] ?? 'general';
+                $value = $fact['value'] ?? '';
+                $lines[] = "- [{$category}] {$value}";
+            }
+            $parts[] = implode("\n", $lines);
         }
 
-        $lines = ['PROFIL UTILISATEUR (memoire contextuelle):'];
-        foreach ($facts as $fact) {
-            $category = $fact['category'] ?? 'general';
-            $value = $fact['value'] ?? '';
-            $lines[] = "- [{$category}] {$value}";
+        // Append persistent conversation memory if injected via context
+        if ($context && $context->memoryContext) {
+            $parts[] = $context->memoryContext;
         }
 
-        return implode("\n", $lines);
+        return implode("\n\n", $parts);
     }
 }
