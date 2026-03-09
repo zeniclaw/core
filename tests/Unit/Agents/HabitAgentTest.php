@@ -34,9 +34,9 @@ class HabitAgentTest extends TestCase
         $this->assertEquals('habit', (new HabitAgent())->name());
     }
 
-    public function test_agent_version_is_1_4_0(): void
+    public function test_agent_version_is_1_5_0(): void
     {
-        $this->assertEquals('1.4.0', (new HabitAgent())->version());
+        $this->assertEquals('1.5.0', (new HabitAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -771,6 +771,170 @@ class HabitAgentTest extends TestCase
         $this->assertStringContainsString('parfaite', $result->reply);
     }
 
+    // ── Monthly Report ───────────────────────────────────────────────────────
+
+    public function test_monthly_report_shows_empty_message_when_no_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport mensuel');
+        $habits  = collect();
+
+        $result = $this->callHandleMonthlyReport($agent, $context, $habits);
+
+        $this->assertEquals('habit_monthly_report_empty', $result->metadata['action']);
+    }
+
+    public function test_monthly_report_shows_segments_for_daily_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport mensuel');
+        $habit   = $this->createHabit($context, 'Meditation', 'daily');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleMonthlyReport($agent, $context, $habits);
+
+        $this->assertEquals('habit_monthly_report', $result->metadata['action']);
+        $this->assertStringContainsString('Rapport mensuel', $result->reply);
+        $this->assertStringContainsString('Meditation', $result->reply);
+        $this->assertStringContainsString('S4', $result->reply);
+        $this->assertStringContainsString('Total', $result->reply);
+    }
+
+    public function test_monthly_report_shows_segments_for_weekly_habit(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport mensuel');
+        $habit   = $this->createHabit($context, 'Sport', 'weekly');
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => now()->toDateString(),
+            'streak_count'   => 1,
+            'best_streak'    => 1,
+        ]);
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleMonthlyReport($agent, $context, $habits);
+
+        $this->assertEquals('habit_monthly_report', $result->metadata['action']);
+        $this->assertStringContainsString('Sport', $result->reply);
+        $this->assertStringContainsString('/4 sem', $result->reply);
+    }
+
+    public function test_monthly_report_shows_perfect_message_when_100_percent(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('rapport mensuel');
+        $habit   = $this->createHabit($context, 'Meditation', 'daily');
+
+        // Log all 30 days
+        for ($i = 0; $i < 30; $i++) {
+            HabitLog::create([
+                'habit_id'       => $habit->id,
+                'completed_date' => now()->subDays($i)->toDateString(),
+                'streak_count'   => $i + 1,
+                'best_streak'    => 30,
+            ]);
+        }
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleMonthlyReport($agent, $context, $habits);
+
+        $this->assertStringContainsString('exceptionnel', $result->reply);
+    }
+
+    // ── Best Day ─────────────────────────────────────────────────────────────
+
+    public function test_best_day_shows_error_when_no_daily_habits(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('meilleur jour');
+        $this->createHabit($context, 'Sport', 'weekly');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleBestDay($agent, $context, $habits);
+
+        $this->assertEquals('habit_best_day_no_daily', $result->metadata['action']);
+    }
+
+    public function test_best_day_shows_no_data_when_no_logs(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('meilleur jour');
+        $this->createHabit($context, 'Meditation', 'daily');
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+
+        $result = $this->callHandleBestDay($agent, $context, $habits);
+
+        $this->assertEquals('habit_best_day_no_data', $result->metadata['action']);
+    }
+
+    public function test_best_day_shows_analysis_with_logs(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('meilleur jour');
+        $habit   = $this->createHabit($context, 'Meditation', 'daily');
+
+        // Log the last 7 days
+        for ($i = 0; $i < 7; $i++) {
+            HabitLog::create([
+                'habit_id'       => $habit->id,
+                'completed_date' => now()->subDays($i)->toDateString(),
+                'streak_count'   => $i + 1,
+                'best_streak'    => 7,
+            ]);
+        }
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleBestDay($agent, $context, $habits);
+
+        $this->assertEquals('habit_best_day', $result->metadata['action']);
+        $this->assertStringContainsString('Meilleur jour', $result->reply);
+        $this->assertStringContainsString('Lundi', $result->reply);
+        $this->assertArrayHasKey('best_dow', $result->metadata);
+    }
+
+    public function test_best_day_returns_day_between_1_and_7(): void
+    {
+        $agent   = new HabitAgent();
+        $context = $this->makeContext('meilleur jour');
+        $habit   = $this->createHabit($context, 'Meditation', 'daily');
+
+        for ($i = 0; $i < 14; $i++) {
+            HabitLog::create([
+                'habit_id'       => $habit->id,
+                'completed_date' => now()->subDays($i)->toDateString(),
+                'streak_count'   => $i + 1,
+                'best_streak'    => 14,
+            ]);
+        }
+
+        $habits = Habit::where('user_phone', $this->testPhone)->orderBy('name')->get();
+        $result = $this->callHandleBestDay($agent, $context, $habits);
+
+        $this->assertGreaterThanOrEqual(1, $result->metadata['best_dow']);
+        $this->assertLessThanOrEqual(7, $result->metadata['best_dow']);
+    }
+
+    // ── Keywords ─────────────────────────────────────────────────────────────
+
+    public function test_keywords_include_rapport_mensuel(): void
+    {
+        $this->assertContains('rapport mensuel', (new HabitAgent())->keywords());
+    }
+
+    public function test_keywords_include_meilleur_jour(): void
+    {
+        $this->assertContains('meilleur jour', (new HabitAgent())->keywords());
+    }
+
     // ── Calculate Streak ─────────────────────────────────────────────────────
 
     public function test_calculate_streak_returns_0_when_no_logs(): void
@@ -1052,5 +1216,19 @@ class HabitAgentTest extends TestCase
         $method = new \ReflectionMethod($agent, 'handleHelp');
         $method->setAccessible(true);
         return $method->invoke($agent, $context);
+    }
+
+    private function callHandleMonthlyReport(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleMonthlyReport');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
+    }
+
+    private function callHandleBestDay(HabitAgent $agent, AgentContext $context, $habits): \App\Services\Agents\AgentResult
+    {
+        $method = new \ReflectionMethod($agent, 'handleBestDay');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $context, $habits);
     }
 }

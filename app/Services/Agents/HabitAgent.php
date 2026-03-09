@@ -22,7 +22,7 @@ class HabitAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks et le rapport hebdomadaire.';
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour, suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks, le rapport hebdomadaire, le rapport mensuel des 30 derniers jours et analyser son meilleur jour de la semaine.';
     }
 
     public function keywords(): array
@@ -53,12 +53,14 @@ class HabitAgent extends BaseAgent
             'aide habitude', 'help habit',
             'classement streak', 'streak board', 'meilleur streak', 'top streak',
             'rapport semaine', 'bilan semaine', 'weekly report', 'rapport habitudes',
+            'rapport mensuel', 'bilan mensuel', 'monthly report', 'bilan 30 jours', '30 jours habitudes', 'rapport 30j',
+            'meilleur jour', 'best day', 'jour regulier', 'quel jour', 'analyse jour',
         ];
     }
 
     public function version(): string
     {
-        return '1.4.0';
+        return '1.5.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -115,6 +117,8 @@ class HabitAgent extends BaseAgent
             'motivate'         => $this->handleMotivate($context, $habits),
             'streak_board'     => $this->handleStreakBoard($context, $habits),
             'weekly_report'    => $this->handleWeeklyReport($context, $habits),
+            'monthly_report'   => $this->handleMonthlyReport($context, $habits),
+            'best_day'         => $this->handleBestDay($context, $habits),
             'help'             => $this->handleHelp($context),
             default            => $this->handleUnknown($context),
         };
@@ -176,6 +180,12 @@ Si l'utilisateur veut voir toutes les habitudes, item = null.
 15. AIDE / GUIDE d'utilisation:
 {"action": "help"}
 
+16. RAPPORT MENSUEL (bilan des 30 derniers jours, progression semaine par semaine):
+{"action": "monthly_report"}
+
+17. MEILLEUR JOUR (analyse des jours de la semaine les plus productifs sur 90 jours):
+{"action": "best_day"}
+
 REGLES:
 - 'name' = nom court et clair de l'habitude (ex: "Meditation", "Sport", "Lecture")
 - 'frequency' = "daily" (quotidienne) ou "weekly" (hebdomadaire). Par defaut "daily".
@@ -205,6 +215,8 @@ EXEMPLES:
 - "Classement streaks" ou "Top streaks" ou "Meilleur streak" ou "Streak board" -> {"action": "streak_board"}
 - "Rapport semaine" ou "Bilan semaine" ou "Comment j'ai fait cette semaine" -> {"action": "weekly_report"}
 - "Aide" ou "Comment ca marche" -> {"action": "help"}
+- "Rapport mensuel" ou "Bilan 30 jours" ou "Comment j'ai fait ce mois" -> {"action": "monthly_report"}
+- "Mon meilleur jour" ou "Quel jour suis-je le plus regulier" ou "Analyse par jour" -> {"action": "best_day"}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -212,7 +224,7 @@ PROMPT;
 
     private function handleAdd(AgentContext $context, array $parsed): AgentResult
     {
-        $name = trim($parsed['name'] ?? '');
+        $name = trim(preg_replace('/\s+/', ' ', $parsed['name'] ?? ''));
         if (!$name) {
             $reply = "Donne-moi le nom de l'habitude a ajouter.\nEx: \"Ajouter habitude Meditation\"";
             $this->sendText($context->from, $reply);
@@ -611,7 +623,7 @@ PROMPT;
             if ($isDone) $totalDoneToday++;
             $totalCompleted += $totalLogs;
 
-            $denominator = $habit->frequency === 'daily' ? 30 : round(30 / 7, 1);
+            $denominator = $habit->frequency === 'daily' ? 30 : 4;
             $rate        = $denominator > 0 ? min(100, round(($last30 / $denominator) * 100)) : 0;
 
             $freqLabel  = $habit->frequency === 'daily' ? 'quotidien' : 'hebdo';
@@ -987,7 +999,9 @@ PROMPT;
             . "  \"Historique habitude 2\" — 7 derniers jours\n"
             . "  \"Motivation\" — bilan streaks en jeu\n"
             . "  \"Classement streaks\" — top streaks de tes habitudes\n"
-            . "  \"Rapport semaine\" — bilan de la semaine en cours\n\n"
+            . "  \"Rapport semaine\" — bilan de la semaine en cours\n"
+            . "  \"Rapport mensuel\" — bilan des 30 derniers jours\n"
+            . "  \"Mon meilleur jour\" — analyse par jour de semaine\n\n"
             . "GERER\n"
             . "  \"Renommer habitude 2 en Course a pied\"\n"
             . "  \"Passer habitude 2 en hebdo\" (changer frequence)\n"
@@ -1135,6 +1149,213 @@ PROMPT;
         $this->log($context, 'Habit weekly report viewed', ['global_rate' => $globalRate]);
 
         return AgentResult::reply($reply, ['action' => 'habit_weekly_report']);
+    }
+
+    /**
+     * Rapport des 30 derniers jours, breakdown par semaine (S1..S4).
+     */
+    private function handleMonthlyReport(AgentContext $context, $habits): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_monthly_report_empty']);
+        }
+
+        $tz       = AppSetting::timezone();
+        $now      = now($tz);
+        $today    = $now->toDateString();
+        $habitIds = $habits->pluck('id')->toArray();
+
+        // 4 segments de ~7-8 jours couvrant les 30 derniers jours
+        // S1 (plus ancien): j-29 -> j-22  (8 jours)
+        // S2:               j-21 -> j-15  (7 jours)
+        // S3:               j-14 -> j-8   (7 jours)
+        // S4 (recent):      j-7  -> j-0   (8 jours)
+        $segments = [
+            ['start' => $now->copy()->subDays(29)->toDateString(), 'end' => $now->copy()->subDays(22)->toDateString(), 'label' => 'S1'],
+            ['start' => $now->copy()->subDays(21)->toDateString(), 'end' => $now->copy()->subDays(15)->toDateString(), 'label' => 'S2'],
+            ['start' => $now->copy()->subDays(14)->toDateString(), 'end' => $now->copy()->subDays(8)->toDateString(),  'label' => 'S3'],
+            ['start' => $now->copy()->subDays(7)->toDateString(),  'end' => $today,                                   'label' => 'S4'],
+        ];
+
+        $since30 = $segments[0]['start'];
+
+        $logsByHabit = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$since30, $today])
+            ->get()
+            ->groupBy('habit_id');
+
+        $totalDone     = 0;
+        $totalPossible = 0;
+        $dateRange     = Carbon::parse($since30, $tz)->format('d/m') . ' - ' . Carbon::parse($today, $tz)->format('d/m');
+        $lines         = ["Rapport mensuel ({$dateRange}) :"];
+
+        foreach ($habits->values() as $i => $habit) {
+            $num       = $i + 1;
+            $habitLogs = $logsByHabit->get($habit->id, collect());
+            $logDates  = $habitLogs->pluck('completed_date')
+                ->map(fn($d) => $d instanceof Carbon ? $d->toDateString() : Carbon::parse($d)->toDateString())
+                ->toArray();
+
+            $lines[] = "\n{$num}. {$habit->name}";
+
+            if ($habit->frequency === 'daily') {
+                $habitDone     = 0;
+                $habitPossible = 0;
+
+                foreach ($segments as $seg) {
+                    $wDone   = 0;
+                    $wDays   = 0;
+                    $cursor  = Carbon::parse($seg['start'], $tz);
+                    $wEnd    = Carbon::parse($seg['end'], $tz);
+
+                    while ($cursor->lte($wEnd)) {
+                        $wDays++;
+                        if (in_array($cursor->toDateString(), $logDates)) {
+                            $wDone++;
+                        }
+                        $cursor->addDay();
+                    }
+
+                    $wRate         = $wDays > 0 ? round(($wDone / $wDays) * 100) : 0;
+                    $bar           = $this->buildMiniBar($wDone, $wDays);
+                    $lines[]       = "   {$seg['label']}: {$bar} {$wDone}/{$wDays} ({$wRate}%)";
+                    $habitDone     += $wDone;
+                    $habitPossible += $wDays;
+                }
+
+                $rate30        = $habitPossible > 0 ? round(($habitDone / $habitPossible) * 100) : 0;
+                $lines[]       = "   Total: {$habitDone}/30j ({$rate30}%)";
+                $totalDone     += $habitDone;
+                $totalPossible += $habitPossible;
+            } else {
+                // Habitude hebdomadaire: max 4 semaines
+                $weeksDone = 0;
+                foreach ($segments as $seg) {
+                    $doneInSeg = collect($logDates)
+                        ->filter(fn($d) => $d >= $seg['start'] && $d <= $seg['end'])
+                        ->isNotEmpty();
+                    if ($doneInSeg) {
+                        $weeksDone++;
+                    }
+                }
+                $rate30        = round(($weeksDone / 4) * 100);
+                $bar           = $this->buildMiniBar($weeksDone, 4);
+                $lines[]       = "   {$bar} {$weeksDone}/4 sem ({$rate30}%)";
+                $totalDone     += $weeksDone;
+                $totalPossible += 4;
+            }
+        }
+
+        $globalRate = $totalPossible > 0 ? (int) round(($totalDone / $totalPossible) * 100) : 0;
+        $lines[]    = "\n---";
+        $lines[]    = "Taux global 30j : {$globalRate}%";
+
+        if ($globalRate >= 90) {
+            $lines[] = "Mois exceptionnel — continue comme ca !";
+        } elseif ($globalRate >= 75) {
+            $lines[] = "Tres bon mois !";
+        } elseif ($globalRate >= 50) {
+            $lines[] = "Bonne progression — on peut faire encore mieux !";
+        } else {
+            $lines[] = "Mois difficile — mais chaque jour est une nouvelle chance !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit monthly report viewed', ['global_rate' => $globalRate]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_monthly_report']);
+    }
+
+    /**
+     * Analyse la regularite par jour de la semaine sur les 90 derniers jours.
+     * Uniquement pour les habitudes daily (les weekly n'ont pas de jour specifique).
+     */
+    private function handleBestDay(AgentContext $context, $habits): AgentResult
+    {
+        $dailyHabits = $habits->where('frequency', 'daily');
+
+        if ($dailyHabits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude quotidienne.\nAjoute-en une pour voir ton analyse par jour de semaine.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_best_day_no_daily']);
+        }
+
+        $tz         = AppSetting::timezone();
+        $now        = now($tz);
+        $today      = $now->toDateString();
+        $since90    = $now->copy()->subDays(89)->toDateString();
+        $habitIds   = $dailyHabits->pluck('id')->toArray();
+        $dailyCount = $dailyHabits->count();
+
+        $logs = HabitLog::whereIn('habit_id', $habitIds)
+            ->where('completed_date', '>=', $since90)
+            ->get();
+
+        if ($logs->isEmpty()) {
+            $reply = "Pas encore assez de donnees.\nCoche quelques habitudes d'abord pour voir ton analyse !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_best_day_no_data']);
+        }
+
+        // Compter les logs par jour de semaine (1=Lundi, 7=Dimanche)
+        $dowCounts = array_fill(1, 7, 0);
+        foreach ($logs as $log) {
+            $dow = Carbon::parse($log->completed_date instanceof Carbon ? $log->completed_date->toDateString() : $log->completed_date, $tz)->dayOfWeekIso;
+            $dowCounts[$dow]++;
+        }
+
+        // Compter le nombre d'occurrences de chaque jour dans la periode
+        $dowOccurrences = array_fill(1, 7, 0);
+        $cursor         = Carbon::parse($since90, $tz);
+        $end            = Carbon::parse($today, $tz);
+        while ($cursor->lte($end)) {
+            $dowOccurrences[$cursor->dayOfWeekIso]++;
+            $cursor->addDay();
+        }
+
+        // Calculer les taux de completion par jour
+        $dayNames = [1 => 'Lundi', 2 => 'Mardi', 3 => 'Mercredi', 4 => 'Jeudi', 5 => 'Vendredi', 6 => 'Samedi', 7 => 'Dimanche'];
+        $rates    = [];
+        for ($dow = 1; $dow <= 7; $dow++) {
+            $expected   = $dowOccurrences[$dow] * $dailyCount;
+            $rates[$dow] = $expected > 0 ? min(100, (int) round(($dowCounts[$dow] / $expected) * 100)) : 0;
+        }
+
+        $bestDow  = (int) array_search(max($rates), $rates);
+        $worstDow = (int) array_search(min($rates), $rates);
+
+        $lines   = ["Analyse par jour de semaine (90 derniers jours) :"];
+        $lines[] = "({$dailyCount} habitude(s) quotidienne(s))";
+        $lines[] = "";
+
+        for ($dow = 1; $dow <= 7; $dow++) {
+            $bar     = $this->buildMiniBar($rates[$dow], 100, 7);
+            $marker  = ($dow === $bestDow) ? ' <-' : '';
+            $lines[] = sprintf("  %-10s %s %d%%%s", $dayNames[$dow] . ':', $bar, $rates[$dow], $marker);
+        }
+
+        $lines[] = "";
+        $lines[] = "Meilleur jour : {$dayNames[$bestDow]} ({$rates[$bestDow]}%)";
+        if ($bestDow !== $worstDow) {
+            $lines[] = "Jour le plus difficile : {$dayNames[$worstDow]} ({$rates[$worstDow]}%)";
+        }
+
+        if ($rates[$bestDow] >= 80) {
+            $lines[] = "Excellent le {$dayNames[$bestDow]} — continue !";
+        } elseif ($rates[$bestDow] >= 60) {
+            $lines[] = "Bon rythme le {$dayNames[$bestDow]} !";
+        } else {
+            $lines[] = "Tu peux encore progresser — essaie de viser 80% !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit best day viewed', ['best_dow' => $bestDow, 'worst_dow' => $worstDow]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_best_day', 'best_dow' => $bestDow]);
     }
 
     /**
@@ -1311,7 +1532,7 @@ PROMPT;
     private function getMilestoneMessage(int $streak, bool $isNewRecord, string $frequency = 'daily'): string
     {
         $unit       = $frequency === 'weekly' ? 'semaines' : 'jours';
-        $milestones = $frequency === 'weekly' ? [52, 26, 12, 8, 4, 2] : [100, 50, 30, 21, 14, 7, 3];
+        $milestones = $frequency === 'weekly' ? [52, 26, 12, 8, 4, 2] : [365, 100, 90, 60, 50, 30, 21, 14, 7, 3];
 
         foreach ($milestones as $m) {
             if ($streak === $m) {
@@ -1334,7 +1555,10 @@ PROMPT;
                     21  => "21 jours — une nouvelle habitude est nee !",
                     30  => "30 jours d'affilee, impressionnant !",
                     50  => "50 jours — tu es une machine !",
+                    60  => "2 mois sans interruption — incroyable !",
+                    90  => "3 mois de regularite — champion !",
                     100 => "100 jours ! Legendaire !",
+                    365 => "1 an complet — tu es un exemple de discipline !",
                     default => "{$m} {$unit} d'affilee !",
                 };
             }
