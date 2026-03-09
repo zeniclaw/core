@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Models\AgentLog;
+use App\Models\UserBriefPreference;
 use Illuminate\Http\Request;
 
 class AgentController extends Controller
@@ -241,6 +242,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Suivi intelligent des depenses et budgets',
         ],
+        'daily_brief' => [
+            'label' => 'Daily Brief',
+            'icon' => '🌅',
+            'color' => 'amber',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Resume personnalise du jour',
+        ],
     ];
 
     public function index(Request $request)
@@ -463,5 +472,44 @@ class AgentController extends Controller
             'context' => $bridge->getContext($userId),
             'hasContext' => $bridge->hasContext($userId),
         ]);
+    }
+
+    /**
+     * GET /api/brief-preferences/{phone}
+     */
+    public function getBriefPreferences(Request $request, string $phone)
+    {
+        $pref = UserBriefPreference::where('user_phone', $phone)->first();
+
+        if (!$pref) {
+            return response()->json([
+                'user_phone' => $phone,
+                'brief_time' => '07:00',
+                'enabled' => false,
+                'preferred_sections' => ['reminders', 'tasks', 'weather', 'news', 'quote'],
+            ]);
+        }
+
+        return response()->json($pref);
+    }
+
+    /**
+     * POST /api/brief-preferences/{phone}
+     */
+    public function updateBriefPreferences(Request $request, string $phone)
+    {
+        $validated = $request->validate([
+            'brief_time' => 'sometimes|string|regex:/^\d{2}:\d{2}$/',
+            'enabled' => 'sometimes|boolean',
+            'preferred_sections' => 'sometimes|array',
+            'preferred_sections.*' => 'string|in:reminders,tasks,weather,news,quote',
+        ]);
+
+        $pref = UserBriefPreference::updateOrCreate(
+            ['user_phone' => $phone],
+            $validated
+        );
+
+        return response()->json($pref);
     }
 }

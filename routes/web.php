@@ -51,6 +51,10 @@ Route::middleware(['auth'])->group(function () {
     // Context Memory Bridge debug endpoint
     Route::get('/api/context/{userId}', [AgentController::class, 'showContext'])->name('api.context.show');
 
+    // Daily Brief preferences API
+    Route::get('/api/brief-preferences/{phone}', [AgentController::class, 'getBriefPreferences'])->name('api.brief-preferences.show');
+    Route::post('/api/brief-preferences/{phone}', [AgentController::class, 'updateBriefPreferences'])->name('api.brief-preferences.update');
+
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     // Agents
@@ -60,7 +64,7 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/agents/{agent}/sessions/{session}', [AgentSessionController::class, 'destroy'])->name('agents.sessions.destroy');
     Route::get('/agents/{agent}/sub/{subAgent}', [AgentController::class, 'showSubAgent'])
         ->name('agents.sub-agent')
-        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro|web_search|document|user_preferences|conversation_memory|streamline|interactive_quiz|content_curator|context_memory_bridge');
+        ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro|web_search|document|user_preferences|conversation_memory|streamline|interactive_quiz|content_curator|context_memory_bridge|game_master|budget_tracker|daily_brief');
     Route::post('/agents/{agent}/sub-agent-models', [AgentController::class, 'updateSubAgentModels'])->name('agents.sub-agent-models');
 
     // Reminders
