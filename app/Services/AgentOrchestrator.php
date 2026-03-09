@@ -40,6 +40,7 @@ use App\Services\Agents\BudgetTrackerAgent;
 use App\Services\Agents\DailyBriefAgent;
 use App\Services\Agents\CollaborativeTaskAgent;
 use App\Services\Agents\RecipeAgent;
+use App\Services\Agents\TimeBlockerAgent;
 use App\Models\CollaborativeVote;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
@@ -107,6 +108,7 @@ class AgentOrchestrator
             new DailyBriefAgent(),
             new CollaborativeTaskAgent(),
             new RecipeAgent(),
+            new TimeBlockerAgent(),
         ];
 
         foreach ($agentClasses as $agent) {
