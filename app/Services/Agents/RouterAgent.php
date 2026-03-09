@@ -76,6 +76,13 @@ class RouterAgent
         // Daily brief → daily_brief
         '/\b(daily\s*brief|mon\s+brief|briefing\s+du\s+jour|r[eé]sum[eé]\s+du\s+jour|r[eé]sum[eé]\s+matinal|morning\s+brief|configure\s+brief|enable\s+brief|disable\s+brief)\b/iu'
             => ['daily_brief', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Collaborative task / vote → collaborative_task
+        '/^\/(?:vote|approve|decide)\b/iu'
+            => ['collaborative_task', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        '/\b(voter?\s+(?:pour|contre)\s+\d+|consensus|votes?\s+en\s+cours|proposer\s+|soumettre\s+|sondage|poll)\b/iu'
+            => ['collaborative_task', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        '/^(👍|👎|❓)\s*\d+\s*$/u'
+            => ['collaborative_task', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
             => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -441,6 +448,7 @@ CATALOG;
                 'game_master',
                 'budget_tracker',
                 'daily_brief',
+                'collaborative_task',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {

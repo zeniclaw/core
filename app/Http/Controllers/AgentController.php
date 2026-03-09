@@ -250,6 +250,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Resume personnalise du jour',
         ],
+        'collaborative_task' => [
+            'label' => 'Votes Equipe',
+            'icon' => '🗳️',
+            'color' => 'purple',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Votez sur des taches, decidez en groupe',
+        ],
     ];
 
     public function index(Request $request)
