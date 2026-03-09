@@ -17,7 +17,7 @@ class MoodCheckAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'humeur et bien-etre. Enregistre le niveau d\'humeur (1-5 ou emoji), detecte les tendances, identifie les heures de baisse d\'energie, fournit des recommandations personnalisees et empathiques. Commandes: mood today, mood stats [30], mood history, mood streak, mood insights, mood help.';
+        return 'Agent de suivi d\'humeur et bien-etre. Enregistre le niveau d\'humeur (1-5 ou emoji), detecte les tendances, identifie les heures de baisse d\'energie, fournit des recommandations personnalisees et empathiques. Commandes: mood today, mood stats [7|14|30], mood history, mood streak, mood weekly, mood compare, mood goal [1-5], mood goal reset, mood help.';
     }
 
     public function keywords(): array
@@ -39,14 +39,15 @@ class MoodCheckAgent extends BaseAgent
             'mood streak', 'serie humeur', 'streak humeur',
             'mood help', 'aide humeur', 'commandes humeur',
             'mood log',
-            'mood insights', 'insights humeur', 'analyse humeur',
-            'mood best', 'meilleur jour', 'pire jour',
+            'mood weekly', 'semaine humeur', 'pattern humeur', 'hebdomadaire humeur',
+            'mood goal', 'objectif humeur', 'mon objectif humeur',
+            'mood compare', 'comparer humeur', 'comparaison humeur',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -63,7 +64,7 @@ class MoodCheckAgent extends BaseAgent
             '/\bje\s+(me\s+sens|suis)\s+(bien|mal|triste|stresse|fatigue|energique|heureux|deprime|anxieux|epuise)/i',
             '/\bmood[\s_-]?stats?\b/',
             '/\bmood[\s_-]?today\b/',
-            '/\bhumeur\s+(aujourd\'hui|du\s+jour|stats?|historique|streak)\b/',
+            '/\bhumeur\s+(aujourd\'hui|du\s+jour|stats?|historique|streak|semaine)\b/',
             '/\bcomment\s+je\s+me\s+sens\b/',
             '/\bmood[\s_-]?history\b/',
             '/\bhistorique\s+humeur\b/',
@@ -72,12 +73,15 @@ class MoodCheckAgent extends BaseAgent
             '/\bmood[\s_-]?help\b/',
             '/\baide\s+humeur\b/',
             '/\bmes\s+humeurs\b/',
-            '/\bmood[\s_-]?insights?\b/',
-            '/\binsights?\s+humeur\b/',
-            '/\banalyse\s+humeur\b/',
-            '/\bmood[\s_-]?best\b/',
-            '/\bmeilleur\s+jour\b/',
             '/\bmood\s+[1-5]\b/',
+            '/\bmood[\s_-]?weekly\b/',
+            '/\bsemaine\s+humeur\b/',
+            '/\bpattern\s+humeur\b/',
+            '/\bmood[\s_-]?goal\b/',
+            '/\bobjectif\s+humeur\b/',
+            '/\bmood[\s_-]?compare\b/',
+            '/\bcomparer\s+humeur\b/',
+            '/\bcomparaison\s+humeur\b/',
         ];
 
         foreach ($patterns as $pattern) {
@@ -99,6 +103,45 @@ class MoodCheckAgent extends BaseAgent
             return AgentResult::reply($help);
         }
 
+        // "mood weekly" — pattern par jour de semaine
+        if (preg_match('/mood[\s_-]?weekly|semaine\s+humeur|pattern\s+humeur|hebdomadaire\s+humeur/i', $body)) {
+            $weekly = $this->generateWeeklyPattern($context->from);
+            $this->sendText($context->from, $weekly);
+            $this->log($context, 'Weekly pattern requested');
+            return AgentResult::reply($weekly);
+        }
+
+        // "mood compare" — comparer cette semaine vs semaine passee
+        if (preg_match('/mood[\s_-]?compare|comparer\s+humeur|comparaison\s+humeur/i', $body)) {
+            $compare = $this->generateCompare($context->from);
+            $this->sendText($context->from, $compare);
+            $this->log($context, 'Week comparison requested');
+            return AgentResult::reply($compare);
+        }
+
+        // "mood goal reset" — supprimer l'objectif
+        if (preg_match('/mood[\s_-]?goal[\s_-]?reset|reset[\s_-]?goal|supprimer\s+objectif\s+humeur/i', $body)) {
+            $resetMsg = $this->resetMoodGoal($context->from);
+            $this->sendText($context->from, $resetMsg);
+            $this->log($context, 'Mood goal reset');
+            return AgentResult::reply($resetMsg);
+        }
+
+        // "mood goal [1-5]" — definir ou consulter un objectif
+        if (preg_match('/mood[\s_-]?goal|objectif\s+humeur/i', $body)) {
+            if (preg_match('/mood[\s_-]?goal\s+([1-5])|objectif\s+humeur\s+([1-5])/i', $body, $m)) {
+                $level   = (int) ($m[1] ?: $m[2]);
+                $goalMsg = $this->setMoodGoal($context->from, $level);
+                $this->sendText($context->from, $goalMsg);
+                $this->log($context, "Mood goal set to {$level}");
+                return AgentResult::reply($goalMsg);
+            }
+            $goalMsg = $this->showMoodGoal($context->from);
+            $this->sendText($context->from, $goalMsg);
+            $this->log($context, 'Mood goal consulted');
+            return AgentResult::reply($goalMsg);
+        }
+
         // "mood today" — resume du jour
         if (preg_match('/mood[\s_-]?today|humeur\s+(aujourd\'hui|du\s+jour)/i', $body)) {
             $summary = $this->generateTodaySummary($context->from);
@@ -107,9 +150,11 @@ class MoodCheckAgent extends BaseAgent
             return AgentResult::reply($summary);
         }
 
-        // "mood stats [30]" — stats sur 7 ou 30 jours
+        // "mood stats [7|14|30]" — stats sur N jours
         if (preg_match('/mood[\s_-]?stats?|stats\s+humeur|statistiques\s+humeur/i', $body)) {
-            $days  = preg_match('/\b30\b/', $body) ? 30 : 7;
+            $days = 7;
+            if (preg_match('/\b30\b/', $body)) $days = 30;
+            elseif (preg_match('/\b14\b/', $body)) $days = 14;
             $stats = $this->generateStats($context->from, $days);
             $this->sendText($context->from, $stats);
             $this->log($context, "Mood stats requested ({$days}j)");
@@ -131,14 +176,6 @@ class MoodCheckAgent extends BaseAgent
             $this->sendText($context->from, $streakMsg);
             $this->log($context, 'Streak requested');
             return AgentResult::reply($streakMsg);
-        }
-
-        // "mood insights" — analyse approfondie des patterns
-        if (preg_match('/mood[\s_-]?insights?|insights?\s+humeur|analyse\s+humeur|mood[\s_-]?best|meilleur\s+jour/i', $body)) {
-            $insights = $this->generateInsights($context->from);
-            $this->sendText($context->from, $insights);
-            $this->log($context, 'Insights requested');
-            return AgentResult::reply($insights);
         }
 
         // Parse mood from message
@@ -169,13 +206,14 @@ class MoodCheckAgent extends BaseAgent
         $trend          = MoodLog::getDailyTrend($context->from, 7);
         $lowEnergyHours = MoodLog::detectLowEnergyHours($context->from);
         $streak         = MoodLog::getStreak($context->from);
+        $goal           = $this->getMoodGoal($context->from);
         $trendSummary   = $this->buildTrendSummary($trend);
         $trendDirection = $this->detectTrendDirection($trend);
         $contextMemory  = $this->formatContextMemoryForPrompt($context->from);
 
         // Generate empathetic response with Claude
         $response = $this->claude->chat(
-            $this->buildAnalysisMessage($moodData, $hour, $trendSummary, $trendDirection, $lowEnergyHours, $contextMemory, $context->senderName, $streak),
+            $this->buildAnalysisMessage($moodData, $hour, $trendSummary, $trendDirection, $lowEnergyHours, $contextMemory, $context->senderName, $streak, $goal),
             $this->resolveModel($context),
             $this->buildSystemPrompt()
         );
@@ -190,6 +228,7 @@ class MoodCheckAgent extends BaseAgent
             'mood_level' => $moodData['level'],
             'mood_label' => $moodData['label'],
             'streak'     => $streak,
+            'goal'       => $goal,
         ]);
     }
 
@@ -207,10 +246,16 @@ class MoodCheckAgent extends BaseAgent
             . "📊 *Consulter tes stats:*\n"
             . "  • `mood today` — resume du jour\n"
             . "  • `mood stats` — tendance 7 jours\n"
+            . "  • `mood stats 14` — tendance 14 jours\n"
             . "  • `mood stats 30` — tendance 30 jours\n"
             . "  • `mood history` — 10 dernieres entrees\n"
             . "  • `mood streak` — jours consecutifs\n"
-            . "  • `mood insights` — analyse des patterns\n\n"
+            . "  • `mood weekly` — pattern par jour de semaine\n"
+            . "  • `mood compare` — cette semaine vs semaine passee\n\n"
+            . "🎯 *Objectif:*\n"
+            . "  • `mood goal 4` — definir un objectif (1-5)\n"
+            . "  • `mood goal` — consulter ton objectif actuel\n"
+            . "  • `mood goal reset` — supprimer l'objectif\n\n"
             . "_Echelle: 1=😢 tres bas | 3=😐 neutre | 5=🤩 excellent_";
     }
 
@@ -229,10 +274,12 @@ class MoodCheckAgent extends BaseAgent
             ->get();
 
         $streak = MoodLog::getStreak($userPhone);
+        $goal   = $this->getMoodGoal($userPhone);
 
         if ($logs->isEmpty()) {
             $streakInfo = $streak > 0 ? " 🔥 Serie: {$streak} jour(s)" : '';
-            return "📋 *Humeur du jour*{$streakInfo}\n\n"
+            $goalInfo   = $goal ? " | 🎯 Objectif: {$goal}/5" : '';
+            return "📋 *Humeur du jour*{$streakInfo}{$goalInfo}\n\n"
                 . "Pas encore d'entree aujourd'hui.\n"
                 . "Enregistre ton humeur avec `mood [1-5]` ou un emoji !";
         }
@@ -252,11 +299,21 @@ class MoodCheckAgent extends BaseAgent
 
         $output .= "\n{$emoji} Moyenne du jour: *{$avg}/5*";
 
+        if ($goal) {
+            $diff = $avg - $goal;
+            if ($diff >= 0) {
+                $output .= " ✅ Objectif {$goal}/5 atteint !";
+            } else {
+                $remaining = abs(round($diff, 1));
+                $output .= " 🎯 Objectif: {$goal}/5 (−{$remaining})";
+            }
+        }
+
         return $output;
     }
 
     // ─────────────────────────────────────────────
-    // NOUVELLE COMMANDE: HISTORY
+    // COMMANDE: HISTORY
     // ─────────────────────────────────────────────
 
     public function generateHistory(string $userPhone, int $limit = 10): string
@@ -287,7 +344,7 @@ class MoodCheckAgent extends BaseAgent
     }
 
     // ─────────────────────────────────────────────
-    // NOUVELLE COMMANDE: STREAK
+    // COMMANDE: STREAK
     // ─────────────────────────────────────────────
 
     public function generateStreakMessage(string $userPhone): string
@@ -322,63 +379,190 @@ class MoodCheckAgent extends BaseAgent
     }
 
     // ─────────────────────────────────────────────
-    // COMMANDE: INSIGHTS
+    // COMMANDE: WEEKLY PATTERN
     // ─────────────────────────────────────────────
 
-    public function generateInsights(string $userPhone): string
+    public function generateWeeklyPattern(string $userPhone): string
     {
-        $tz = AppSetting::timezone();
-        $insights = MoodLog::getInsights($userPhone);
+        $pattern = MoodLog::getWeeklyPattern($userPhone);
+        $hasData = collect($pattern)->contains(fn ($d) => $d['count'] > 0);
 
-        if ($insights['total_entries'] === 0) {
-            return "💡 *Insights d'humeur*\n\n"
-                . "Pas encore assez de donnees pour generer des insights.\n"
-                . "Continue a enregistrer ton humeur avec `mood [1-5]` !";
+        if (!$hasData) {
+            return "📅 *Pattern hebdomadaire*\n\n"
+                . "Pas encore assez de donnees.\n"
+                . "Continue d'enregistrer ton humeur chaque jour pour voir ton pattern !";
         }
 
-        $output = "💡 *Insights d'humeur* ({$insights['total_entries']} entrees sur {$insights['days_tracked']}j)\n\n";
+        $output = "📅 *Pattern hebdomadaire* (4 dernieres semaines)\n\n";
 
-        // Overall average
-        $avgEmoji = $this->levelToEmoji((int) round($insights['overall_avg']));
-        $output .= "{$avgEmoji} Moyenne globale: *{$insights['overall_avg']}/5*\n\n";
-
-        // Best & worst day of week
-        if ($insights['best_day']) {
-            $output .= "📅 *Meilleur jour:* {$insights['best_day']['day']} ({$insights['best_day']['avg']}/5)\n";
-        }
-        if ($insights['worst_day']) {
-            $output .= "📅 *Jour le plus bas:* {$insights['worst_day']['day']} ({$insights['worst_day']['avg']}/5)\n";
-        }
-
-        // Peak hours
-        if (!empty($insights['peak_hours'])) {
-            $peakStr = implode('h, ', $insights['peak_hours']) . 'h';
-            $output .= "\n⏰ *Heures les plus positives:* {$peakStr}\n";
-        }
-        if (!empty($insights['low_hours'])) {
-            $lowStr = implode('h, ', $insights['low_hours']) . 'h';
-            $output .= "⚠️ *Heures basse energie:* {$lowStr}\n";
+        foreach ($pattern as $day) {
+            if ($day['avg_mood'] !== null) {
+                $filled = (int) round($day['avg_mood']);
+                $bar    = str_repeat('█', $filled) . str_repeat('░', 5 - $filled);
+                $emoji  = $day['avg_mood'] >= 4 ? '😊' : ($day['avg_mood'] >= 3 ? '😐' : '😔');
+                $output .= "{$day['day']}: {$bar} {$emoji} {$day['avg_mood']}/5 ({$day['count']}x)\n";
+            } else {
+                $output .= "{$day['day']}: ·····  —\n";
+            }
         }
 
-        // Most common mood
-        if ($insights['most_common_label']) {
-            $output .= "\n🏷️ *Humeur la plus frequente:* {$insights['most_common_label']} ({$insights['most_common_count']}x)\n";
+        // Identify best and worst days
+        $withData = array_filter($pattern, fn ($d) => $d['avg_mood'] !== null);
+        if (count($withData) >= 2) {
+            $best  = max(array_column($withData, 'avg_mood'));
+            $worst = min(array_column($withData, 'avg_mood'));
+
+            $bestDay  = collect($withData)->firstWhere('avg_mood', $best);
+            $worstDay = collect($withData)->firstWhere('avg_mood', $worst);
+
+            $output .= "\n⭐ Meilleur jour: *{$bestDay['day']}* ({$best}/5)";
+            if ($worst < $best) {
+                $output .= "\n💙 Jour difficile: *{$worstDay['day']}* ({$worst}/5)";
+            }
         }
 
-        // Volatility
-        if ($insights['volatility'] !== null) {
-            $volLabel = match (true) {
-                $insights['volatility'] <= 0.5 => 'tres stable',
-                $insights['volatility'] <= 1.0 => 'stable',
-                $insights['volatility'] <= 1.5 => 'variable',
-                default                        => 'tres variable',
-            };
-            $output .= "📉 *Variabilite:* {$volLabel} (ecart-type: {$insights['volatility']})\n";
-        }
-
-        $output .= "\n_`mood stats` pour la tendance | `mood streak` pour la serie_";
+        $output .= "\n\n_`mood compare` pour cette semaine vs semaine passee_";
 
         return $output;
+    }
+
+    // ─────────────────────────────────────────────
+    // NOUVELLE COMMANDE: COMPARE SEMAINES
+    // ─────────────────────────────────────────────
+
+    public function generateCompare(string $userPhone): string
+    {
+        $tz = AppSetting::timezone();
+        $now = Carbon::now($tz);
+
+        $thisWeekStart = $now->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $lastWeekStart = $thisWeekStart->copy()->subWeek();
+        $lastWeekEnd   = $thisWeekStart->copy()->subSecond();
+
+        $thisWeekLogs = MoodLog::where('user_phone', $userPhone)
+            ->where('created_at', '>=', $thisWeekStart)
+            ->where('created_at', '<=', $now)
+            ->get();
+
+        $lastWeekLogs = MoodLog::where('user_phone', $userPhone)
+            ->where('created_at', '>=', $lastWeekStart)
+            ->where('created_at', '<=', $lastWeekEnd)
+            ->get();
+
+        if ($thisWeekLogs->isEmpty() && $lastWeekLogs->isEmpty()) {
+            return "📊 *Comparaison semaines*\n\n"
+                . "Pas encore assez de donnees.\n"
+                . "Enregistre ton humeur chaque jour avec `mood [1-5]` !";
+        }
+
+        $thisAvg = $thisWeekLogs->isNotEmpty() ? round($thisWeekLogs->avg('mood_level'), 1) : null;
+        $lastAvg = $lastWeekLogs->isNotEmpty() ? round($lastWeekLogs->avg('mood_level'), 1) : null;
+
+        $output = "📊 *Comparaison semaines*\n\n";
+
+        if ($lastAvg !== null) {
+            $lastEmoji = $this->levelToEmoji((int) round($lastAvg));
+            $output .= "Semaine passee: {$lastEmoji} *{$lastAvg}/5* ({$lastWeekLogs->count()} entree(s))\n";
+        } else {
+            $output .= "Semaine passee: — (pas de donnees)\n";
+        }
+
+        if ($thisAvg !== null) {
+            $thisEmoji = $this->levelToEmoji((int) round($thisAvg));
+            $output .= "Cette semaine:  {$thisEmoji} *{$thisAvg}/5* ({$thisWeekLogs->count()} entree(s))\n";
+        } else {
+            $output .= "Cette semaine:  — (pas encore d'entree cette semaine)\n";
+        }
+
+        if ($thisAvg !== null && $lastAvg !== null) {
+            $diff = round($thisAvg - $lastAvg, 1);
+            if ($diff > 0) {
+                $output .= "\n📈 +{$diff} vs semaine passee — belle progression !";
+            } elseif ($diff < 0) {
+                $output .= "\n📉 {$diff} vs semaine passee — garde courage, ca va aller !";
+            } else {
+                $output .= "\n→ Stable par rapport a la semaine passee.";
+            }
+        }
+
+        $output .= "\n\n_`mood weekly` pour le pattern | `mood stats 14` pour 2 semaines_";
+
+        return $output;
+    }
+
+    // ─────────────────────────────────────────────
+    // COMMANDE: MOOD GOAL
+    // ─────────────────────────────────────────────
+
+    public function setMoodGoal(string $userPhone, int $level): string
+    {
+        $level = max(1, min(5, $level));
+        AppSetting::set('mood_goal_' . md5($userPhone), (string) $level);
+
+        $emoji = $this->levelToEmoji($level);
+        $label = $this->levelToLabel($level);
+
+        return "🎯 *Objectif d'humeur defini*\n\n"
+            . "Objectif: {$emoji} *{$level}/5* ({$label})\n\n"
+            . "Je comparerai tes entrees journalieres avec cet objectif.\n"
+            . "_`mood today` pour voir ta progression | `mood goal` pour consulter | `mood goal reset` pour supprimer_";
+    }
+
+    public function showMoodGoal(string $userPhone): string
+    {
+        $goal = $this->getMoodGoal($userPhone);
+
+        if (!$goal) {
+            return "🎯 *Objectif d'humeur*\n\n"
+                . "Aucun objectif defini.\n"
+                . "Utilise `mood goal [1-5]` pour en definir un !\n\n"
+                . "_Ex: `mood goal 4` pour viser une bonne humeur quotidienne_";
+        }
+
+        $emoji = $this->levelToEmoji($goal);
+        $label = $this->levelToLabel($goal);
+
+        // Show recent performance vs goal
+        $trend     = MoodLog::getDailyTrend($userPhone, 7);
+        $daysAbove = 0;
+        $daysTotal = 0;
+
+        foreach ($trend as $day) {
+            if ($day['avg_mood'] !== null) {
+                $daysTotal++;
+                if ($day['avg_mood'] >= $goal) {
+                    $daysAbove++;
+                }
+            }
+        }
+
+        $output = "🎯 *Objectif d'humeur*\n\n"
+            . "Objectif actuel: {$emoji} *{$goal}/5* ({$label})\n";
+
+        if ($daysTotal > 0) {
+            $output .= "\n📊 Performance 7j: *{$daysAbove}/{$daysTotal}* jours atteints";
+            $pct = round($daysAbove / $daysTotal * 100);
+            $output .= " ({$pct}%)\n";
+        }
+
+        $output .= "\n_`mood goal [1-5]` pour changer | `mood goal reset` pour supprimer | `mood today` pour le detail du jour_";
+
+        return $output;
+    }
+
+    public function resetMoodGoal(string $userPhone): string
+    {
+        AppSetting::where('key', 'mood_goal_' . md5($userPhone))->delete();
+
+        return "🎯 *Objectif d'humeur supprime*\n\n"
+            . "Ton objectif a ete reinitialise.\n"
+            . "_`mood goal [1-5]` pour en definir un nouveau_";
+    }
+
+    private function getMoodGoal(string $userPhone): ?int
+    {
+        $val = AppSetting::get('mood_goal_' . md5($userPhone));
+        return ($val !== null && $val !== '') ? (int) $val : null;
     }
 
     // ─────────────────────────────────────────────
@@ -393,60 +577,61 @@ class MoodCheckAgent extends BaseAgent
             return ['level' => $level, 'label' => $this->levelToLabel($level)];
         }
 
-        // Emoji detection — enriched map
+        // Emoji detection — enriched map (32 emojis)
         $emojiMap = [
             '😢' => ['level' => 1, 'label' => 'tres triste'],
             '😭' => ['level' => 1, 'label' => 'en pleurs'],
             '😞' => ['level' => 1, 'label' => 'triste'],
             '😩' => ['level' => 1, 'label' => 'epuise'],
             '😡' => ['level' => 1, 'label' => 'en colere'],
+            '😫' => ['level' => 1, 'label' => 'a bout'],
+            '😣' => ['level' => 1, 'label' => 'souffrant'],
+            '🥺' => ['level' => 1, 'label' => 'vulnerable'],
             '😤' => ['level' => 2, 'label' => 'frustre'],
             '😔' => ['level' => 2, 'label' => 'morose'],
             '😰' => ['level' => 2, 'label' => 'anxieux'],
             '😴' => ['level' => 2, 'label' => 'fatigue'],
+            '😟' => ['level' => 2, 'label' => 'preoccupe'],
+            '😒' => ['level' => 2, 'label' => 'mecontent'],
+            '🤕' => ['level' => 2, 'label' => 'souffrant'],
             '😐' => ['level' => 3, 'label' => 'neutre'],
             '🙂' => ['level' => 3, 'label' => 'ok'],
             '😌' => ['level' => 3, 'label' => 'tranquille'],
+            '😑' => ['level' => 3, 'label' => 'indifferent'],
+            '😶' => ['level' => 3, 'label' => 'sans expression'],
             '😊' => ['level' => 4, 'label' => 'bien'],
             '🥰' => ['level' => 4, 'label' => 'heureux'],
             '💪' => ['level' => 4, 'label' => 'energique'],
+            '🤗' => ['level' => 4, 'label' => 'chaleureux'],
+            '😃' => ['level' => 4, 'label' => 'joyeux'],
+            '😎' => ['level' => 4, 'label' => 'cool'],
             '😄' => ['level' => 5, 'label' => 'excellent'],
             '😁' => ['level' => 5, 'label' => 'super'],
             '🤩' => ['level' => 5, 'label' => 'euphorique'],
             '🎉' => ['level' => 5, 'label' => 'festif'],
+            '🥳' => ['level' => 5, 'label' => 'en fete'],
+            '🌟' => ['level' => 5, 'label' => 'rayonnant'],
         ];
 
         foreach ($emojiMap as $emoji => $data) {
             if (str_contains($body, $emoji)) return $data;
         }
 
-        // Text-based mood keywords — two-pass matching:
-        // 1st pass: multi-word phrases (longest first) to avoid "pas mal" matching "mal"
-        // 2nd pass: single-word keywords
+        // Text-based mood keywords — ordered: most specific FIRST to avoid false positives
         $moodKeywords = [
-            1 => ['horrible', 'terrible', 'tres mal', 'au plus bas', 'desespere', 'deprime', 'effondre', 'en detresse'],
+            1 => ['horrible', 'terrible', 'tres mal', 'au plus bas', 'desespere', 'deprime', 'effondre', 'en detresse', 'triste'],
             2 => ['stresse', 'fatigue', 'anxieux', 'epuise', 'morose', 'down', 'bof', 'mal', 'mauvais'],
-            3 => ['pas mal', 'neutre', 'ca va', 'ça va', 'normal', 'tranquille', 'ok', 'moyen', 'triste'],
+            3 => ['pas mal', 'neutre', 'ca va', 'ça va', 'normal', 'tranquille', 'ok', 'moyen'],
             4 => ['pas mal du tout', 'content', 'energique', 'motive', 'positif', 'heureux', 'bien', 'good'],
             5 => ['super', 'excellent', 'genial', 'top', 'parfait', 'euphorique', 'incroyable', 'amazing', 'fantastique'],
         ];
 
         $lower = mb_strtolower($body);
 
-        // Pass 1: multi-word phrases first (longest match wins), checked across all levels
-        // Order: extremes first [5,1,4,2,3] to prioritize strong signals
+        // First pass: check level 5 (most positive), then 1 (most negative), then 4, 2, 3
         foreach ([5, 1, 4, 2, 3] as $level) {
             foreach ($moodKeywords[$level] as $keyword) {
-                if (str_word_count($keyword) >= 2 && str_contains($lower, $keyword)) {
-                    return ['level' => $level, 'label' => $keyword];
-                }
-            }
-        }
-
-        // Pass 2: single-word keywords
-        foreach ([5, 1, 4, 2, 3] as $level) {
-            foreach ($moodKeywords[$level] as $keyword) {
-                if (str_word_count($keyword) === 1 && str_contains($lower, $keyword)) {
+                if (str_contains($lower, $keyword)) {
                     return ['level' => $level, 'label' => $keyword];
                 }
             }
@@ -533,11 +718,12 @@ ROLE:
 - Proposer 2-3 recommandations concretes et actionnables, adaptees a l'heure et au contexte
 - Adapter le ton : doux et soutenant si humeur basse, energique et celebratoire si haute
 - Mentionner la serie (streak) si >= 3 jours pour encourager la regularite
+- Si un objectif est defini, mentionner brievement s'il est atteint ou non
 
 FORMAT STRICT (WhatsApp):
 1. Ligne 1 : emoji humeur + phrase empathique courte (max 15 mots)
 2. Lignes 2-4 : recommandations avec emoji (une par ligne, max 12 mots chacune)
-3. Derniere ligne : phrase d'encouragement courte ou mention du streak si applicable
+3. Derniere ligne : phrase d'encouragement courte ou mention du streak/objectif si applicable
 
 REGLES:
 - Maximum 150 mots au total
@@ -548,6 +734,8 @@ REGLES:
 - Si humeur <= 2 : propose respiration profonde, pause, parler a quelqu'un, mouvements doux
 - Si humeur >= 4 : encourage a avancer sur des projets/taches importantes, partager la bonne energie
 - Si streak >= 3 : mentionne brievement la serie comme motivation
+- Si objectif defini et atteint : felicite avec un ✅
+- Si objectif defini et non atteint : encourage sans pression
 - Reponds TOUJOURS en francais
 - Evite les formules creuses comme "c'est normal de se sentir ainsi"
 PROMPT;
@@ -561,7 +749,8 @@ PROMPT;
         array $lowEnergyHours,
         string $contextMemory,
         string $senderName,
-        int $streak = 0
+        int $streak = 0,
+        ?int $goal = null
     ): string {
         $timeContext = match (true) {
             $hour >= 5  && $hour < 12 => 'matin',
@@ -578,6 +767,11 @@ PROMPT;
 
         if ($streak > 0) {
             $msg .= "- Streak: {$streak} jour(s) consecutif(s) avec entree\n";
+        }
+
+        if ($goal !== null) {
+            $status = $moodData['level'] >= $goal ? 'ATTEINT' : 'non atteint';
+            $msg .= "- Objectif quotidien: {$goal}/5 ({$status})\n";
         }
 
         if ($trendSummary) {
@@ -605,10 +799,11 @@ PROMPT;
 
     public function generateStats(string $userPhone, int $days = 7): string
     {
-        $trend        = MoodLog::getDailyTrend($userPhone, $days);
+        $trend         = MoodLog::getDailyTrend($userPhone, $days);
         $weeklyPattern = MoodLog::getWeeklyPattern($userPhone);
-        $lowHours     = MoodLog::detectLowEnergyHours($userPhone);
-        $streak       = MoodLog::getStreak($userPhone);
+        $lowHours      = MoodLog::detectLowEnergyHours($userPhone);
+        $streak        = MoodLog::getStreak($userPhone);
+        $goal          = $this->getMoodGoal($userPhone);
 
         $hasData = collect($trend)->contains(fn ($d) => $d['count'] > 0);
 
@@ -617,11 +812,15 @@ PROMPT;
                 . "Utilise `mood [1-5]` ou `mood [emoji]` pour enregistrer !";
         }
 
-        $periodLabel = $days === 30 ? '30 derniers jours' : '7 derniers jours';
+        $periodLabel = match ($days) {
+            14      => '14 derniers jours',
+            30      => '30 derniers jours',
+            default => '7 derniers jours',
+        };
         $output = "📊 *Stats d'humeur ({$periodLabel})* 📊\n\n";
 
-        // Trend chart — weekly summary for 30 days to keep it concise
-        if ($days >= 30) {
+        // Trend chart — weekly summary for 14/30 days to keep it concise
+        if ($days >= 14) {
             $weeklySummary = MoodLog::getWeeklySummary($userPhone, $days);
             $output .= "📈 TENDANCE (par semaine):\n";
             foreach ($weeklySummary as $week) {
@@ -658,6 +857,16 @@ PROMPT;
             $output .= "\n🔥 Streak actuel: *{$streak} jour(s)*\n";
         }
 
+        // Goal performance
+        if ($goal !== null) {
+            $daysAbove = collect($trend)->filter(fn ($d) => $d['avg_mood'] !== null && $d['avg_mood'] >= $goal)->count();
+            $daysTotal = collect($trend)->filter(fn ($d) => $d['avg_mood'] !== null)->count();
+            if ($daysTotal > 0) {
+                $emoji  = $this->levelToEmoji($goal);
+                $output .= "\n🎯 Objectif {$goal}/5 {$emoji}: *{$daysAbove}/{$daysTotal}* jours atteints\n";
+            }
+        }
+
         // Weekly pattern (seulement pour 7 jours)
         if ($days <= 7) {
             $patternData = array_filter($weeklyPattern, fn ($d) => $d['count'] > 0);
@@ -688,7 +897,7 @@ PROMPT;
             $output .= "\n{$emoji} Moyenne sur {$days}j: *{$avg}/5*";
         }
 
-        $output .= "\n\n💡 _'mood stats 30' pour 30 jours | 'mood history' pour le detail_";
+        $output .= "\n\n💡 _'mood stats 14' | 'mood stats 30' | 'mood weekly' | 'mood compare' | 'mood history'_";
 
         return $output;
     }
@@ -750,7 +959,7 @@ PROMPT;
             $msg .= "Pour booster ta journee :\n";
             $msg .= "🚶 10 min de marche a l'air libre\n";
             $msg .= "🎵 Ta playlist preferee !\n\n";
-            $msg .= "Ça va aller. 😊";
+            $msg .= "Ca va aller. 😊";
         } else {
             $msg .= "Super energie ! Profites-en pour :\n";
             $msg .= "🚀 Attaquer une tache importante\n";

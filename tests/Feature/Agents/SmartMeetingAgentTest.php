@@ -400,9 +400,9 @@ class SmartMeetingAgentTest extends TestCase
 
     // ── New features v1.2.0 ───────────────────────────────────────────────
 
-    public function test_version_is_1_2_0(): void
+    public function test_version_is_1_3_0(): void
     {
-        $this->assertEquals('1.2.0', $this->agent->version());
+        $this->assertEquals('1.3.0', $this->agent->version());
     }
 
     public function test_cancel_meeting_without_active_returns_error(): void
@@ -675,5 +675,205 @@ class SmartMeetingAgentTest extends TestCase
 
         $result = $agent->handle($context);
         $this->assertStringContainsString('j', $result->reply); // days shown as "Xj"
+    }
+
+    // ── New features v1.3.0 ───────────────────────────────────────────────
+
+    public function test_add_note_without_active_meeting_returns_error(): void
+    {
+        $context = $this->makeContext('reunion note decision importante');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('no_active_meeting', $result->metadata['action']);
+    }
+
+    public function test_add_note_missing_text_returns_usage(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Note Test',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(5),
+            'messages_captured' => [],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion note');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('note_missing_text', $result->metadata['action']);
+    }
+
+    public function test_add_note_stores_note_in_meeting(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Sprint Planning',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(10),
+            'messages_captured' => [],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion note decision: on livre vendredi');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('note_added', $result->metadata['action']);
+        $this->assertEquals($meeting->id, $result->metadata['meeting_id']);
+        $this->assertStringContainsString('decision: on livre vendredi', $result->metadata['note']);
+
+        $meeting->refresh();
+        $messages = $meeting->messages_captured;
+        $this->assertCount(1, $messages);
+        $this->assertEquals('note', $messages[0]['type']);
+        $this->assertStringContainsString('decision: on livre vendredi', $messages[0]['content']);
+    }
+
+    public function test_status_shows_note_count_when_notes_exist(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Mixed Meeting',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(20),
+            'messages_captured' => [
+                ['sender' => 'Alice', 'content' => 'Hello', 'timestamp' => now()->toISOString(), 'type' => 'message'],
+                ['sender' => 'Alice', 'content' => 'Note importante', 'timestamp' => now()->toISOString(), 'type' => 'note'],
+            ],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion status');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals(1, $result->metadata['messages_count']); // only regular messages
+        $this->assertStringContainsString('Notes ajoutees', $result->reply);
+        $this->assertStringContainsString('Note importante', $result->reply);
+    }
+
+    public function test_recap_without_active_meeting_returns_error(): void
+    {
+        $context = $this->makeContext('reunion recap');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('no_active_meeting', $result->metadata['action']);
+    }
+
+    public function test_recap_with_no_messages_returns_empty(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Empty Recap',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(5),
+            'messages_captured' => [],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion recap');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('recap_empty', $result->metadata['action']);
+    }
+
+    public function test_stats_shows_this_week_and_avg_messages(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Weekly Sync',
+            'status' => 'completed',
+            'started_at' => now()->subHours(2),
+            'ended_at' => now()->subHour(),
+            'messages_captured' => [
+                ['sender' => 'Alice', 'content' => 'Hello', 'timestamp' => now()->toISOString(), 'type' => 'message'],
+                ['sender' => 'Bob', 'content' => 'Hi', 'timestamp' => now()->toISOString(), 'type' => 'message'],
+                ['sender' => 'Alice', 'content' => 'Note', 'timestamp' => now()->toISOString(), 'type' => 'note'],
+            ],
+        ]);
+
+        $context = $this->makeContext('reunion stats');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('meeting_stats', $result->metadata['action']);
+        $this->assertEquals(2, $result->metadata['total_messages']); // notes excluded
+        $this->assertStringContainsString('Cette semaine', $result->reply);
+        $this->assertStringContainsString('Moyenne messages', $result->reply);
+    }
+
+    public function test_help_message_includes_new_commands(): void
+    {
+        $context = $this->makeContext('aide reunion');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('reunion note', $result->reply);
+        $this->assertStringContainsString('reunion recap', $result->reply);
     }
 }

@@ -17,7 +17,7 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
 
     public function description(): string
     {
-        return 'Recherche web en temps reel via Brave Search API. Cherche des infos actuelles, actualites, meteo, definitions, comparaisons. Fournit aussi des stats d\'utilisation API. Peut etre appele par d\'autres agents.';
+        return 'Recherche web en temps reel via Brave Search API. Cherche des infos actuelles, actualites, meteo, definitions, comparaisons, prix. Affiche un historique des recherches et les stats d\'utilisation API. Peut etre appele par d\'autres agents.';
     }
 
     public function keywords(): array
@@ -28,15 +28,16 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
             'c\'est quoi', 'qu\'est-ce que', 'definition', 'who is', 'what is',
             'meteo', 'weather', 'temps qu\'il fait', 'temperature',
             'compare', 'vs', 'versus', 'difference entre',
-            'prix de', 'combien coute', 'price of',
+            'prix de', 'combien coute', 'price of', 'tarif',
             'derniere version', 'latest', 'recent',
             'stats api', 'api usage', 'utilisation api', 'combien d\'appels',
+            'historique recherche', 'mes recherches',
         ];
     }
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -49,15 +50,26 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
         $body = trim($context->body ?? '');
 
         if (!$body) {
-            $this->sendText($context->from, "Envoie-moi ce que tu veux chercher sur le web !");
-            return AgentResult::reply("Envoie-moi ce que tu veux chercher sur le web !");
+            return $this->sendReply($context, $this->helpMessage());
         }
 
         $lower = mb_strtolower($body);
 
+        // Help command
+        if (preg_match('/^\s*(aide|help|\?)\s*$/iu', $lower)) {
+            return $this->sendReply($context, $this->helpMessage());
+        }
+
         // Stats commands
         if (preg_match('/\b(stats?\s*api|api\s*usage|utilisation\s*api|combien\s*d.appels|api\s*stats)\b/iu', $lower)) {
-            return $this->handleStats($context);
+            $days = $this->extractDays($lower, 30);
+            return $this->handleStats($context, $days);
+        }
+
+        // History command
+        if (preg_match('/\b(historique|mes\s+recherches|last\s+search(?:es)?|dernieres?\s+recherches?)\b/iu', $lower)) {
+            $limit = $this->extractNumber($lower, 10);
+            return $this->handleHistory($context, min($limit, 20));
         }
 
         // API key check
@@ -65,26 +77,31 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
         if (!$apiKey) {
             $reply = "La cle API Brave Search n'est pas configuree.\n\n"
                 . "Configure-la dans les settings:\n"
-                . "→ Cle: `brave_search_api_key`\n"
-                . "→ Gratuit: https://api.search.brave.com/register";
-            $this->sendText($context->from, $reply);
-            return AgentResult::reply($reply);
+                . "  Cle: `brave_search_api_key`\n"
+                . "  Gratuit: https://api.search.brave.com/register";
+            return $this->sendReply($context, $reply);
         }
 
-        // Detect search type
+        // Detect search type and language
         $searchType = $this->detectSearchType($lower);
+        $searchLang = $this->detectLanguage($lower, $body);
+        $freshness = ($searchType === 'news') ? 'pw' : null; // past week for news
 
         // Execute search
-        $results = $this->search($context, $body, $searchType, $apiKey);
+        $results = $this->search($context, $body, $searchType, $apiKey, $searchLang, $freshness);
 
         if ($results === null) {
-            $reply = "Desole, la recherche a echoue. Reessaie dans un instant.";
-            $this->sendText($context->from, $reply);
-            return AgentResult::reply($reply);
+            $reply = "Desole, la recherche a echoue. Verifie ta connexion ou reessaie dans un instant.\n\nTu peux aussi taper *aide* pour voir les commandes disponibles.";
+            return $this->sendReply($context, $reply);
+        }
+
+        if (empty($results)) {
+            $reply = "Aucun resultat trouve pour: *{$body}*\n\nEssaie une formulation differente ou elargis la recherche.";
+            return $this->sendReply($context, $reply);
         }
 
         // Format results with Claude
-        $reply = $this->formatResults($context, $body, $results, $searchType);
+        $reply = $this->formatResults($context, $body, $results, $searchType, $searchLang);
 
         $this->sendText($context->from, $reply);
 
@@ -92,6 +109,7 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
             'model' => $this->resolveModel($context),
             'routed_agent' => $context->routedAgent,
             'search_type' => $searchType,
+            'search_lang' => $searchLang,
             'result_count' => count($results),
             'reply' => mb_substr($reply, 0, 200),
         ]);
@@ -99,6 +117,7 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
         return AgentResult::reply($reply, [
             'model' => $this->resolveModel($context),
             'search_type' => $searchType,
+            'search_lang' => $searchLang,
             'result_count' => count($results),
         ]);
     }
@@ -152,7 +171,7 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
                 $lines[] = "   {$r['description']}";
             }
             if (!empty($r['url'])) {
-                $lines[] = "   → {$r['url']}";
+                $lines[] = "   -> {$r['url']}";
             }
         }
 
@@ -197,24 +216,97 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
 
     // ── Private methods ──
 
+    private function sendReply(AgentContext $context, string $reply): AgentResult
+    {
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
+    private function helpMessage(): string
+    {
+        return "*Recherche Web* — Commandes disponibles\n\n"
+            . "*Rechercher:*\n"
+            . "  cherche <sujet>\n"
+            . "  actu <sujet>  _(actualites recentes)_\n"
+            . "  c'est quoi <terme>  _(definition)_\n"
+            . "  compare <A> vs <B>\n"
+            . "  prix de <produit>\n"
+            . "  meteo <ville>\n\n"
+            . "*Historique:*\n"
+            . "  historique  _(10 dernieres recherches)_\n"
+            . "  historique 20  _(jusqu'a 20 recherches)_\n\n"
+            . "*Stats API:*\n"
+            . "  stats api\n"
+            . "  stats api 7j  _(7 derniers jours)_\n"
+            . "  stats api 90j  _(90 derniers jours)_\n\n"
+            . "_Note: ajoute \"en anglais\" pour forcer les resultats en anglais._";
+    }
+
     private function detectSearchType(string $lower): string
     {
-        if (preg_match('/\b(actu|actualit|news|quoi de neuf|dernières nouvelles)\b/iu', $lower)) {
+        if (preg_match('/\b(actu|actualit|news|quoi de neuf|dernieres?\s+nouvelles|breaking)\b/iu', $lower)) {
             return 'news';
         }
-        if (preg_match('/\b(meteo|weather|temps qu.il fait|temperature|pluie|soleil)\b/iu', $lower)) {
-            return 'web'; // Brave handles weather in web results
+        if (preg_match('/\b(meteo|weather|temps\s+qu.il\s+fait|temperature|pluie|soleil|precipitation)\b/iu', $lower)) {
+            return 'weather';
         }
-        if (preg_match('/\b(c.est quoi|qu.est.ce que|definition|who is|what is|wiki)\b/iu', $lower)) {
+        if (preg_match('/\b(c.est\s+quoi|qu.est.ce\s+que|definition|qui\s+est|who\s+is|what\s+is|wiki|signifie|signification)\b/iu', $lower)) {
             return 'definition';
+        }
+        if (preg_match('/\b(compare|vs\.?|versus|difference\s+entre|comparaison|meilleur\s+entre|quel\s+est\s+le\s+meilleur)\b/iu', $lower)) {
+            return 'compare';
+        }
+        if (preg_match('/\b(prix\s+de|combien\s+coute|price\s+of|tarif|cost\s+of|acheter|combien\s+vaut)\b/iu', $lower)) {
+            return 'price';
         }
         return 'web';
     }
 
-    private function search(AgentContext $context, string $query, string $type, string $apiKey): ?array
+    private function detectLanguage(string $lower, string $body): string
     {
+        // Force English if explicitly requested
+        if (preg_match('/\b(en\s+anglais|in\s+english|english\s+results?)\b/iu', $lower)) {
+            return 'en';
+        }
+
+        // Detect if query is mostly English (simple heuristic: common French words absent)
+        $frenchIndicators = ['le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'est', 'sont',
+            'je', 'tu', 'il', 'nous', 'vous', 'ils', 'et', 'ou', 'pas', 'que', 'qui'];
+        $words = preg_split('/\s+/', $lower);
+        $frenchCount = count(array_intersect($words, $frenchIndicators));
+
+        return $frenchCount > 0 ? 'fr' : 'en';
+    }
+
+    private function extractDays(string $lower, int $default): int
+    {
+        if (preg_match('/(\d+)\s*j(?:ours?)?\b/iu', $lower, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/\b7\s*(?:days?|jours?)\b/iu', $lower)) return 7;
+        if (preg_match('/\b90\s*(?:days?|jours?)\b/iu', $lower)) return 90;
+        return $default;
+    }
+
+    private function extractNumber(string $lower, int $default): int
+    {
+        if (preg_match('/\b(\d+)\b/', $lower, $m)) {
+            return (int) $m[1];
+        }
+        return $default;
+    }
+
+    private function search(
+        AgentContext $context,
+        string $query,
+        string $type,
+        string $apiKey,
+        string $lang = 'fr',
+        ?string $freshness = null
+    ): ?array {
         $count = ($type === 'news') ? 8 : 5;
-        return $this->executeBraveSearch($query, $apiKey, 'web_search', $context->agent->id, $context->from, $count, $type);
+        $braveType = ($type === 'news') ? 'news' : 'web';
+        return $this->executeBraveSearch($query, $apiKey, 'web_search', $context->agent->id, $context->from, $count, $braveType, $lang, $freshness);
     }
 
     private function executeBraveSearch(
@@ -224,7 +316,9 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
         int $agentId,
         ?string $phone,
         int $count = 5,
-        string $type = 'web'
+        string $type = 'web',
+        string $lang = 'fr',
+        ?string $freshness = null
     ): ?array {
         $endpoint = ($type === 'news')
             ? 'https://api.search.brave.com/res/v1/news/search'
@@ -233,9 +327,13 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
         $params = [
             'q' => $query,
             'count' => $count,
-            'search_lang' => 'fr',
-            'ui_lang' => 'fr-FR',
+            'search_lang' => $lang,
+            'ui_lang' => $lang === 'fr' ? 'fr-FR' : 'en-US',
         ];
+
+        if ($freshness) {
+            $params['freshness'] = $freshness;
+        }
 
         $start = microtime(true);
         $status = null;
@@ -255,6 +353,14 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
             $status = $response->status();
             $elapsed = (int) ((microtime(true) - $start) * 1000);
 
+            if ($status === 422) {
+                // Quota or invalid param — log and return empty
+                $error = "HTTP 422 (quota ou parametre invalide): " . mb_substr($response->body(), 0, 200);
+                $this->logApiCall($agentId, $phone, $callerAgent, 'brave_search', $endpoint, $params, $status, $elapsed, 0, $error);
+                Log::warning('WebSearchAgent: Brave API 422', ['body' => mb_substr($response->body(), 0, 300)]);
+                return [];
+            }
+
             if (!$response->successful()) {
                 $error = "HTTP {$status}: " . mb_substr($response->body(), 0, 200);
                 $this->logApiCall($agentId, $phone, $callerAgent, 'brave_search', $endpoint, $params, $status, $elapsed, 0, $error);
@@ -272,10 +378,11 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
 
             foreach ($items as $item) {
                 $results[] = [
-                    'title' => $item['title'] ?? '',
-                    'url' => $item['url'] ?? '',
+                    'title'       => $item['title'] ?? '',
+                    'url'         => $item['url'] ?? '',
                     'description' => $item['description'] ?? $item['meta_url']['hostname'] ?? '',
-                    'age' => $item['age'] ?? null,
+                    'age'         => $item['age'] ?? null,
+                    'source'      => $item['meta_url']['hostname'] ?? parse_url($item['url'] ?? '', PHP_URL_HOST) ?? '',
                 ];
             }
 
@@ -307,73 +414,94 @@ class WebSearchAgent extends BaseAgent implements AgentInterface
     ): void {
         try {
             ApiUsageLog::create([
-                'agent_id' => $agentId,
-                'requester_phone' => $phone,
-                'caller_agent' => $callerAgent,
-                'api_name' => $apiName,
-                'endpoint' => $endpoint,
-                'method' => 'GET',
-                'request_params' => $params,
-                'response_status' => $status,
+                'agent_id'         => $agentId,
+                'requester_phone'  => $phone,
+                'caller_agent'     => $callerAgent,
+                'api_name'         => $apiName,
+                'endpoint'         => $endpoint,
+                'method'           => 'GET',
+                'request_params'   => $params,
+                'response_status'  => $status,
                 'response_time_ms' => $elapsed,
-                'result_count' => $resultCount,
-                'error_message' => $error,
+                'result_count'     => $resultCount,
+                'error_message'    => $error,
             ]);
         } catch (\Exception $e) {
             Log::warning('WebSearchAgent: failed to log API call', ['error' => $e->getMessage()]);
         }
     }
 
-    private function formatResults(AgentContext $context, string $query, array $results, string $type): string
+    private function formatResults(AgentContext $context, string $query, array $results, string $type, string $lang = 'fr'): string
     {
-        if (empty($results)) {
-            return "Aucun resultat trouve pour: *{$query}*";
-        }
-
         $model = $this->resolveModel($context);
 
         // Build context for Claude to summarize
         $resultText = '';
         foreach ($results as $i => $r) {
             $resultText .= ($i + 1) . ". [{$r['title']}]({$r['url']})\n";
-            $resultText .= "   {$r['description']}\n";
+            if (!empty($r['source'])) {
+                $resultText .= "   Source: {$r['source']}\n";
+            }
+            if (!empty($r['description'])) {
+                $resultText .= "   {$r['description']}\n";
+            }
             if (!empty($r['age'])) {
                 $resultText .= "   (il y a {$r['age']})\n";
             }
             $resultText .= "\n";
         }
 
-        $typeLabel = match ($type) {
-            'news' => 'actualites',
-            'definition' => 'definition/explication',
-            default => 'recherche web',
+        $replyLang = $lang === 'en' ? 'en anglais' : 'en francais';
+
+        $typeInstruction = match ($type) {
+            'news' => "Resume les actualites principales en 3-5 points cles avec date si disponible. Cite les sources.",
+            'definition' => "Donne une definition claire et concise. Si c'est une personne, resume qui c'est en 2-3 phrases. Cite les sources.",
+            'compare' => "Structure la comparaison en points forts/faibles pour chaque option. Conclus avec une recommandation si possible.",
+            'price' => "Donne les prix trouves, precise la source et la date. Mentionne si les prix varient selon les vendeurs.",
+            'weather' => "Resume les conditions meteorologiques actuelles et previsions. Sois concis.",
+            default => "Synthetise les informations principales en reponse directe a la question. Cite les sources les plus fiables.",
         };
 
         $systemPrompt = <<<PROMPT
-Tu es ZeniClaw, un assistant WhatsApp. L'utilisateur a demande une {$typeLabel}.
-Voici les resultats de recherche. Synthetise-les en une reponse claire et utile.
+Tu es ZeniClaw, un assistant WhatsApp. Reponds {$replyLang}.
 
-REGLES:
-- Formate pour WhatsApp (pas de markdown complexe, utilise * pour gras, _ pour italique)
-- Sois concis mais informatif (max 500 mots)
-- Cite les sources avec les URLs
-- Si c'est une question factuelle, donne la reponse directement puis les sources
-- Si c'est des actualites, resume les points cles
-- Reponds en francais sauf si la question est en anglais
+INSTRUCTIONS DE FORMATAGE WHATSAPP:
+- Utilise * pour le gras (ex: *titre*)
+- Utilise _ pour l'italique (ex: _source_)
+- Utilise des emojis pertinents avec moderation
+- Max 400 mots, sois direct et informatif
+- Les URLs doivent etre completes (pas de raccourcissement)
+- Commence directement par la reponse, pas de phrase d'introduction
+
+INSTRUCTIONS DE CONTENU:
+{$typeInstruction}
 PROMPT;
 
-        $userMessage = "Question: {$query}\n\nResultats:\n{$resultText}";
+        $userMessage = "Question: {$query}\n\nResultats de recherche:\n{$resultText}";
 
         $reply = $this->claude->chat($userMessage, $model, $systemPrompt);
 
-        return $reply ?? "Voici les resultats pour *{$query}* :\n\n{$resultText}";
+        if (!$reply) {
+            // Fallback: plain formatted list
+            $lines = ["*Resultats pour:* {$query}\n"];
+            foreach ($results as $i => $r) {
+                $lines[] = ($i + 1) . ". *{$r['title']}*";
+                if (!empty($r['description'])) {
+                    $lines[] = "   " . mb_substr($r['description'], 0, 120);
+                }
+                $lines[] = "   {$r['url']}";
+            }
+            return implode("\n", $lines);
+        }
+
+        return $reply;
     }
 
-    private function handleStats(AgentContext $context): AgentResult
+    private function handleStats(AgentContext $context, int $days = 30): AgentResult
     {
-        $stats = self::getUsageStats($context->agent->id, 30);
+        $stats = self::getUsageStats($context->agent->id, $days);
 
-        $lines = ["*Stats API — 30 derniers jours*\n"];
+        $lines = ["*Stats API — {$days} derniers jours*\n"];
         $lines[] = "Total appels: *{$stats['total_calls']}*";
         $lines[] = "Succes: *{$stats['success_calls']}* ({$stats['success_rate']}%)";
         $lines[] = "Erreurs: *{$stats['error_calls']}*";
@@ -388,7 +516,7 @@ PROMPT;
         }
 
         if (!empty($stats['calls_by_agent'])) {
-            $lines[] = "\n*Par agent:*";
+            $lines[] = "\n*Par agent appelant:*";
             foreach ($stats['calls_by_agent'] as $agent => $count) {
                 $lines[] = "  · {$agent}: {$count}";
             }
@@ -402,9 +530,42 @@ PROMPT;
             }
         }
 
+        if ($stats['total_calls'] === 0) {
+            $lines[] = "\n_Aucun appel API enregistre sur cette periode._";
+        }
+
         $reply = implode("\n", $lines);
         $this->sendText($context->from, $reply);
 
         return AgentResult::reply($reply, ['stats' => $stats]);
+    }
+
+    private function handleHistory(AgentContext $context, int $limit = 10): AgentResult
+    {
+        $logs = ApiUsageLog::where('requester_phone', $context->from)
+            ->where('api_name', 'brave_search')
+            ->whereNull('error_message')
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get(['request_params', 'result_count', 'created_at', 'caller_agent']);
+
+        if ($logs->isEmpty()) {
+            $reply = "Aucune recherche enregistree pour ce compte.\n\nLance ta premiere recherche: *cherche <sujet>*";
+            return $this->sendReply($context, $reply);
+        }
+
+        $lines = ["*Historique — {$logs->count()} dernieres recherches*\n"];
+        foreach ($logs as $i => $log) {
+            $params = $log->request_params ?? [];
+            $query = $params['q'] ?? '(inconnu)';
+            $date = $log->created_at->format('d/m H:i');
+            $count = $log->result_count;
+            $caller = ($log->caller_agent !== 'web_search') ? " _[{$log->caller_agent}]_" : '';
+            $lines[] = ($i + 1) . ". *" . mb_substr($query, 0, 50) . "*";
+            $lines[] = "   {$date} · {$count} resultats{$caller}";
+        }
+
+        $reply = implode("\n", $lines);
+        return $this->sendReply($context, $reply);
     }
 }

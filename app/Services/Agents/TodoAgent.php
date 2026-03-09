@@ -54,12 +54,16 @@ class TodoAgent extends BaseAgent
             'a venir', 'prochains', 'cette semaine', 'echue', 'en retard', 'due soon',
             'tout cocher', 'tout fait', 'tout termine', 'check all', 'j\'ai tout fait',
             'changer categorie', 'set category', 'categorie de', 'modifier categorie',
+            'aujourd\'hui', 'ce soir', 'ce matin', 'planning du jour', 'mes taches du jour',
+            'taches travail', 'taches perso', 'taches sport', 'taches sante', 'taches courses',
+            'voir categorie', 'filtrer categorie', 'par categorie', 'filter categorie',
+            'priorites du jour', 'resume du jour', 'mes urgences',
         ];
     }
 
     public function version(): string
     {
-        return '1.4.0';
+        return '1.5.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -97,7 +101,7 @@ class TodoAgent extends BaseAgent
 
         $response = $this->claude->chat(
             "Message: \"{$context->body}\"\n\n{$listsContext}\n\nTous les todos:\n{$listText}\n\nDate actuelle: " . now(AppSetting::timezone())->format('Y-m-d H:i (l)') . $contextHint,
-            'claude-haiku-4-5-20251001',
+            $this->resolveModel($context),
             $this->buildPrompt()
         );
 
@@ -279,6 +283,12 @@ class TodoAgent extends BaseAgent
 
             case 'set_category':
                 return $this->handleSetCategory($context, $todos, $items, $listName, $newCategory);
+
+            case 'filter_category':
+                return $this->handleFilterCategory($context, $category ?? $newCategory, $listName);
+
+            case 'today':
+                return $this->handleToday($context);
 
             case 'list':
                 break;
@@ -790,6 +800,174 @@ class TodoAgent extends BaseAgent
     }
 
     /**
+     * Filter and display tasks belonging to a specific category.
+     */
+    private function handleFilterCategory(AgentContext $context, ?string $category, ?string $listName): AgentResult
+    {
+        if (!$category || trim($category) === '') {
+            // List available categories
+            $cats = Todo::where('requester_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->whereNotNull('category')
+                ->distinct()
+                ->pluck('category')
+                ->sort()
+                ->values();
+
+            if ($cats->isEmpty()) {
+                $reply = "🏷️ Aucune catégorie définie. Ajoute une tâche avec une catégorie, ex: \"ajoute rapport catégorie travail\"";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'todo_filter_category_no_cats']);
+            }
+
+            $lines = ["🏷️ *Tes catégories :*", ''];
+            foreach ($cats as $cat) {
+                $emoji   = $this->getCategoryEmoji($cat);
+                $count   = Todo::where('requester_phone', $context->from)
+                    ->where('agent_id', $context->agent->id)
+                    ->where('category', $cat)
+                    ->where('is_done', false)
+                    ->count();
+                $lines[] = "{$emoji} *" . ucfirst($cat) . "* — {$count} à faire";
+            }
+            $lines[] = '';
+            $lines[] = "_Dis \"mes tâches travail\" pour filtrer par catégorie._";
+
+            $reply = implode("\n", $lines);
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_filter_category_list']);
+        }
+
+        $dbQuery = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('category', $category)
+            ->orderBy('is_done')
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->orderBy('due_at')
+            ->orderBy('id');
+
+        if ($listName) {
+            $dbQuery->where('list_name', $listName);
+        }
+
+        $results = $dbQuery->get();
+        $emoji   = $this->getCategoryEmoji($category);
+        $scope   = $listName ? " dans *{$listName}*" : '';
+
+        if ($results->isEmpty()) {
+            $reply = "{$emoji} Aucune tâche dans la catégorie *{$category}*{$scope}.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_filter_category_empty']);
+        }
+
+        $done    = $results->where('is_done', true)->count();
+        $total   = $results->count();
+        $pending = $total - $done;
+
+        $lines = ["{$emoji} *Catégorie " . ucfirst($category) . "{$scope}* — {$done}/{$total} ✅" . ($pending > 0 ? " ({$pending} à faire)" : '')];
+
+        foreach ($results->values() as $i => $todo) {
+            $listHint = (!$listName && $todo->list_name) ? " _({$todo->list_name})_" : '';
+            $lines[]  = ($i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: filter_category", ['category' => $category, 'count' => $total]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_filter_category', 'count' => $total]);
+    }
+
+    /**
+     * Smart daily overview: overdue + due today + high-priority pending (no deadline).
+     */
+    private function handleToday(AgentContext $context): AgentResult
+    {
+        $now         = now(AppSetting::timezone());
+        $endOfDay    = $now->copy()->endOfDay()->utc();
+
+        // Overdue (due_at in the past, not done)
+        $overdue = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', $now->copy()->startOfDay()->utc())
+            ->orderBy('due_at')
+            ->get();
+
+        // Due today (due_at today, not done)
+        $dueToday = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->whereNotNull('due_at')
+            ->where('due_at', '>=', $now->copy()->startOfDay()->utc())
+            ->where('due_at', '<=', $endOfDay)
+            ->orderBy('due_at')
+            ->get();
+
+        // High-priority pending with no due date
+        $urgent = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->where('priority', 'high')
+            ->whereNull('due_at')
+            ->orderBy('id')
+            ->limit(5)
+            ->get();
+
+        if ($overdue->isEmpty() && $dueToday->isEmpty() && $urgent->isEmpty()) {
+            $reply = "🌟 *Planning du jour*\n\nAucune tâche urgente pour aujourd'hui ! Tout est sous contrôle.\n\n_\"mes tâches de la semaine\" pour voir les prochaines échéances._";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_today_empty']);
+        }
+
+        $dateStr = $now->isoFormat('dddd D MMMM');
+        $lines   = ["📅 *Planning du jour — {$now->format('d/m')}*", ''];
+
+        if ($overdue->isNotEmpty()) {
+            $lines[] = "⚠️ *En retard ({$overdue->count()}) :*";
+            foreach ($overdue->values() as $i => $todo) {
+                $listHint = $todo->list_name ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+            $lines[] = '';
+        }
+
+        if ($dueToday->isNotEmpty()) {
+            $lines[] = "⏰ *Pour aujourd'hui ({$dueToday->count()}) :*";
+            $offset  = $overdue->count();
+            foreach ($dueToday->values() as $i => $todo) {
+                $listHint = $todo->list_name ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($offset + $i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+            $lines[] = '';
+        }
+
+        if ($urgent->isNotEmpty()) {
+            $lines[] = "🔴 *Urgences sans échéance ({$urgent->count()}) :*";
+            $offset  = $overdue->count() + $dueToday->count();
+            foreach ($urgent->values() as $i => $todo) {
+                $listHint = $todo->list_name ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($offset + $i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+            $lines[] = '';
+        }
+
+        $total   = $overdue->count() + $dueToday->count() + $urgent->count();
+        $lines[] = "_{$total} tâche(s) à traiter aujourd'hui._";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: today", [
+            'overdue'   => $overdue->count(),
+            'due_today' => $dueToday->count(),
+            'urgent'    => $urgent->count(),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_today', 'count' => $total]);
+    }
+
+    /**
      * Display usage help.
      */
     private function handleHelp(AgentContext $context): AgentResult
@@ -833,6 +1011,11 @@ class TodoAgent extends BaseAgent
             . "\"mes listes\"\n\n"
             . "*Stats :*\n"
             . "\"mes stats\" / \"stats de la liste courses\"\n\n"
+            . "*Planning du jour :*\n"
+            . "\"planning du jour\" / \"mes tâches aujourd'hui\"\n\n"
+            . "*Filtrer par catégorie :*\n"
+            . "\"mes tâches travail\" / \"voir catégorie sport\"\n"
+            . "\"mes catégories\" (liste toutes les catégories)\n\n"
             . "*Priorités :* urgent / normal / pas urgent\n"
             . "*Échéances :* \"pour vendredi\", \"avant le 15 mars\"\n"
             . "*Récurrences :* \"tous les jours à 8h\", \"chaque lundi\"";
@@ -850,7 +1033,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|due_soon|check_all|uncheck_all|set_category|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "new_category": "categorie" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null, "days": 7}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|due_soon|check_all|uncheck_all|set_category|filter_category|today|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "new_category": "categorie" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null, "days": 7}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
@@ -872,6 +1055,8 @@ ACTIONS:
 - "check_all": cocher TOUTES les taches en attente d'une liste (ou globalement). items = []. list_name = la liste (null = global). Utilise pour "j'ai tout fait", "tout cocher", "tout termine dans courses".
 - "uncheck_all": decocher TOUTES les taches d'une liste (ou globalement). items = []. list_name = la liste (null = global). Utilise pour "recommencer la liste", "tout remettre a zero".
 - "set_category": changer la categorie d'une tache existante. items = [numero]. new_category = nouvelle categorie (string) ou null pour supprimer. list_name = la liste concernee.
+- "filter_category": afficher les taches d'une categorie specifique. items = []. category = nom de la categorie (null = lister les categories disponibles). list_name = null (global) ou nom de liste. Utilise pour "mes taches travail", "voir catégorie sport", "mes categories".
+- "today": afficher le planning du jour (en retard + echeances du jour + urgences sans echeance). items = []. list_name = null. Utilise pour "planning du jour", "mes taches aujourd'hui", "qu'est-ce que j'ai a faire aujourd'hui", "mes urgences".
 - "help": afficher l'aide des commandes disponibles. items = []. list_name = null.
 
 GESTION DES LISTES:
@@ -981,6 +1166,25 @@ EXEMPLES:
 - "recommencer la liste courses" → {"action": "uncheck_all", "items": [], "list_name": "courses", "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 - "change categorie du 2 en travail" → {"action": "set_category", "items": [2], "list_name": null, "target_list": null, "new_title": null, "new_category": "travail", "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 - "supprime categorie du 3" → {"action": "set_category", "items": [3], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "mes taches travail" → {"action": "filter_category", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": "travail", "priority": "normal", "due_at": null, "days": 7}
+- "voir categorie sport" → {"action": "filter_category", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": "sport", "priority": "normal", "due_at": null, "days": 7}
+- "mes categories" → {"action": "filter_category", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "planning du jour" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "mes taches aujourd'hui" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "qu'est-ce que j'ai a faire aujourd'hui" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+
+FILTER_CATEGORY:
+- "mes taches travail" → filter_category, category: "travail", list_name: null
+- "voir categorie sport" → filter_category, category: "sport", list_name: null
+- "taches sante dans courses" → filter_category, category: "sante", list_name: "courses"
+- "mes categories" ou "liste des categories" → filter_category, category: null, list_name: null
+
+TODAY:
+- "planning du jour" → today
+- "mes taches d'aujourd'hui" → today
+- "qu'est-ce que j'ai a faire" → today
+- "mes urgences" → today (shows high-priority + overdue + due today)
+- "resume du jour" → today
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -1281,12 +1485,28 @@ PROMPT;
 
         $rate  = round(($completed / $total) * 100);
         $title = $listName ? "Tes stats ({$listName}) :" : "Tes stats :";
+
+        // Completed this week (updated_at >= start of week)
+        $weekStart       = now(AppSetting::timezone())->startOfWeek(\Carbon\Carbon::MONDAY)->utc();
+        $completedQuery  = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', true)
+            ->where('updated_at', '>=', $weekStart);
+        if ($listName) {
+            $completedQuery->where('list_name', $listName);
+        }
+        $completedThisWeek = $completedQuery->count();
+
         $lines = [
             "📊 *{$title}*",
             "✅ {$completed} complétée" . ($completed > 1 ? 's' : ''),
             "⬜ {$pending} en cours",
             "📈 Taux de complétion : {$rate}%",
         ];
+
+        if ($completedThisWeek > 0) {
+            $lines[] = "🗓️ Cette semaine : {$completedThisWeek} complétée" . ($completedThisWeek > 1 ? 's' : '');
+        }
 
         // Overdue count
         $now     = now(AppSetting::timezone());

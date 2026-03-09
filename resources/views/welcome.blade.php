@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 {{-- SEO --}}
-<title>ZeniClaw — Plateforme IA WhatsApp Self-Hosted | 21 Agents Autonomes</title>
-<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 21 agents specialises. Gerez vos projets, finances, rappels et plus depuis un simple chat WhatsApp. On-prem ou Cloud, propulse par Claude, GPT-4 et Ollama.">
+<title>ZeniClaw — Plateforme IA WhatsApp Self-Hosted | 23 Agents Autonomes</title>
+<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 23 agents specialises. Gerez vos projets, finances, rappels et plus depuis un simple chat WhatsApp. On-prem ou Cloud, propulse par Claude, GPT-4 et Ollama.">
 <meta name="keywords" content="zeniclaw, whatsapp ia, chatbot whatsapp, ai agents, self-hosted, open source, claude, gpt-4, ollama, on-prem, assistant ia, automatisation whatsapp, crm whatsapp">
 <meta name="author" content="ZeniBiz">
 <meta name="robots" content="index, follow">
@@ -16,7 +16,7 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ url('/') }}">
 <meta property="og:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
-<meta property="og:description" content="Plateforme IA self-hosted avec 20 agents autonomes. Projets, finances, rappels, code reviews, flashcards — tout depuis WhatsApp. On-prem ou Cloud. Open source et gratuit.">
+<meta property="og:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Projets, finances, rappels, code reviews, flashcards — tout depuis WhatsApp. On-prem ou Cloud. Open source et gratuit.">
 <meta property="og:image" content="{{ url('/og-image.php') }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,7 +27,7 @@
 {{-- Twitter Card --}}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
-<meta name="twitter:description" content="Plateforme IA self-hosted avec 20 agents autonomes. Projets, finances, rappels, code reviews — tout depuis WhatsApp.">
+<meta name="twitter:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Projets, finances, rappels, code reviews — tout depuis WhatsApp.">
 <meta name="twitter:image" content="{{ url('/og-image.php') }}">
 
 {{-- Favicon --}}
@@ -39,7 +39,7 @@
   "@@context": "https://schema.org",
   "@@type": "SoftwareApplication",
   "name": "ZeniClaw",
-  "description": "Plateforme IA open source et self-hosted avec 21 agents specialises accessibles via WhatsApp. On-prem ou Cloud.",
+  "description": "Plateforme IA open source et self-hosted avec 23 agents specialises accessibles via WhatsApp. On-prem ou Cloud.",
   "url": "{{ url('/') }}",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Linux",
@@ -54,7 +54,7 @@
     "url": "https://www.zenibiz.com"
   },
   "screenshot": "{{ url('/og-image.php') }}",
-  "featureList": "21 AI Agents, WhatsApp Integration, Self-Hosted, Open Source, On-Prem LLM, Ollama, Agentic Loop, Web Search, API Tracking, Confidence Routing, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Flashcards, Reminders, Persistent Memory"
+  "featureList": "23 AI Agents, WhatsApp Integration, Self-Hosted, Open Source, On-Prem LLM, Ollama, Agentic Loop, Web Search, API Tracking, Confidence Routing, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Flashcards, Reminders, Document Generation, Games, Persistent Memory"
 }
 </script>
 
@@ -405,14 +405,14 @@ footer {
   <div class="hero-content">
     <div class="hero-badge fade-up">
       <span class="dot"></span>
-      <span>v2.25 &middot; Open Source &middot; Self-Hosted &middot; On-Prem Ready</span>
+      <span>v2.26 &middot; Open Source &middot; Self-Hosted &middot; On-Prem Ready</span>
     </div>
     <h1 class="fade-up d1">
       Your AI Army,<br>
       <span class="gradient-text">One WhatsApp Away</span>
     </h1>
     <p class="fade-up d2">
-      ZeniClaw is a self-hosted AI platform with 21 specialized agents that turn your WhatsApp into an autonomous command center. Cloud or On-Prem LLMs, agentic tool loops, persistent memory &mdash; all from a single chat.
+      ZeniClaw is a self-hosted AI platform with 23 specialized agents that turn your WhatsApp into an autonomous command center. Cloud or On-Prem LLMs, agentic tool loops, persistent memory &mdash; all from a single chat.
     </p>
     <div class="hero-actions fade-up d3">
       @auth
@@ -443,7 +443,7 @@ footer {
 <section style="padding-top: 0;">
   <div class="section-inner">
     <div class="stats-row">
-      <div class="stat-box fade-up"><div class="stat-number">21</div><div class="stat-label">AI Agents</div></div>
+      <div class="stat-box fade-up"><div class="stat-number">23</div><div class="stat-label">AI Agents</div></div>
       <div class="stat-box fade-up d1"><div class="stat-number">3+</div><div class="stat-label">LLM Providers</div></div>
       <div class="stat-box fade-up d2"><div class="stat-number">5</div><div class="stat-label">Docker Containers</div></div>
       <div class="stat-box fade-up d3"><div class="stat-number">100%</div><div class="stat-label">Self-Hosted</div></div>
@@ -457,7 +457,7 @@ footer {
     <h2 class="section-title">Everything you need, <span class="gradient-text">built in</span></h2>
     <p class="section-desc">A full-stack AI platform that goes way beyond chatbots. Every feature runs on your own infrastructure, your data never leaves your server.</p>
     <div class="features-grid">
-      <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>21 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, meeting notes, habits, pomodoro, and more. Each agent has its own memory and tools.</p></div>
+      <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>23 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, document generation, meeting notes, habits, games, and more. Each agent has its own memory and tools.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x1F500;</div><h3>Agentic Loop</h3><p>LLM-driven decision loop with tool usage. Agents autonomously decide which tools to call, chain API operations, and iterate up to 10 times to complete complex tasks without human intervention.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon cyan">&#x1F5A5;</div><h3>On-Prem LLMs (Ollama)</h3><p>Run models locally with the built-in Ollama container. Download Qwen 2.5, CodeLlama, or any model directly from the UI. Zero API costs, full privacy, no data leaves your server.</p></div>
       <div class="feature-card"><div class="feature-icon green">&#x1F4AC;</div><h3>WhatsApp + Web Chat</h3><p>Native Baileys integration &mdash; no paid APIs. Full multimodal support: text, images, voice, PDFs. Plus a built-in web chat panel on the dashboard for instant testing.</p></div>
@@ -476,7 +476,7 @@ footer {
 <section id="agents" style="background: var(--bg-secondary);">
   <div class="section-inner">
     <span class="section-label">// agents</span>
-    <h2 class="section-title">21 Specialized <span class="gradient-text">AI Agents</span></h2>
+    <h2 class="section-title">23 Specialized <span class="gradient-text">AI Agents</span></h2>
     <p class="section-desc">Each agent is purpose-built with its own system prompt, tool access, and isolated memory. The Router Agent uses confidence scoring and conversation history for intelligent contextual dispatch.</p>
     <div class="agents-grid">
       <div class="agent-chip"><div class="agent-emoji">&#x1F4AC;</div><div class="agent-info"><h4>ChatAgent</h4><p>General conversation & multimodal</p></div></div>
@@ -498,6 +498,8 @@ footer {
       <div class="agent-chip"><div class="agent-emoji">&#x1F4F7;</div><div class="agent-info"><h4>ScreenshotAgent</h4><p>OCR, annotation & comparison</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F3AF;</div><div class="agent-info"><h4>HabitAgent</h4><p>Habit tracking & streaks</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F345;</div><div class="agent-info"><h4>PomodoroAgent</h4><p>Focus timer & productivity</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4C4;</div><div class="agent-info"><h4>DocumentAgent</h4><p>PDF, Excel & document generation</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F3AE;</div><div class="agent-info"><h4>HangmanGameAgent</h4><p>Word games & entertainment</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F50D;</div><div class="agent-info"><h4>WebSearchAgent</h4><p>Real-time web search & API stats</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F500;</div><div class="agent-info"><h4>RouterAgent</h4><p>Confidence-scored auto-dispatch</p></div></div>
     </div>
@@ -524,7 +526,7 @@ footer {
   |  Dashboard|------&gt;|  <span class="hl-blue">App</span> (port 8080)                |       |  <span class="hl-purple">OpenAI</span>    |
   |  Panel    |       |  Laravel 12 + PHP 8.4            |------&gt;|  GPT-4o     |
   +-----------+       |                                  |       +-------------+
-                      |  <span class="hl-amber">RouterAgent</span> --&gt; 21 Agents      |
+                      |  <span class="hl-amber">RouterAgent</span> --&gt; 23 Agents      |
                       |  <span class="hl-amber">Agentic Loop</span> (tool chaining)   |       +-------------+
                       |  <span class="hl-amber">SubAgents</span> (Claude Code CLI)    |       |  <span class="hl-cyan">Ollama</span>    |
                       |  <span class="hl-amber">Knowledge Store</span> (per-user)     |&lt;-----&gt;|  Qwen 2.5  |
@@ -562,6 +564,17 @@ footer {
     <h2 class="section-title">What's <span class="gradient-text">new</span></h2>
     <p class="section-desc">Recent updates and improvements to the platform.</p>
     <div class="changelog">
+      <div class="changelog-item">
+        <div class="changelog-version">v2.26</div>
+        <div class="changelog-content">
+          <h4>Agent Auto-Improvements, DocumentAgent & HangmanGameAgent</h4>
+          <p>
+            <span class="changelog-tag tag-feat">feat</span><strong>23 agents</strong> &mdash; added <strong>DocumentAgent</strong> (PDF, Excel generation) and <strong>HangmanGameAgent</strong> (word games) to the roster.<br>
+            <span class="changelog-tag tag-feat">feat</span>Auto-improved <strong>MoodCheckAgent</strong>, <strong>ReminderAgent</strong>, <strong>SmartMeetingAgent</strong>, <strong>TodoAgent</strong> and <strong>WebSearchAgent</strong> with richer prompts and expanded capabilities.<br>
+            <span class="changelog-tag tag-feat">feat</span>Updated homepage with all 23 agents, refreshed SEO metadata and architecture diagram.
+          </p>
+        </div>
+      </div>
       <div class="changelog-item">
         <div class="changelog-version">v2.25</div>
         <div class="changelog-content">
@@ -730,7 +743,7 @@ footer {
         <li><a href="{{ route('login') }}">Sign In</a></li>
       @endauth
     </ul>
-    <p class="footer-copy">&copy; {{ date('Y') }} ZeniClaw v2.25 by ZeniBiz &mdash; Self-hosted AI WhatsApp Platform</p>
+    <p class="footer-copy">&copy; {{ date('Y') }} ZeniClaw v2.26 by ZeniBiz &mdash; Self-hosted AI WhatsApp Platform</p>
   </div>
 </footer>
 
