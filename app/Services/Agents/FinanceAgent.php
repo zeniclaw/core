@@ -45,12 +45,14 @@ class FinanceAgent extends BaseAgent
             'aide finance', 'help finance', 'commandes finance',
             'projection', 'prevision', 'fin de mois',
             'detail', 'details', 'analyse categorie', 'category detail',
+            'semaine', 'hebdo', 'hebdomadaire', 'resume semaine', 'cette semaine', 'semaine en cours',
+            'top depenses', 'grosses depenses', 'plus grosses depenses', 'grandes depenses', 'depenses importantes',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -73,6 +75,9 @@ class FinanceAgent extends BaseAgent
             '/\b(aide|help)\s+finance\b/iu',
             '/\bprojection\b/i',
             '/\bdetail\s+\w+/iu',
+            '/\b(semaine|hebdo|hebdomadaire)\b/iu',
+            '/\btop\s+depenses?\b/iu',
+            '/\b(grosses?|grandes?)\s+depenses?\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -182,6 +187,20 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'alerts'];
         }
 
+        // resume semaine / cette semaine / hebdo
+        if (preg_match('/\b(semaine|hebdo|hebdomadaire|cette\s+semaine|resume\s+semaine|semaine\s+en\s+cours)\b/iu', $lower)) {
+            return ['action' => 'weekly_summary'];
+        }
+
+        // top depenses / grosses depenses
+        if (preg_match('/\b(top\s+(?:\d{1,2}\s+)?depenses?|grosses?\s+depenses?|grandes?\s+depenses?|depenses?\s+importantes?|plus\s+grosses?\s+depenses?|plus\s+grandes?\s+depenses?)\b/iu', $lower)) {
+            $limit = 5;
+            if (preg_match('/top\s+(\d{1,2})\s+depenses?/iu', $lower, $m)) {
+                $limit = min((int) $m[1], 10);
+            }
+            return ['action' => 'top_expenses', 'limit' => $limit];
+        }
+
         return null;
     }
 
@@ -203,6 +222,8 @@ class FinanceAgent extends BaseAgent
             'delete_last'     => $this->deleteLastExpense($context->from),
             'projection'      => $this->getProjectionReport($context->from),
             'category_detail' => $this->getCategoryDetail($context->from, $command['category']),
+            'weekly_summary'  => $this->getWeeklySummary($context->from),
+            'top_expenses'    => $this->getTopExpenses($context->from, $command['limit'] ?? 5),
             'help'            => $this->getHelp(),
             default           => null,
         };
@@ -325,6 +346,19 @@ Exemples:
 
 CATEGORIES SUGGEREES:
 alimentation, transport, loisirs, sante, logement, shopping, restaurant, abonnements, education, autres
+
+COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
+- depense [montant] [categorie] [description] — enregistrer une depense
+- budget [categorie] [montant] — definir un budget mensuel
+- solde — voir solde et budgets
+- stats — rapport mensuel
+- historique [n] — dernieres depenses
+- detail [categorie] — analyse d'une categorie
+- projection — prevision fin de mois
+- resume semaine — depenses de la semaine en cours
+- top depenses — top 5 depenses individuelles du mois
+- alertes — alertes de depassement
+- supprimer derniere depense — annuler la derniere depense
 
 CONSEILS:
 - Si le budget est serre (>80%), propose des pistes d'economies concretes
@@ -464,11 +498,15 @@ PROMPT;
 
     private function getBalance(string $userPhone): string
     {
+        $today      = Carbon::now();
         $totalSpent = Expense::calculateTotalMonthlySpent($userPhone);
         $budgets    = Budget::where('user_phone', $userPhone)->get()->keyBy('category');
-        $month      = Carbon::now()->translatedFormat('F Y');
+        $month      = $today->translatedFormat('F Y');
+        $dayOfMonth = $today->day;
+        $daysInMonth = $today->daysInMonth;
 
-        $response  = "💰 *Solde financier - {$month}*\n\n";
+        $response  = "💰 *Solde financier - {$month}*\n";
+        $response .= "📅 Jour {$dayOfMonth}/{$daysInMonth}\n\n";
         $response .= "📉 Total depenses: *{$totalSpent}€*\n";
 
         if ($budgets->isNotEmpty()) {
@@ -604,7 +642,14 @@ PROMPT;
         $monthlySpent = Expense::calculateMonthlySpent($userPhone, $category, $month);
         $average3m    = Expense::getAverageForCategory($userPhone, $category, 3);
 
-        // Recent expenses for this category
+        // Total count for the month
+        $monthlyCount = Expense::where('user_phone', $userPhone)
+            ->where('category', $category)
+            ->whereYear('date', $month->year)
+            ->whereMonth('date', $month->month)
+            ->count();
+
+        // Recent expenses for this category (last 5)
         $recentExpenses = Expense::where('user_phone', $userPhone)
             ->where('category', $category)
             ->whereYear('date', $month->year)
@@ -619,9 +664,9 @@ PROMPT;
                 . "Enregistre une depense: *depense [montant] {$category}*";
         }
 
-        $count    = $recentExpenses->count();
+        $shownCount = $recentExpenses->count();
         $response = "📂 *Detail: {$category}* — " . $month->translatedFormat('F Y') . "\n\n";
-        $response .= "💳 Total ce mois: *{$monthlySpent}€*\n";
+        $response .= "💳 Total ce mois: *{$monthlySpent}€* ({$monthlyCount} depense(s))\n";
         $response .= "📊 Moy. mensuelle (3 mois): {$average3m}€\n";
 
         // Trend
@@ -641,9 +686,10 @@ PROMPT;
             $response .= "{$icon} Budget: {$check['spent']}€/{$check['limit']}€ {$bar}\n";
         }
 
-        // Recent entries
+        // Recent entries (up to 5 most recent)
         if ($recentExpenses->isNotEmpty()) {
-            $response .= "\n📋 *{$count} derniere(s) depense(s) ce mois:*\n";
+            $suffix = $monthlyCount > 5 ? " _(sur {$monthlyCount})_" : '';
+            $response .= "\n📋 *{$shownCount} derniere(s) depense(s) ce mois{$suffix}:*\n";
             foreach ($recentExpenses as $expense) {
                 $date = Carbon::parse($expense->date);
                 $dateStr = $date->isToday()
@@ -686,7 +732,9 @@ PROMPT;
                 . "Commence avec: *depense [montant] [categorie]*";
         }
 
-        $response = "📋 *{$limit} dernieres depenses*\n\n";
+        $actualCount = $expenses->count();
+        $title = $actualCount < $limit ? "{$actualCount} depense(s)" : "{$limit} dernieres depenses";
+        $response = "📋 *{$title}*\n\n";
 
         $currentDate = null;
         foreach ($expenses as $expense) {
@@ -802,10 +850,97 @@ PROMPT;
             . "  `historique` — 10 dernieres depenses\n"
             . "  `historique 5` — 5 dernieres depenses\n"
             . "  `detail alimentation` — analyse d'une categorie\n"
-            . "  `projection` — prevision fin de mois\n\n"
+            . "  `projection` — prevision fin de mois\n"
+            . "  `resume semaine` — depenses de la semaine\n"
+            . "  `top depenses` — top 5 depenses du mois\n\n"
             . "🗑️ *Annuler:*\n"
             . "  `supprimer derniere depense`\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
+    }
+
+    private function getWeeklySummary(string $userPhone): string
+    {
+        $today       = Carbon::now();
+        $startOfWeek = $today->copy()->startOfWeek(Carbon::MONDAY);
+        $daysElapsed = $startOfWeek->diffInDays($today) + 1;
+
+        $categories = Expense::where('user_phone', $userPhone)
+            ->whereBetween('date', [$startOfWeek->toDateString(), $today->toDateString()])
+            ->selectRaw('category, SUM(amount) as total, COUNT(*) as count')
+            ->groupBy('category')
+            ->orderByDesc('total')
+            ->get();
+
+        $totalWeek = round((float) $categories->sum('total'), 2);
+        $dailyAvg  = $daysElapsed > 0 ? round($totalWeek / $daysElapsed, 2) : 0;
+
+        $weekLabel = $startOfWeek->translatedFormat('d M') . ' - ' . $today->translatedFormat('d M');
+        $response  = "📅 *Resume semaine* ({$weekLabel})\n";
+        $response .= "Jour " . $today->translatedFormat('l') . " — {$daysElapsed}/7 jour(s)\n\n";
+        $response .= "💳 Total: *{$totalWeek}€*\n";
+        $response .= "📊 Moyenne: {$dailyAvg}€/jour\n";
+
+        if ($categories->isEmpty()) {
+            $response .= "\n_Aucune depense cette semaine._";
+            return $response;
+        }
+
+        $response .= "\n📈 *Par categorie:*\n";
+        foreach ($categories as $cat) {
+            $pct      = $totalWeek > 0 ? round(($cat['total'] / $totalWeek) * 100, 1) : 0;
+            $response .= "  💳 *{$cat['category']}*: {$cat['total']}€ ({$cat['count']}x) — {$pct}%\n";
+        }
+
+        // Compare with same period last week
+        $lastWeekStart = $startOfWeek->copy()->subWeek();
+        $lastWeekEnd   = $today->copy()->subWeek();
+        $lastWeekTotal = round((float) Expense::where('user_phone', $userPhone)
+            ->whereBetween('date', [$lastWeekStart->toDateString(), $lastWeekEnd->toDateString()])
+            ->sum('amount'), 2);
+
+        if ($lastWeekTotal > 0) {
+            $diff  = round($totalWeek - $lastWeekTotal, 2);
+            $trend = $diff > 0 ? "📈 +{$diff}€ vs sem. precedente" : "📉 {$diff}€ vs sem. precedente";
+            $response .= "\n{$trend}";
+        }
+
+        return $response;
+    }
+
+    private function getTopExpenses(string $userPhone, int $limit = 5): string
+    {
+        $limit    = max(1, min($limit, 10));
+        $month    = Carbon::now();
+        $expenses = Expense::where('user_phone', $userPhone)
+            ->whereYear('date', $month->year)
+            ->whereMonth('date', $month->month)
+            ->orderByDesc('amount')
+            ->limit($limit)
+            ->get();
+
+        $response = "🏆 *Top {$limit} depenses - " . $month->translatedFormat('F Y') . "*\n\n";
+
+        if ($expenses->isEmpty()) {
+            $response .= "_Aucune depense ce mois._\n";
+            $response .= "Commence avec: *depense [montant] [categorie]*";
+            return $response;
+        }
+
+        foreach ($expenses as $i => $expense) {
+            $date    = Carbon::parse($expense->date);
+            $dateStr = $date->isToday()
+                ? "Aujourd'hui"
+                : ($date->isYesterday() ? 'Hier' : $date->translatedFormat('d M'));
+            $desc     = $expense->description ? " — {$expense->description}" : '';
+            $response .= ($i + 1) . ". *{$expense->amount}€* {$expense->category} ({$dateStr}){$desc}\n";
+        }
+
+        $totalSpent = Expense::calculateTotalMonthlySpent($userPhone);
+        $topTotal   = round((float) $expenses->sum('amount'), 2);
+        $pct        = $totalSpent > 0 ? round(($topTotal / $totalSpent) * 100, 1) : 0;
+        $response  .= "\n_Ces {$expenses->count()} depenses = {$topTotal}€ ({$pct}% du total mois)_";
+
+        return $response;
     }
 
     private function buildProgressBar(float $percentage): string

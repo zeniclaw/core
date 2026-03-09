@@ -26,9 +26,9 @@ class FinanceAgentTest extends TestCase
         $this->assertEquals('finance', (new FinanceAgent())->name());
     }
 
-    public function test_agent_version_is_1_2_0(): void
+    public function test_agent_version_is_1_3_0(): void
     {
-        $this->assertEquals('1.2.0', (new FinanceAgent())->version());
+        $this->assertEquals('1.3.0', (new FinanceAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -616,6 +616,244 @@ class FinanceAgentTest extends TestCase
         $this->assertStringContainsString('detail', $help);
         $this->assertStringContainsString('projection', $help);
         $this->assertStringContainsString('supprimer budget', $help);
+    }
+
+    // ── keywords v1.3.0 ──────────────────────────────────────────────────────
+
+    public function test_keywords_include_semaine(): void
+    {
+        $this->assertContains('semaine', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_top_depenses(): void
+    {
+        $this->assertContains('top depenses', (new FinanceAgent())->keywords());
+    }
+
+    // ── canHandle v1.3.0 ─────────────────────────────────────────────────────
+
+    public function test_can_handle_resume_semaine(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('resume semaine')));
+    }
+
+    public function test_can_handle_cette_semaine(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('cette semaine')));
+    }
+
+    public function test_can_handle_top_depenses(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('top depenses')));
+    }
+
+    public function test_can_handle_grosses_depenses(): void
+    {
+        $agent = new FinanceAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('grosses depenses du mois')));
+    }
+
+    // ── parseCommand v1.3.0 ──────────────────────────────────────────────────
+
+    public function test_parse_command_weekly_summary(): void
+    {
+        $cmd = $this->parseCommand('resume semaine');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('weekly_summary', $cmd['action']);
+    }
+
+    public function test_parse_command_weekly_summary_cette_semaine(): void
+    {
+        $cmd = $this->parseCommand('cette semaine');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('weekly_summary', $cmd['action']);
+    }
+
+    public function test_parse_command_weekly_summary_hebdo(): void
+    {
+        $cmd = $this->parseCommand('hebdo');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('weekly_summary', $cmd['action']);
+    }
+
+    public function test_parse_command_top_expenses_default(): void
+    {
+        $cmd = $this->parseCommand('top depenses');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('top_expenses', $cmd['action']);
+        $this->assertEquals(5, $cmd['limit']);
+    }
+
+    public function test_parse_command_top_expenses_with_limit(): void
+    {
+        $cmd = $this->parseCommand('top 3 depenses');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('top_expenses', $cmd['action']);
+        $this->assertEquals(3, $cmd['limit']);
+    }
+
+    public function test_parse_command_grosses_depenses(): void
+    {
+        $cmd = $this->parseCommand('grosses depenses');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('top_expenses', $cmd['action']);
+    }
+
+    // ── getWeeklySummary (via reflection) ─────────────────────────────────────
+
+    private function callGetWeeklySummary(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getWeeklySummary');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_weekly_summary_no_expenses(): void
+    {
+        $result = $this->callGetWeeklySummary();
+        $this->assertStringContainsString('📅', $result);
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_weekly_summary_with_expenses(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 30.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetWeeklySummary();
+        $this->assertStringContainsString('transport', $result);
+        $this->assertStringContainsString('30', $result);
+    }
+
+    public function test_weekly_summary_shows_daily_average(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 70.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetWeeklySummary();
+        $this->assertStringContainsString('Moyenne', $result);
+    }
+
+    // ── getTopExpenses (via reflection) ───────────────────────────────────────
+
+    private function callGetTopExpenses(int $limit = 5): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getTopExpenses');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone, $limit);
+    }
+
+    public function test_top_expenses_no_expenses(): void
+    {
+        $result = $this->callGetTopExpenses();
+        $this->assertStringContainsString('🏆', $result);
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_top_expenses_shows_sorted_by_amount(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 10.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 150.0,
+            'category'   => 'logement',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 45.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetTopExpenses(3);
+        $this->assertStringContainsString('150', $result);
+        // logement (150) should appear before alimentation (45) in output
+        $posLogement     = strpos($result, 'logement');
+        $posAlimentation = strpos($result, 'alimentation');
+        $this->assertLessThan($posAlimentation, $posLogement);
+    }
+
+    public function test_top_expenses_shows_percentage_of_total(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 100.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callGetTopExpenses(5);
+        $this->assertStringContainsString('%', $result);
+    }
+
+    public function test_top_expenses_limit_capped_at_10(): void
+    {
+        for ($i = 1; $i <= 12; $i++) {
+            Expense::create([
+                'user_phone' => $this->testPhone,
+                'amount'     => (float) ($i * 10),
+                'category'   => 'test',
+                'date'       => Carbon::now()->toDateString(),
+            ]);
+        }
+
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getTopExpenses');
+        $method->setAccessible(true);
+        $result = $method->invoke($agent, $this->testPhone, 20); // 20 requested, max is 10
+
+        // Should show at most 10 entries (lines starting with digit.)
+        $matches = preg_match_all('/^\d+\./m', $result);
+        $this->assertLessThanOrEqual(10, $matches);
+    }
+
+    // ── getBalance improvements v1.3.0 ────────────────────────────────────────
+
+    public function test_balance_shows_day_of_month(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getBalance');
+        $method->setAccessible(true);
+        $result = $method->invoke($agent, $this->testPhone);
+
+        $this->assertStringContainsString('Jour', $result);
+    }
+
+    // ── getHelp v1.3.0 ───────────────────────────────────────────────────────
+
+    public function test_help_contains_resume_semaine_command(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getHelp');
+        $method->setAccessible(true);
+        $help = $method->invoke($agent);
+
+        $this->assertStringContainsString('resume semaine', $help);
+        $this->assertStringContainsString('top depenses', $help);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
