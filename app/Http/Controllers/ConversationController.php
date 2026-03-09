@@ -51,7 +51,11 @@ class ConversationController extends Controller
                 $q->where('context->payload->from', $conversation->peer_id)
                   ->orWhere(function ($q2) use ($conversation) {
                       $q2->where('context->from', $conversation->peer_id)
-                          ->where('message', 'like', '%Reply sent%');
+                          ->where(function ($q3) {
+                              $q3->where('message', 'like', '%Reply sent%')
+                                 ->orWhere('message', 'like', '%Document created%')
+                                 ->orWhere('message', 'like', '%reply sent%');
+                          });
                   });
             })
             ->orderBy('created_at')
@@ -77,11 +81,22 @@ class ConversationController extends Controller
                     }
                 }
 
+                // Build reply text: try 'reply' field, then reconstruct from context
+                $replyBody = '';
+                if (!$isIncoming) {
+                    $replyBody = $context['reply'] ?? '';
+                    if (!$replyBody && !empty($context['filename'])) {
+                        $title = $context['title'] ?? $context['filename'];
+                        $format = $context['format'] ?? '';
+                        $replyBody = "Document *{$title}* ({$format}) cree avec succes !";
+                    }
+                }
+
                 return [
                     'direction' => $isIncoming ? 'in' : 'out',
                     'body' => $isIncoming
                         ? ($payload['body'] ?? '')
-                        : ($context['reply'] ?? ''),
+                        : $replyBody,
                     'sender' => $isIncoming
                         ? ($payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? $conversation->display_name ?? $conversation->displayName())
                         : 'ZeniClaw',
