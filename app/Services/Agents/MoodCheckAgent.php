@@ -17,7 +17,7 @@ class MoodCheckAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'humeur et bien-etre. Enregistre le niveau d\'humeur (1-5 ou emoji), detecte les tendances, identifie les heures de baisse d\'energie, fournit des recommandations personnalisees et empathiques. Commandes: mood today, mood stats [30], mood history, mood streak, mood help.';
+        return 'Agent de suivi d\'humeur et bien-etre. Enregistre le niveau d\'humeur (1-5 ou emoji), detecte les tendances, identifie les heures de baisse d\'energie, fournit des recommandations personnalisees et empathiques. Commandes: mood today, mood stats [30], mood history, mood streak, mood insights, mood help.';
     }
 
     public function keywords(): array
@@ -39,12 +39,14 @@ class MoodCheckAgent extends BaseAgent
             'mood streak', 'serie humeur', 'streak humeur',
             'mood help', 'aide humeur', 'commandes humeur',
             'mood log',
+            'mood insights', 'insights humeur', 'analyse humeur',
+            'mood best', 'meilleur jour', 'pire jour',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.3.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -70,6 +72,11 @@ class MoodCheckAgent extends BaseAgent
             '/\bmood[\s_-]?help\b/',
             '/\baide\s+humeur\b/',
             '/\bmes\s+humeurs\b/',
+            '/\bmood[\s_-]?insights?\b/',
+            '/\binsights?\s+humeur\b/',
+            '/\banalyse\s+humeur\b/',
+            '/\bmood[\s_-]?best\b/',
+            '/\bmeilleur\s+jour\b/',
             '/\bmood\s+[1-5]\b/',
         ];
 
@@ -124,6 +131,14 @@ class MoodCheckAgent extends BaseAgent
             $this->sendText($context->from, $streakMsg);
             $this->log($context, 'Streak requested');
             return AgentResult::reply($streakMsg);
+        }
+
+        // "mood insights" — analyse approfondie des patterns
+        if (preg_match('/mood[\s_-]?insights?|insights?\s+humeur|analyse\s+humeur|mood[\s_-]?best|meilleur\s+jour/i', $body)) {
+            $insights = $this->generateInsights($context->from);
+            $this->sendText($context->from, $insights);
+            $this->log($context, 'Insights requested');
+            return AgentResult::reply($insights);
         }
 
         // Parse mood from message
@@ -194,7 +209,8 @@ class MoodCheckAgent extends BaseAgent
             . "  • `mood stats` — tendance 7 jours\n"
             . "  • `mood stats 30` — tendance 30 jours\n"
             . "  • `mood history` — 10 dernieres entrees\n"
-            . "  • `mood streak` — jours consecutifs\n\n"
+            . "  • `mood streak` — jours consecutifs\n"
+            . "  • `mood insights` — analyse des patterns\n\n"
             . "_Echelle: 1=😢 tres bas | 3=😐 neutre | 5=🤩 excellent_";
     }
 
@@ -282,7 +298,7 @@ class MoodCheckAgent extends BaseAgent
             return "🔥 *Streak d'humeur*\n\n"
                 . "Pas encore de serie en cours.\n"
                 . "Enregistre ton humeur aujourd'hui pour commencer !\n\n"
-                . "_Conseil: una entree par jour = progression visible_";
+                . "_Conseil: une entree par jour = progression visible_";
         }
 
         $medal = match (true) {
@@ -303,6 +319,66 @@ class MoodCheckAgent extends BaseAgent
             . "{$medal} Serie actuelle: *{$streak} jour(s) consecutif(s)*\n\n"
             . "{$message}\n\n"
             . "_`mood today` pour le resume du jour_";
+    }
+
+    // ─────────────────────────────────────────────
+    // COMMANDE: INSIGHTS
+    // ─────────────────────────────────────────────
+
+    public function generateInsights(string $userPhone): string
+    {
+        $tz = AppSetting::timezone();
+        $insights = MoodLog::getInsights($userPhone);
+
+        if ($insights['total_entries'] === 0) {
+            return "💡 *Insights d'humeur*\n\n"
+                . "Pas encore assez de donnees pour generer des insights.\n"
+                . "Continue a enregistrer ton humeur avec `mood [1-5]` !";
+        }
+
+        $output = "💡 *Insights d'humeur* ({$insights['total_entries']} entrees sur {$insights['days_tracked']}j)\n\n";
+
+        // Overall average
+        $avgEmoji = $this->levelToEmoji((int) round($insights['overall_avg']));
+        $output .= "{$avgEmoji} Moyenne globale: *{$insights['overall_avg']}/5*\n\n";
+
+        // Best & worst day of week
+        if ($insights['best_day']) {
+            $output .= "📅 *Meilleur jour:* {$insights['best_day']['day']} ({$insights['best_day']['avg']}/5)\n";
+        }
+        if ($insights['worst_day']) {
+            $output .= "📅 *Jour le plus bas:* {$insights['worst_day']['day']} ({$insights['worst_day']['avg']}/5)\n";
+        }
+
+        // Peak hours
+        if (!empty($insights['peak_hours'])) {
+            $peakStr = implode('h, ', $insights['peak_hours']) . 'h';
+            $output .= "\n⏰ *Heures les plus positives:* {$peakStr}\n";
+        }
+        if (!empty($insights['low_hours'])) {
+            $lowStr = implode('h, ', $insights['low_hours']) . 'h';
+            $output .= "⚠️ *Heures basse energie:* {$lowStr}\n";
+        }
+
+        // Most common mood
+        if ($insights['most_common_label']) {
+            $output .= "\n🏷️ *Humeur la plus frequente:* {$insights['most_common_label']} ({$insights['most_common_count']}x)\n";
+        }
+
+        // Volatility
+        if ($insights['volatility'] !== null) {
+            $volLabel = match (true) {
+                $insights['volatility'] <= 0.5 => 'tres stable',
+                $insights['volatility'] <= 1.0 => 'stable',
+                $insights['volatility'] <= 1.5 => 'variable',
+                default                        => 'tres variable',
+            };
+            $output .= "📉 *Variabilite:* {$volLabel} (ecart-type: {$insights['volatility']})\n";
+        }
+
+        $output .= "\n_`mood stats` pour la tendance | `mood streak` pour la serie_";
+
+        return $output;
     }
 
     // ─────────────────────────────────────────────
@@ -344,8 +420,9 @@ class MoodCheckAgent extends BaseAgent
             if (str_contains($body, $emoji)) return $data;
         }
 
-        // Text-based mood keywords — ordered: most specific FIRST to avoid false positives
-        // (e.g. "pas mal" must come before "mal", "pas bien" before "bien")
+        // Text-based mood keywords — two-pass matching:
+        // 1st pass: multi-word phrases (longest first) to avoid "pas mal" matching "mal"
+        // 2nd pass: single-word keywords
         $moodKeywords = [
             1 => ['horrible', 'terrible', 'tres mal', 'au plus bas', 'desespere', 'deprime', 'effondre', 'en detresse'],
             2 => ['stresse', 'fatigue', 'anxieux', 'epuise', 'morose', 'down', 'bof', 'mal', 'mauvais'],
@@ -356,10 +433,20 @@ class MoodCheckAgent extends BaseAgent
 
         $lower = mb_strtolower($body);
 
-        // First pass: check level 5 (most positive), then 1 (most negative), then 4, 2, 3
+        // Pass 1: multi-word phrases first (longest match wins), checked across all levels
+        // Order: extremes first [5,1,4,2,3] to prioritize strong signals
         foreach ([5, 1, 4, 2, 3] as $level) {
             foreach ($moodKeywords[$level] as $keyword) {
-                if (str_contains($lower, $keyword)) {
+                if (str_word_count($keyword) >= 2 && str_contains($lower, $keyword)) {
+                    return ['level' => $level, 'label' => $keyword];
+                }
+            }
+        }
+
+        // Pass 2: single-word keywords
+        foreach ([5, 1, 4, 2, 3] as $level) {
+            foreach ($moodKeywords[$level] as $keyword) {
+                if (str_word_count($keyword) === 1 && str_contains($lower, $keyword)) {
                     return ['level' => $level, 'label' => $keyword];
                 }
             }

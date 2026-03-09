@@ -125,6 +125,7 @@ class MoodLog extends Model
         $tz = \App\Models\AppSetting::timezone();
 
         $logs = self::where('user_phone', $userPhone)
+            ->where('created_at', '>=', Carbon::now()->subDays(90)->startOfDay())
             ->orderBy('created_at', 'desc')
             ->get(['created_at']);
 
@@ -151,6 +152,72 @@ class MoodLog extends Model
         }
 
         return $streak;
+    }
+
+    /**
+     * Generate insights: best/worst day, peak hours, most common mood, volatility.
+     */
+    public static function getInsights(string $userPhone): array
+    {
+        $since = Carbon::now()->subDays(30)->startOfDay();
+        $logs = self::where('user_phone', $userPhone)
+            ->where('created_at', '>=', $since)
+            ->orderBy('created_at')
+            ->get();
+
+        if ($logs->isEmpty()) {
+            return ['total_entries' => 0, 'days_tracked' => 0, 'overall_avg' => null,
+                'best_day' => null, 'worst_day' => null, 'peak_hours' => [],
+                'low_hours' => [], 'most_common_label' => null, 'most_common_count' => 0,
+                'volatility' => null];
+        }
+
+        $days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+        $byDay = $logs->groupBy(fn ($l) => $l->created_at->dayOfWeekIso);
+        $dayAvgs = [];
+        foreach ($byDay as $dow => $group) {
+            $dayAvgs[] = ['day' => $days[$dow - 1], 'avg' => round($group->avg('mood_level'), 1)];
+        }
+        usort($dayAvgs, fn ($a, $b) => $b['avg'] <=> $a['avg']);
+
+        // Peak/low hours (avg mood by hour, top/bottom 2)
+        $byHour = $logs->groupBy(fn ($l) => (int) $l->created_at->format('H'));
+        $hourAvgs = [];
+        foreach ($byHour as $hour => $group) {
+            if ($group->count() >= 2) {
+                $hourAvgs[$hour] = round($group->avg('mood_level'), 1);
+            }
+        }
+        arsort($hourAvgs);
+        $peakHours = array_slice(array_keys($hourAvgs), 0, 2);
+        asort($hourAvgs);
+        $lowHours = array_slice(array_keys(array_filter($hourAvgs, fn ($v) => $v <= 2.5)), 0, 2);
+
+        // Most common label
+        $labelCounts = $logs->groupBy('mood_label')->map->count()->sortDesc();
+        $topLabel = $labelCounts->keys()->first();
+        $topLabelCount = $labelCounts->first();
+
+        // Volatility (std dev)
+        $levels = $logs->pluck('mood_level')->toArray();
+        $mean = array_sum($levels) / count($levels);
+        $variance = array_sum(array_map(fn ($v) => ($v - $mean) ** 2, $levels)) / count($levels);
+        $stdDev = round(sqrt($variance), 1);
+
+        $uniqueDays = $logs->map(fn ($l) => $l->created_at->format('Y-m-d'))->unique()->count();
+
+        return [
+            'total_entries'     => $logs->count(),
+            'days_tracked'      => $uniqueDays,
+            'overall_avg'       => round($logs->avg('mood_level'), 1),
+            'best_day'          => $dayAvgs[0] ?? null,
+            'worst_day'         => count($dayAvgs) > 1 ? end($dayAvgs) : null,
+            'peak_hours'        => $peakHours,
+            'low_hours'         => $lowHours,
+            'most_common_label' => $topLabel,
+            'most_common_count' => $topLabelCount,
+            'volatility'        => $stdDev,
+        ];
     }
 
     /**
