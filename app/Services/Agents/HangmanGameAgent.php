@@ -45,13 +45,29 @@ class HangmanGameAgent extends BaseAgent
             'ARCHITECTURE', 'MEDITATION', 'CINEMATHEQUE', 'REVOLUTION', 'MYSTERE',
             'KALEIDOSCOPE', 'EXPEDITION', 'HARMONIE', 'PAYSAGE', 'MERVEILLE',
         ],
+        'sport' => [
+            'FOOTBALL', 'TENNIS', 'BASKETBALL', 'NATATION', 'CYCLISME',
+            'ATHLETISME', 'VOLLEYBALL', 'HANDBALL', 'RUGBY', 'BOXE',
+            'JUDO', 'ESCALADE', 'TRIATHLON', 'MARATHON', 'PLONGEON',
+            'PATINAGE', 'EQUITATION', 'AVIRON', 'ESCRIME', 'BADMINTON',
+            'KARATE', 'LUTTE', 'TIRO', 'SURF', 'PLANCHE',
+        ],
+        'gastronomie' => [
+            'BAGUETTE', 'CROISSANT', 'RATATOUILLE', 'BOUILLABAISSE', 'CASSOULET',
+            'CREPE', 'ECLAIR', 'MACARON', 'GATEAU', 'FONDUE',
+            'RACLETTE', 'SOUFFLE', 'BRIOCHE', 'PROFITEROLE', 'MADELEINE',
+            'MILLEFEUILLE', 'GALETTE', 'QUICHE', 'CAMEMBERT', 'TARTIFLETTE',
+            'COUSCOUS', 'TAPENADE', 'FLAMICHE', 'ANDOUILLE', 'CLAFOUTIS',
+        ],
     ];
 
     private const CATEGORY_LABELS = [
-        'tech'    => 'Informatique 💻',
-        'animaux' => 'Animaux 🦁',
-        'nature'  => 'Nature 🌿',
-        'vocab'   => 'Vocabulaire 📚',
+        'tech'        => 'Informatique 💻',
+        'animaux'     => 'Animaux 🦁',
+        'nature'      => 'Nature 🌿',
+        'vocab'       => 'Vocabulaire 📚',
+        'sport'       => 'Sport 🏆',
+        'gastronomie' => 'Gastronomie 🍽️',
     ];
 
     private const CATEGORY_ALIASES = [
@@ -63,6 +79,11 @@ class HangmanGameAgent extends BaseAgent
         'flore'        => 'nature',
         'mot'          => 'vocab',
         'mots'         => 'vocab',
+        'sports'       => 'sport',
+        'foot'         => 'sport',
+        'cuisine'      => 'gastronomie',
+        'food'         => 'gastronomie',
+        'gastro'       => 'gastronomie',
     ];
 
     public function name(): string
@@ -72,7 +93,7 @@ class HangmanGameAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent jeu du Pendu (Hangman). Permet de jouer au pendu avec des mots aleatoires par categorie (tech, animaux, nature, vocab) ou personnalises, deviner le mot entier, obtenir des indices, abandonner une partie, consulter son historique, suivre ses statistiques avec meilleur score, voir les categories disponibles et reinitialiser ses stats.';
+        return 'Agent jeu du Pendu (Hangman). Permet de jouer au pendu avec des mots aleatoires par categorie (tech, animaux, nature, vocab, sport, gastronomie) ou personnalises, deviner le mot entier, obtenir des indices, abandonner une partie, consulter son historique, suivre ses statistiques avec meilleur score, voir les categories disponibles, reinitialiser ses stats, acceder au defi du jour (daily) et voir le classement des meilleurs joueurs (top).';
     }
 
     public function keywords(): array
@@ -92,12 +113,14 @@ class HangmanGameAgent extends BaseAgent
             'reset pendu', 'reinitialiser pendu',
             'categories pendu', 'hangman categories', 'liste categories',
             'devine le mot', 'deviner le mot entier', 'mot entier pendu',
+            'defi du jour', 'pendu daily', 'hangman daily', 'mot du jour',
+            'classement pendu', 'top pendu', 'hangman top', 'meilleurs joueurs pendu',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -141,6 +164,16 @@ class HangmanGameAgent extends BaseAgent
         // Categories listing
         if (preg_match('/\/hangman\s+categori(?:es?)?/i', $lower) || preg_match('/\b(categories?|liste?\s+categories?)\s*(pendu|hangman)?\b/iu', $lower) || preg_match('/\b(pendu|hangman)\s+categories?\b/iu', $lower)) {
             return $this->showCategories();
+        }
+
+        // Leaderboard / top players
+        if (preg_match('/\/hangman\s+top/i', $lower) || preg_match('/\b(classement|top|leaderboard|meilleurs?\s+joueurs?)\s*(pendu|hangman)?\b/iu', $lower) || preg_match('/\b(pendu|hangman)\s+(top|classement)\b/iu', $lower)) {
+            return $this->showLeaderboard($context);
+        }
+
+        // Daily challenge
+        if (preg_match('/\/hangman\s+daily/i', $lower) || preg_match('/\b(daily|defi\s+du\s+jour|mot\s+du\s+jour|pendu\s+daily)\b/iu', $lower)) {
+            return $this->dailyChallenge($context);
         }
 
         // Start / new game — optionally with a category: /hangman start tech
@@ -234,7 +267,7 @@ class HangmanGameAgent extends BaseAgent
             . "{$board}\n\n"
             . "Envoie une lettre pour deviner !\n"
             . "💡 /hangman hint (indice, -1 vie) | /hangman devine MOT (mot entier, -2 vies si faux)\n"
-            . "🗂️ Categorie : /hangman start [tech|animaux|nature|vocab]"
+            . "🗂️ Categorie : /hangman start [tech|animaux|nature|vocab|sport|gastronomie]"
         );
     }
 
@@ -315,7 +348,8 @@ class HangmanGameAgent extends BaseAgent
             $wrongCount = $game->wrong_count;
             $maxWrong   = self::MAX_WRONG;
             $score      = $this->computeScore($game);
-            return AgentResult::reply("🎉 *Bravo, tu as gagne !*\n\n{$board}\n\nMot : *{$game->word}*\nErreurs : {$wrongCount}/{$maxWrong}\n🏅 Score : *{$score} pts*\n\n🔄 /hangman start pour rejouer !");
+            $speedMsg   = $this->getSpeedMessage($game);
+            return AgentResult::reply("🎉 *Bravo, tu as gagne !*{$speedMsg}\n\n{$board}\n\nMot : *{$game->word}*\nErreurs : {$wrongCount}/{$maxWrong}\n🏅 Score : *{$score} pts*\n\n🔄 /hangman start pour rejouer !");
         }
 
         $game->save();
@@ -323,7 +357,7 @@ class HangmanGameAgent extends BaseAgent
 
         $board     = $this->getDisplayBoard($game);
         $emoji     = $found ? '✅' : '❌';
-        $occMsg    = $found && $occurrences > 1 ? " ({$occurrences}x)" : '';
+        $occMsg    = $found && $occurrences > 1 ? " ({$occurrences}x dans le mot)" : '';
         $msg       = $found
             ? "Bien joue ! *{$letter}* est dans le mot{$occMsg} !"
             : "Dommage, *{$letter}* n'est pas dans le mot.";
@@ -367,10 +401,11 @@ class HangmanGameAgent extends BaseAgent
             $game->save();
             $this->updateStatsOnEnd($stats, true);
 
-            $board = $this->getDisplayBoard($game);
-            $score = $this->computeScore($game);
+            $board     = $this->getDisplayBoard($game);
+            $score     = $this->computeScore($game);
+            $speedMsg  = $this->getSpeedMessage($game);
             return AgentResult::reply(
-                "🎉 *Excellent ! Tu as trouve le mot entier !*\n\n"
+                "🎉 *Excellent ! Tu as trouve le mot entier !*{$speedMsg}\n\n"
                 . "{$board}\n\n"
                 . "Mot : *{$game->word}*\n"
                 . "🏅 Score : *{$score} pts*\n\n"
@@ -417,7 +452,8 @@ class HangmanGameAgent extends BaseAgent
         }
 
         if ($game->wrong_count >= self::MAX_WRONG - 1) {
-            return AgentResult::reply("⚠️ *Trop risque !* Il ne te reste qu'une vie. L'indice te ferait perdre !\n\nPropose directement une lettre.");
+            $board = $this->getDisplayBoard($game);
+            return AgentResult::reply("⚠️ *Trop risque !* Il ne te reste qu'une vie. L'indice te ferait perdre !\n\n{$board}\n\nPropose directement une lettre.");
         }
 
         // Find letters not yet guessed
@@ -463,7 +499,8 @@ class HangmanGameAgent extends BaseAgent
             $this->updateStatsOnEnd($stats, true);
 
             $board = $this->getDisplayBoard($game);
-            return AgentResult::reply("🎉 *Victoire avec indice !*\n\n{$board}\n\nMot : *{$game->word}*\n\n🔄 /hangman start pour rejouer !");
+            $score = $this->computeScore($game);
+            return AgentResult::reply("🎉 *Victoire avec indice !*\n\n{$board}\n\nMot : *{$game->word}*\n🏅 Score : *{$score} pts*\n\n🔄 /hangman start pour rejouer !");
         }
 
         $game->save();
@@ -508,8 +545,14 @@ class HangmanGameAgent extends BaseAgent
 
         $hiddenMsg = $hidden > 0 ? " | *{$hidden}* lettre(s) a trouver" : '';
 
+        // Show elapsed time
+        $elapsedMsg = '';
+        if ($game->created_at) {
+            $elapsedMsg = ' | ⏱️ ' . $game->created_at->diffForHumans(null, true);
+        }
+
         return AgentResult::reply(
-            "🎮 *Partie en cours* | {$remainingLives} vie(s) restante(s) | {$guessCount} lettre(s) essayee(s){$hiddenMsg}\n\n"
+            "🎮 *Partie en cours* | {$remainingLives} vie(s) restante(s) | {$guessCount} lettre(s) essayee(s){$hiddenMsg}{$elapsedMsg}\n\n"
             . "{$board}\n\n"
             . "💡 /hangman hint | /hangman devine MOT | /hangman abandon"
         );
@@ -546,7 +589,7 @@ class HangmanGameAgent extends BaseAgent
             $response  .= "\n⏰ Derniere partie : {$lastPlayed}";
         }
 
-        $response .= "\n\n_/hangman reset pour reinitialiser_";
+        $response .= "\n\n_/hangman reset pour reinitialiser | /hangman top pour le classement_";
 
         return AgentResult::reply($response);
     }
@@ -589,10 +632,113 @@ class HangmanGameAgent extends BaseAgent
             $lines[] = "• {$label} — {$count} mots → /hangman start {$key}";
         }
 
-        $lines[] = "\n💡 Exemple : /hangman start tech";
+        $lines[] = "\n💡 Exemple : /hangman start sport";
         $lines[] = "🎲 Sans categorie : /hangman start (aleatoire)";
+        $lines[] = "📅 Defi du jour : /hangman daily";
 
         return AgentResult::reply(implode("\n", $lines));
+    }
+
+    private function showLeaderboard(AgentContext $context): AgentResult
+    {
+        $topStats = HangmanStats::where('agent_id', $context->agent->id)
+            ->where('games_played', '>', 0)
+            ->orderByDesc('games_won')
+            ->orderByDesc('best_streak')
+            ->limit(5)
+            ->get();
+
+        if ($topStats->isEmpty()) {
+            return AgentResult::reply("🏆 Aucun joueur au classement pour l'instant.\n\nSois le premier ! /hangman start");
+        }
+
+        $lines   = ["🏆 *Classement Pendu - Top joueurs :*\n"];
+        $medals  = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+        $isMe    = false;
+
+        foreach ($topStats as $i => $stat) {
+            $medal  = $medals[$i] ?? ($i + 1) . '.';
+            $isSelf = $stat->user_phone === $context->from;
+
+            // Mask phone: keep last 4 digits of number part
+            if (preg_match('/^(\d+?)(\d{4})(@.+)?$/', $stat->user_phone, $pm)) {
+                $maskedPhone = '****' . $pm[2];
+            } else {
+                $maskedPhone = '****';
+            }
+
+            $winRate  = $stat->getWinRate();
+            $selfMark = $isSelf ? ' ← Toi' : '';
+            $lines[]  = "{$medal} {$maskedPhone} — *{$stat->games_won}* victoires | {$stat->best_streak}🔥 serie | {$winRate}%{$selfMark}";
+
+            if ($isSelf) {
+                $isMe = true;
+            }
+        }
+
+        if (!$isMe) {
+            $myStats = HangmanStats::where('agent_id', $context->agent->id)
+                ->where('user_phone', $context->from)
+                ->first();
+
+            if ($myStats && $myStats->games_played > 0) {
+                $lines[] = "\n_Tu n'es pas dans le top 5 — continue a jouer !_";
+            }
+        }
+
+        $lines[] = "\n_/hangman stats pour tes propres stats_";
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    private function dailyChallenge(AgentContext $context): AgentResult
+    {
+        // Build a flat word pool across all categories
+        $allWords = [];
+        foreach (self::WORD_CATEGORIES as $cat => $words) {
+            foreach ($words as $word) {
+                $allWords[] = [$word, $cat];
+            }
+        }
+
+        // Deterministic index based on the current date
+        $dateStr = date('Y-m-d');
+        $index   = abs(crc32($dateStr)) % count($allWords);
+        [$word, $category] = $allWords[$index];
+
+        $catLabel = self::CATEGORY_LABELS[$category];
+
+        // Abandon existing game if any
+        $abandonMsg = '';
+        $existing   = $this->getActiveGame($context);
+        if ($existing) {
+            $this->abandonActiveGame($context, $existing);
+            $abandonMsg = "⚠️ Ancienne partie abandonnee (mot : *{$existing->word}*)\n\n";
+        }
+
+        $game = HangmanGame::create([
+            'user_phone'      => $context->from,
+            'agent_id'        => $context->agent->id,
+            'word'            => $word,
+            'guessed_letters' => [],
+            'wrong_count'     => 0,
+            'status'          => 'playing',
+        ]);
+
+        $board        = $this->getDisplayBoard($game);
+        $wordLen      = mb_strlen($word);
+        $todayFormatted = Carbon::today()->format('d/m/Y');
+
+        $this->log($context, 'Daily challenge started', ['game_id' => $game->id, 'word_length' => $wordLen, 'category' => $category]);
+
+        return AgentResult::reply(
+            "{$abandonMsg}📅 *Defi du Jour — {$todayFormatted}*\n"
+            . "Categorie : {$catLabel}\n"
+            . "📏 Mot de *{$wordLen}* lettre(s)\n\n"
+            . "{$board}\n\n"
+            . "Tout le monde a le meme mot aujourd'hui ! 🌍\n"
+            . "💡 /hangman hint | /hangman devine MOT | /hangman top"
+        );
     }
 
     private function resetStats(AgentContext $context): AgentResult
@@ -646,12 +792,16 @@ class HangmanGameAgent extends BaseAgent
         $result .= "❌ Erreurs : {$game->wrong_count}/{$maxWrong}";
 
         if (!empty($wrongLetters)) {
+            sort($wrongLetters);
             $result .= " (" . implode(', ', $wrongLetters) . ")";
         }
 
         if (!empty($guessed)) {
-            sort($guessed);
-            $result .= "\n🔤 Lettres essayees : " . implode(', ', $guessed);
+            $correctLetters = array_diff($guessed, $wrongLetters);
+            sort($correctLetters);
+            if (!empty($correctLetters)) {
+                $result .= "\n✅ Bonnes lettres : " . implode(', ', $correctLetters);
+            }
         }
 
         return $result;
@@ -709,7 +859,43 @@ class HangmanGameAgent extends BaseAgent
         $errorPenalty = $errors * 5;
         $bonus        = max(0, (self::MAX_WRONG - $errors) * 3);
 
-        return max(0, $base - $errorPenalty + $bonus);
+        // Speed bonus based on game duration
+        $speedBonus = 0;
+        if ($game->created_at && $game->updated_at) {
+            $seconds = $game->created_at->diffInSeconds($game->updated_at);
+            if ($seconds < 60) {
+                $speedBonus = 20;
+            } elseif ($seconds < 120) {
+                $speedBonus = 10;
+            } elseif ($seconds < 300) {
+                $speedBonus = 5;
+            }
+        }
+
+        return max(0, $base - $errorPenalty + $bonus + $speedBonus);
+    }
+
+    private function getSpeedMessage(HangmanGame $game): string
+    {
+        if (!$game->created_at || !$game->updated_at) {
+            return '';
+        }
+
+        $seconds = $game->created_at->diffInSeconds($game->updated_at);
+
+        if ($seconds < 60) {
+            return ' ⚡ *Eclair !* (+20 bonus)';
+        }
+
+        if ($seconds < 120) {
+            return ' 🚀 *Rapide !* (+10 bonus)';
+        }
+
+        if ($seconds < 300) {
+            return ' ⏱️ *Bonne vitesse !* (+5 bonus)';
+        }
+
+        return '';
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────
@@ -719,7 +905,7 @@ class HangmanGameAgent extends BaseAgent
         $wonGames = HangmanGame::where('user_phone', $context->from)
             ->where('agent_id', $context->agent->id)
             ->where('status', 'won')
-            ->get(['word', 'wrong_count']);
+            ->get(['word', 'wrong_count', 'created_at', 'updated_at']);
 
         if ($wonGames->isEmpty()) {
             return 0;
@@ -796,31 +982,42 @@ class HangmanGameAgent extends BaseAgent
 
         if ($activeGame) {
             $masked      = $activeGame->getMaskedWord();
-            $gameContext = "\nPartie en cours: mot={$masked}, erreurs={$activeGame->wrong_count}/6, lettres essayees=" . implode(',', $activeGame->guessed_letters ?? []);
+            $livesLeft   = self::MAX_WRONG - $activeGame->wrong_count;
+            $gameContext = "\nPartie en cours: mot={$masked}, erreurs={$activeGame->wrong_count}/6, vies={$livesLeft}, lettres essayees=" . implode(',', $activeGame->guessed_letters ?? []);
         }
 
         $model    = $this->resolveModel($context);
         $response = $this->claude->chat(
             "Message utilisateur: \"{$body}\"{$gameContext}",
             $model,
-            "Tu es l'agent du jeu du Pendu. Comprends l'intention de l'utilisateur et reponds en JSON:\n"
-            . "{\"action\": \"start|guess|guess_word|stats|hint|abandon|status|history|reset|categories|help\", \"letter\": \"X\", \"word\": \"MOT\", \"category\": \"tech|animaux|nature|vocab\"}\n"
+            "Tu es l'agent du jeu du Pendu ZeniClaw. Analyse l'intention de l'utilisateur et reponds en JSON strict:\n"
+            . "{\"action\": \"start|guess|guess_word|stats|hint|abandon|status|history|reset|categories|daily|leaderboard|help\", \"letter\": \"X\", \"word\": \"MOT\", \"category\": \"tech|animaux|nature|vocab|sport|gastronomie\"}\n\n"
             . "Actions disponibles:\n"
-            . "- start      = nouvelle partie (peut inclure \"category\" si demande)\n"
-            . "- guess      = deviner une lettre (inclure \"letter\": \"X\")\n"
-            . "- guess_word = deviner le mot entier (inclure \"word\": \"MOT\")\n"
-            . "- stats      = voir statistiques\n"
-            . "- hint       = demander un indice\n"
-            . "- abandon    = abandonner/quitter la partie en cours\n"
-            . "- status     = voir l'etat de la partie en cours\n"
-            . "- history    = voir l'historique des parties\n"
-            . "- reset      = reinitialiser les statistiques\n"
-            . "- categories = lister les categories disponibles\n"
-            . "- help       = afficher l'aide\n"
-            . "Exemples: \"donne moi un indice\" -> hint, \"je veux arreter\" -> abandon, \"historique\" -> history, "
-            . "\"remet mes stats a zero\" -> reset, \"le mot est LARAVEL\" -> guess_word avec word=LARAVEL, "
-            . "\"liste les categories\" -> categories\n"
-            . "Reponds UNIQUEMENT avec le JSON."
+            . "- start       = nouvelle partie (inclure \"category\" si demandee: tech, animaux, nature, vocab, sport, gastronomie)\n"
+            . "- guess       = deviner une lettre (inclure \"letter\": \"X\")\n"
+            . "- guess_word  = deviner le mot entier (inclure \"word\": \"MOT\")\n"
+            . "- stats       = voir ses statistiques\n"
+            . "- hint        = demander un indice (revele une lettre, coute -1 vie)\n"
+            . "- abandon     = abandonner/quitter la partie en cours\n"
+            . "- status      = voir l'etat actuel de la partie\n"
+            . "- history     = voir l'historique des dernieres parties\n"
+            . "- reset       = reinitialiser les statistiques\n"
+            . "- categories  = lister les categories de mots disponibles\n"
+            . "- daily       = lancer le defi du jour (meme mot pour tous)\n"
+            . "- leaderboard = voir le classement des meilleurs joueurs\n"
+            . "- help        = afficher l'aide et les commandes\n\n"
+            . "Exemples:\n"
+            . "  \"donne moi un indice\" -> {\"action\":\"hint\"}\n"
+            . "  \"je veux arreter\" -> {\"action\":\"abandon\"}\n"
+            . "  \"historique\" -> {\"action\":\"history\"}\n"
+            . "  \"remet mes stats a zero\" -> {\"action\":\"reset\"}\n"
+            . "  \"le mot est LARAVEL\" -> {\"action\":\"guess_word\",\"word\":\"LARAVEL\"}\n"
+            . "  \"liste les categories\" -> {\"action\":\"categories\"}\n"
+            . "  \"jouer sport\" -> {\"action\":\"start\",\"category\":\"sport\"}\n"
+            . "  \"defi du jour\" -> {\"action\":\"daily\"}\n"
+            . "  \"classement\" -> {\"action\":\"leaderboard\"}\n"
+            . "  \"je propose la lettre E\" -> {\"action\":\"guess\",\"letter\":\"E\"}\n"
+            . "Reponds UNIQUEMENT avec le JSON, sans markdown."
         );
 
         $parsed = json_decode(trim($response ?? ''), true);
@@ -830,21 +1027,23 @@ class HangmanGameAgent extends BaseAgent
         }
 
         return match ($parsed['action']) {
-            'start'      => $this->startGame($context, null, $this->resolveCategory($parsed['category'] ?? '')),
-            'guess'      => isset($parsed['letter'])
+            'start'       => $this->startGame($context, null, $this->resolveCategory($parsed['category'] ?? '')),
+            'guess'       => isset($parsed['letter'])
                 ? $this->guessLetter($context, mb_strtoupper($parsed['letter']))
                 : AgentResult::reply("Quelle lettre veux-tu proposer ?"),
-            'guess_word' => isset($parsed['word'])
+            'guess_word'  => isset($parsed['word'])
                 ? $this->guessWord($context, $parsed['word'])
                 : AgentResult::reply("Quel mot veux-tu proposer ?"),
-            'stats'      => $this->showStats($context),
-            'hint'       => $this->hint($context),
-            'abandon'    => $this->abandon($context),
-            'status'     => $this->status($context),
-            'history'    => $this->showHistory($context),
-            'reset'      => $this->resetStats($context),
-            'categories' => $this->showCategories(),
-            default      => $this->showHelp($activeGame),
+            'stats'       => $this->showStats($context),
+            'hint'        => $this->hint($context),
+            'abandon'     => $this->abandon($context),
+            'status'      => $this->status($context),
+            'history'     => $this->showHistory($context),
+            'reset'       => $this->resetStats($context),
+            'categories'  => $this->showCategories(),
+            'daily'       => $this->dailyChallenge($context),
+            'leaderboard' => $this->showLeaderboard($context),
+            default       => $this->showHelp($activeGame),
         };
     }
 
@@ -853,7 +1052,8 @@ class HangmanGameAgent extends BaseAgent
         $help = "🎮 *Jeu du Pendu - Commandes :*\n\n"
             . "▶️ /hangman start → Nouvelle partie\n"
             . "🗂️ /hangman start [categorie] → Choisir une categorie\n"
-            . "   └ tech | animaux | nature | vocab\n"
+            . "   └ tech | animaux | nature | vocab | sport | gastronomie\n"
+            . "📅 /hangman daily → Defi du jour (meme mot pour tous)\n"
             . "🔤 /hangman guess X → Proposer la lettre X\n"
             . "🎯 /hangman devine MOT → Deviner le mot entier (-2 vies si faux)\n"
             . "💡 /hangman hint → Indice (revele une lettre, -1 vie)\n"
@@ -862,6 +1062,7 @@ class HangmanGameAgent extends BaseAgent
             . "📜 /hangman history → Historique des parties\n"
             . "🏳️ /hangman abandon → Abandonner la partie\n"
             . "📊 /hangman stats → Tes statistiques\n"
+            . "🏆 /hangman top → Classement des meilleurs joueurs\n"
             . "🗂️ /hangman categories → Lister les categories\n"
             . "🔄 /hangman reset → Reinitialiser les stats\n\n"
             . "💡 Pendant une partie : envoie une lettre ou un mot directement !";

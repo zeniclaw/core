@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_3_0(): void
+    public function test_agent_version_is_1_4_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.3.0', $agent->version());
+        $this->assertEquals('1.4.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -649,6 +649,214 @@ class HangmanGameAgentTest extends TestCase
         $result = $agent->handle($context);
 
         $this->assertStringContainsString('lettre(s) a trouver', $result->reply);
+    }
+
+    public function test_status_shows_elapsed_time(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman status');
+
+        $this->createActiveGame($context, 'LARAVEL');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('⏱️', $result->reply);
+    }
+
+    // ── New categories ────────────────────────────────────────────────────────
+
+    public function test_start_with_sport_category_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start sport');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Sport', $result->reply);
+    }
+
+    public function test_start_with_gastronomie_category_creates_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman start gastronomie');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Nouvelle partie', $result->reply);
+        $this->assertStringContainsString('Gastronomie', $result->reply);
+    }
+
+    public function test_categories_list_includes_sport_and_gastronomie(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman categories');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('sport', $result->reply);
+        $this->assertStringContainsString('gastronomie', $result->reply);
+    }
+
+    // ── Daily challenge ───────────────────────────────────────────────────────
+
+    public function test_daily_challenge_starts_a_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman daily');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Defi du Jour', $result->reply);
+        $this->assertDatabaseHas('hangman_games', [
+            'user_phone' => $context->from,
+            'agent_id'   => $context->agent->id,
+            'status'     => 'playing',
+        ]);
+    }
+
+    public function test_daily_challenge_is_deterministic_same_day(): void
+    {
+        $agent    = new HangmanGameAgent();
+        $context1 = $this->makeContext('/hangman daily');
+        $context2 = $this->makeContext('/hangman daily');
+
+        // Two different users (different phones but same agent)
+        $user2    = \App\Models\User::factory()->create();
+        $agent2   = \App\Models\Agent::factory()->create(['user_id' => $user2->id]);
+        $phone2   = '33699999999@s.whatsapp.net';
+        $session2 = \App\Models\AgentSession::create([
+            'agent_id'        => $agent2->id,
+            'session_key'     => \App\Models\AgentSession::keyFor($agent2->id, 'whatsapp', $phone2),
+            'channel'         => 'whatsapp',
+            'peer_id'         => $phone2,
+            'last_message_at' => now(),
+        ]);
+        $context2 = new \App\Services\AgentContext(
+            agent: $agent2,
+            session: $session2,
+            from: $phone2,
+            senderName: 'User 2',
+            body: '/hangman daily',
+            hasMedia: false,
+            mediaUrl: null,
+            mimetype: null,
+            media: null,
+            routedAgent: 'hangman',
+            routedModel: 'claude-haiku-4-5-20251001',
+            complexity: 'simple',
+            reasoning: 'test',
+            autonomy: 'auto',
+        );
+
+        $result1 = (new \App\Services\Agents\HangmanGameAgent())->handle($context1);
+        $result2 = (new \App\Services\Agents\HangmanGameAgent())->handle($context2);
+
+        // Both games should have the same word (daily challenge is universal)
+        $game1 = \App\Models\HangmanGame::where('user_phone', $context1->from)->where('agent_id', $context1->agent->id)->first();
+        $game2 = \App\Models\HangmanGame::where('user_phone', $phone2)->where('agent_id', $agent2->id)->first();
+
+        $this->assertEquals($game1->word, $game2->word);
+    }
+
+    public function test_daily_challenge_abandons_existing_game(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman daily');
+
+        $existing = $this->createActiveGame($context, 'ANCIEN');
+
+        $agent->handle($context);
+
+        $existing->refresh();
+        $this->assertEquals('lost', $existing->status);
+    }
+
+    // ── Leaderboard ───────────────────────────────────────────────────────────
+
+    public function test_leaderboard_shows_no_players_message_when_empty(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman top');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Aucun joueur', $result->reply);
+    }
+
+    public function test_leaderboard_shows_top_players(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman top');
+
+        // Create stats for current user
+        $stats = HangmanStats::getOrCreate($context->from, $context->agent->id);
+        $stats->update([
+            'games_played'   => 5,
+            'games_won'      => 4,
+            'best_streak'    => 3,
+            'current_streak' => 2,
+        ]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Classement', $result->reply);
+        $this->assertStringContainsString('victoires', $result->reply);
+        $this->assertStringContainsString('🥇', $result->reply);
+    }
+
+    public function test_leaderboard_masks_phone_numbers(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman top');
+
+        $stats = HangmanStats::getOrCreate($context->from, $context->agent->id);
+        $stats->update(['games_played' => 3, 'games_won' => 2]);
+
+        $result = $agent->handle($context);
+
+        // Phone should be masked, not shown fully
+        $this->assertStringNotContainsString('33612345678', $result->reply);
+        $this->assertStringContainsString('****', $result->reply);
+    }
+
+    // ── Score speed bonus ─────────────────────────────────────────────────────
+
+    public function test_winning_game_fast_shows_speed_bonus_message(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('A');
+
+        // Single-letter word won instantly = speed bonus applies
+        $this->createActiveGame($context, 'A');
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('pts', $result->reply);
+        // Speed message should appear (game was won almost instantly)
+        $this->assertStringContainsString('bonus', $result->reply);
+    }
+
+    public function test_hint_win_shows_score(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman hint');
+
+        // 2-letter word — one hint reveals last letter and wins
+        $game = $this->createActiveGame($context, 'AB');
+        $game->update(['guessed_letters' => ['A']]);
+
+        $result = $agent->handle($context);
+
+        // Either wins (if hint reveals B) or gives hint
+        $this->assertEquals('reply', $result->action);
+        // If won, score should be shown
+        if (str_contains($result->reply, 'Victoire')) {
+            $this->assertStringContainsString('pts', $result->reply);
+        }
     }
 
     private function makeContext(string $body, ?AgentContext $context = null): AgentContext
