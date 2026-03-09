@@ -24,10 +24,10 @@ class HangmanGameAgentTest extends TestCase
         $this->assertEquals('hangman', $agent->name());
     }
 
-    public function test_agent_version_is_1_6_0(): void
+    public function test_agent_version_is_1_7_0(): void
     {
         $agent = new HangmanGameAgent();
-        $this->assertEquals('1.6.0', $agent->version());
+        $this->assertEquals('1.7.0', $agent->version());
     }
 
     public function test_can_handle_returns_true_for_hangman_keyword(): void
@@ -361,7 +361,24 @@ class HangmanGameAgentTest extends TestCase
         $this->assertStringContainsString('Aucune statistique', $result->reply);
     }
 
-    public function test_reset_stats_clears_all_values(): void
+    public function test_reset_stats_asks_for_confirmation(): void
+    {
+        $agent   = new HangmanGameAgent();
+        $context = $this->makeContext('/hangman reset');
+
+        $stats = HangmanStats::getOrCreate($context->from, $context->agent->id);
+        $stats->update(['games_played' => 5, 'games_won' => 3]);
+
+        $result = $agent->handle($context);
+
+        $this->assertStringContainsString('Confirmation requise', $result->reply);
+        $this->assertStringContainsString('OUI', $result->reply);
+        // Stats should NOT be reset yet
+        $stats->refresh();
+        $this->assertEquals(5, $stats->games_played);
+    }
+
+    public function test_reset_stats_clears_all_values_after_confirmation(): void
     {
         $agent   = new HangmanGameAgent();
         $context = $this->makeContext('/hangman reset');
@@ -376,8 +393,21 @@ class HangmanGameAgentTest extends TestCase
             'total_guesses'  => 40,
         ]);
 
-        $result = $agent->handle($context);
+        // Step 1: request reset (gets confirmation prompt)
+        $agent->handle($context);
 
+        // Step 2: confirm via handlePendingContext
+        $confirmContext = $this->makeContext('OUI', context: $context);
+        $pendingCtx     = [
+            'agent'            => 'hangman',
+            'type'             => 'confirm_reset',
+            'data'             => ['games_played' => 5, 'games_won' => 3],
+            'expect_raw_input' => true,
+            'expires_at'       => now()->addMinutes(3)->toIso8601String(),
+        ];
+        $result = $agent->handlePendingContext($confirmContext, $pendingCtx);
+
+        $this->assertNotNull($result);
         $this->assertStringContainsString('remises a zero', $result->reply);
 
         $stats->refresh();
