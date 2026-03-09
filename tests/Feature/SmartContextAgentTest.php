@@ -232,6 +232,101 @@ class SmartContextAgentTest extends TestCase
         $this->assertEquals('blue', $subAgents['smart_context']['color']);
     }
 
+    // ── New capabilities v1.1.0 ───────────────────────────────────────────────
+
+    public function test_smart_context_agent_skips_commands(): void
+    {
+        $agent = new SmartContextAgent();
+        $context = $this->makeContext('/help something long enough to pass');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('silent', $result->action);
+        $this->assertEquals('command_skipped', $result->metadata['reason']);
+    }
+
+    public function test_smart_context_agent_summarize_profile_empty(): void
+    {
+        $agent = new SmartContextAgent();
+        $this->assertEquals('', $agent->summarizeProfile($this->testPhone));
+    }
+
+    public function test_smart_context_agent_summarize_profile_with_facts(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev Laravel', 'category' => 'profession', 'score' => 1.0],
+            ['key' => 'location', 'value' => 'Paris', 'category' => 'personal', 'score' => 0.9],
+            ['key' => 'career_goal', 'value' => 'Devenir CTO', 'category' => 'goal', 'score' => 0.8],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $summary = $agent->summarizeProfile($this->testPhone);
+
+        $this->assertStringContainsString('Profession', $summary);
+        $this->assertStringContainsString('Dev Laravel', $summary);
+        $this->assertStringContainsString('Paris', $summary);
+    }
+
+    public function test_smart_context_agent_forget_fact_removes_it(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev PHP', 'category' => 'profession', 'score' => 1.0],
+            ['key' => 'location', 'value' => 'Lyon', 'category' => 'personal', 'score' => 0.9],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $result = $agent->forgetFact($this->testPhone, 'profession');
+
+        $this->assertTrue($result);
+        $remaining = $agent->getStoredContext($this->testPhone);
+        $this->assertCount(1, $remaining);
+        $this->assertEquals('location', $remaining[0]['key']);
+    }
+
+    public function test_smart_context_agent_forget_nonexistent_fact_returns_false(): void
+    {
+        $agent = new SmartContextAgent();
+        $result = $agent->forgetFact($this->testPhone, 'nonexistent_key');
+
+        $this->assertFalse($result);
+    }
+
+    public function test_smart_context_agent_get_profile_stats_empty(): void
+    {
+        $agent = new SmartContextAgent();
+        $stats = $agent->getProfileStats($this->testPhone);
+
+        $this->assertEquals(0, $stats['total']);
+        $this->assertEmpty($stats['by_category']);
+        $this->assertEquals(0.0, $stats['avg_score']);
+    }
+
+    public function test_smart_context_agent_get_profile_stats_with_facts(): void
+    {
+        $store = new ContextStore();
+        $store->store($this->testPhone, [
+            ['key' => 'profession', 'value' => 'Dev Laravel', 'category' => 'profession', 'score' => 1.0, 'timestamp' => time()],
+            ['key' => 'humor_style', 'value' => 'Humour noir', 'category' => 'preference', 'score' => 0.8, 'timestamp' => time()],
+        ]);
+
+        $agent = new SmartContextAgent();
+        $stats = $agent->getProfileStats($this->testPhone);
+
+        $this->assertEquals(2, $stats['total']);
+        $this->assertArrayHasKey('profession', $stats['by_category']);
+        $this->assertArrayHasKey('preference', $stats['by_category']);
+        $this->assertEquals(0.9, $stats['avg_score']);
+        $this->assertNotNull($stats['oldest_fact']);
+    }
+
+    public function test_smart_context_agent_version_is_1_1_0(): void
+    {
+        $agent = new SmartContextAgent();
+        $this->assertEquals('1.1.0', $agent->version());
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private function makeContext(string $body): AgentContext
@@ -239,8 +334,10 @@ class SmartContextAgentTest extends TestCase
         $user = User::factory()->create();
         $agent = Agent::factory()->create(['user_id' => $user->id]);
         $session = AgentSession::create([
-            'agent_id' => $agent->id,
-            'phone' => $this->testPhone,
+            'agent_id'     => $agent->id,
+            'session_key'  => AgentSession::keyFor($agent->id, 'whatsapp', $this->testPhone),
+            'channel'      => 'whatsapp',
+            'peer_id'      => $this->testPhone,
             'last_message_at' => now(),
         ]);
 
