@@ -56,6 +56,9 @@ class RouterAgent
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
             => ['user_preferences', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Content curation → content_curator
+        '/\b(digest|trending|tendance|follow\s+\w+|veille|curation|mes\s+bookmarks?|resume\s+quotidien|daily\s+digest)\b/iu'
+            => ['content_curator', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
         // Workflow / chain / streamline → streamline
         '/^\/workflow\b/iu'
             => ['streamline', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -413,6 +416,7 @@ CATALOG;
                 'conversation_memory',
                 'streamline',
                 'interactive_quiz',
+                'content_curator',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {

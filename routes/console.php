@@ -21,3 +21,4 @@ Schedule::command('zeniclaw:auto-improve-agents')->everyThirtyMinutes()->when(fu
     return AppSetting::get('auto_improve_agents_enabled') === 'true';
 });
 Schedule::command('memories:cleanup')->dailyAt('02:00');
+Schedule::command('content:daily-digest')->dailyAt('07:30');

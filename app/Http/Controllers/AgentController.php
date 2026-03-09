@@ -209,6 +209,14 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Quizz ludiques avec scoring et défis',
         ],
+        'content_curator' => [
+            'label' => 'Content Curator',
+            'icon' => '📰',
+            'color' => 'indigo',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-09',
+            'description' => 'Agregez et organisez l\'actualite selon vos interets',
+        ],
     ];
 
     public function index(Request $request)
