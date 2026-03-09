@@ -70,4 +70,14 @@ class MeetingSession extends Model
     {
         return $query->where('status', 'completed');
     }
+
+    public function scopeActive($query)
+    {
+        return $query->where('status', 'active');
+    }
+
+    public function scopeCancelled($query)
+    {
+        return $query->where('status', 'cancelled');
+    }
 }

@@ -24,10 +24,10 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertEquals('content_summarizer', $agent->name());
     }
 
-    public function test_agent_version_is_1_2_0(): void
+    public function test_agent_version_is_1_3_0(): void
     {
         $agent = new ContentSummarizerAgent();
-        $this->assertEquals('1.2.0', $agent->version());
+        $this->assertEquals('1.3.0', $agent->version());
     }
 
     public function test_agent_has_description(): void
@@ -162,13 +162,13 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertFalse($method->invoke($agent, 'data:text/html,<script>alert(1)</script>'));
     }
 
-    // ── Summary length detection ──────────────────────────────────────────────
+    // ── Summary mode detection ────────────────────────────────────────────────
 
     public function test_detect_short_summary_keywords(): void
     {
         $agent = new ContentSummarizerAgent();
         $reflection = new \ReflectionClass($agent);
-        $method = $reflection->getMethod('detectSummaryLength');
+        $method = $reflection->getMethod('detectSummaryMode');
         $method->setAccessible(true);
 
         $this->assertEquals('short', $method->invoke($agent, 'resume court https://example.com'));
@@ -181,7 +181,7 @@ class ContentSummarizerAgentTest extends TestCase
     {
         $agent = new ContentSummarizerAgent();
         $reflection = new \ReflectionClass($agent);
-        $method = $reflection->getMethod('detectSummaryLength');
+        $method = $reflection->getMethod('detectSummaryMode');
         $method->setAccessible(true);
 
         $this->assertEquals('detailed', $method->invoke($agent, 'resume detaille https://example.com'));
@@ -194,11 +194,48 @@ class ContentSummarizerAgentTest extends TestCase
     {
         $agent = new ContentSummarizerAgent();
         $reflection = new \ReflectionClass($agent);
-        $method = $reflection->getMethod('detectSummaryLength');
+        $method = $reflection->getMethod('detectSummaryMode');
         $method->setAccessible(true);
 
         $this->assertEquals('medium', $method->invoke($agent, 'resume https://example.com'));
         $this->assertEquals('medium', $method->invoke($agent, 'summarize this'));
+    }
+
+    public function test_detect_bullet_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('bullet', $method->invoke($agent, 'en points https://example.com'));
+        $this->assertEquals('bullet', $method->invoke($agent, 'bullet https://example.com'));
+        $this->assertEquals('bullet', $method->invoke($agent, 'liste de points https://example.com'));
+        $this->assertEquals('bullet', $method->invoke($agent, 'key points https://example.com'));
+    }
+
+    public function test_detect_keywords_only_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('keywords', $method->invoke($agent, 'mots-cles seulement https://example.com'));
+        $this->assertEquals('keywords', $method->invoke($agent, 'keywords only https://example.com'));
+        $this->assertEquals('keywords', $method->invoke($agent, 'liste des tags https://example.com'));
+        $this->assertEquals('keywords', $method->invoke($agent, 'extraire les tags https://example.com'));
+    }
+
+    public function test_keywords_mode_takes_priority_over_bullet(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // keywords-only pattern should win even if bullet words appear
+        $this->assertEquals('keywords', $method->invoke($agent, 'mots-cles seulement en points https://example.com'));
     }
 
     // ── URL extraction ────────────────────────────────────────────────────────
@@ -407,6 +444,8 @@ class ContentSummarizerAgentTest extends TestCase
 
         $this->assertStringContainsString('Comparaison', $result->reply);
         $this->assertStringContainsString('Detection automatique de la langue', $result->reply);
+        $this->assertStringContainsString('en points', $result->reply);
+        $this->assertStringContainsString('mots-cles seulement', $result->reply);
     }
 
     public function test_help_message_shows_vimeo(): void
@@ -609,6 +648,64 @@ HTML;
         $this->assertStringContainsString('full article body from JSON-LD', $result);
     }
 
+    public function test_parse_html_extracts_author_and_pub_date(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('parseHtmlContent');
+        $method->setAccessible(true);
+
+        $html = <<<HTML
+<html>
+<head>
+<title>Test Article</title>
+<meta name="author" content="Jane Doe">
+<meta property="article:published_time" content="2026-01-15T08:30:00Z">
+<meta name="description" content="An article about testing.">
+</head>
+<body><main><p>Article body content here.</p></main></body>
+</html>
+HTML;
+
+        $result = $method->invoke($agent, $html, 'https://example.com/article');
+
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('Jane Doe', $result);
+        $this->assertStringContainsString('2026-01-15', $result);
+        $this->assertStringNotContainsString('T08:30:00Z', $result); // Date should be trimmed to YYYY-MM-DD
+    }
+
+    public function test_parse_html_extracts_author_from_json_ld(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('parseHtmlContent');
+        $method->setAccessible(true);
+
+        $html = <<<HTML
+<html>
+<head>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "JSON-LD Article",
+    "author": {"@type": "Person", "name": "John Smith"},
+    "datePublished": "2025-12-01T10:00:00Z"
+}
+</script>
+</head>
+<body><main><p>Content here.</p></main></body>
+</html>
+HTML;
+
+        $result = $method->invoke($agent, $html, 'https://example.com/test');
+
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('John Smith', $result);
+        $this->assertStringContainsString('2025-12-01', $result);
+    }
+
     public function test_is_secure_url_blocks_private_ips(): void
     {
         $agent = new ContentSummarizerAgent();
@@ -636,6 +733,20 @@ HTML;
         $this->assertFalse($method->invoke($agent, 'data:text/html,<b>test</b>'));
         $this->assertTrue($method->invoke($agent, 'http://example.com/page'));
         $this->assertTrue($method->invoke($agent, 'https://example.com/page'));
+    }
+
+    public function test_onion_domain_is_blocked(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSecureUrl');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($agent, 'http://3g2upl4pq6kufc4m.onion/'));
+        $this->assertFalse($method->invoke($agent, 'https://somesite.onion/page'));
+        $this->assertFalse($method->invoke($agent, 'http://hidden.onion:8080/path'));
+        // Non-.onion with "onion" in path should pass
+        $this->assertTrue($method->invoke($agent, 'https://onion.example.com/article'));
     }
 
     // ── Compare mode ──────────────────────────────────────────────────────────

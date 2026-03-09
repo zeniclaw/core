@@ -397,4 +397,283 @@ class SmartMeetingAgentTest extends TestCase
         $this->assertCount(1, $userMeetings);
         $this->assertEquals('Completed Meeting', $userMeetings->first()->group_name);
     }
+
+    // ── New features v1.2.0 ───────────────────────────────────────────────
+
+    public function test_version_is_1_2_0(): void
+    {
+        $this->assertEquals('1.2.0', $this->agent->version());
+    }
+
+    public function test_cancel_meeting_without_active_returns_error(): void
+    {
+        $context = $this->makeContext('reunion cancel');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('no_active_meeting', $result->metadata['action']);
+        $this->assertStringContainsString('annuler', $result->reply);
+    }
+
+    public function test_cancel_meeting_marks_as_cancelled(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Meeting a Annuler',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(5),
+            'messages_captured' => [
+                ['sender' => 'Alice', 'content' => 'test', 'timestamp' => now()->toISOString()],
+            ],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion cancel');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('meeting_cancelled', $result->metadata['action']);
+        $this->assertStringContainsString('Meeting a Annuler', $result->reply);
+
+        $this->assertDatabaseHas('meeting_sessions', [
+            'id' => $meeting->id,
+            'status' => 'cancelled',
+        ]);
+        $this->assertNull(MeetingSession::getActive($this->testPhone));
+    }
+
+    public function test_stats_when_no_meetings(): void
+    {
+        $context = $this->makeContext('reunion stats');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('stats_no_data', $result->metadata['action']);
+    }
+
+    public function test_stats_shows_meeting_statistics(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Sprint Planning',
+            'status' => 'completed',
+            'started_at' => now()->subHours(2),
+            'ended_at' => now()->subHour(),
+            'messages_captured' => [
+                ['sender' => 'Alice', 'content' => 'Hello', 'timestamp' => now()->toISOString()],
+                ['sender' => 'Bob', 'content' => 'Hi', 'timestamp' => now()->toISOString()],
+            ],
+            'summary' => json_encode([
+                'action_items' => [['task' => 'Do something', 'assignee' => 'Alice', 'deadline' => null]],
+                'decisions' => [], 'risks' => [], 'next_steps' => [], 'participants' => ['Alice', 'Bob'], 'summary' => 'Test',
+            ]),
+        ]);
+
+        $context = $this->makeContext('reunion stats');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('meeting_stats', $result->metadata['action']);
+        $this->assertEquals(1, $result->metadata['total_meetings']);
+        $this->assertEquals(2, $result->metadata['total_messages']);
+        $this->assertEquals(1, $result->metadata['total_action_items']);
+        $this->assertStringContainsString('Sprint Planning', $result->reply);
+    }
+
+    public function test_search_meetings_missing_term(): void
+    {
+        $context = $this->makeContext('reunion search');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('search_missing_term', $result->metadata['action']);
+    }
+
+    public function test_search_meetings_no_results(): void
+    {
+        $context = $this->makeContext('reunion search introuvable');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('search_no_results', $result->metadata['action']);
+        $this->assertEquals('introuvable', $result->metadata['term']);
+    }
+
+    public function test_search_meetings_finds_by_name(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Sprint Review Q1',
+            'status' => 'completed',
+            'started_at' => now()->subHour(),
+            'ended_at' => now(),
+            'messages_captured' => [],
+        ]);
+
+        $context = $this->makeContext('reunion search sprint');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('search_results', $result->metadata['action']);
+        $this->assertEquals(1, $result->metadata['count']);
+        $this->assertStringContainsString('Sprint Review Q1', $result->reply);
+    }
+
+    public function test_list_meetings_with_custom_limit(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        for ($i = 1; $i <= 8; $i++) {
+            MeetingSession::create([
+                'user_phone' => $this->testPhone,
+                'agent_id' => $agentModel->id,
+                'group_name' => "Meeting {$i}",
+                'status' => 'completed',
+                'started_at' => now()->subHours($i + 1),
+                'ended_at' => now()->subHours($i),
+                'messages_captured' => [],
+            ]);
+        }
+
+        $context = $this->makeContext('reunion list 3');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertEquals('meeting_list', $result->metadata['action']);
+        $this->assertEquals(3, $result->metadata['count']);
+        // Should mention total count
+        $this->assertStringContainsString('8 reunions', $result->reply);
+    }
+
+    public function test_status_shows_last_messages(): void
+    {
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        $meeting = MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Demo',
+            'status' => 'active',
+            'started_at' => now()->subMinutes(10),
+            'messages_captured' => [
+                ['sender' => 'Alice', 'content' => 'Premier message', 'timestamp' => now()->toISOString()],
+                ['sender' => 'Bob', 'content' => 'Deuxieme message', 'timestamp' => now()->toISOString()],
+                ['sender' => 'Alice', 'content' => 'Troisieme message', 'timestamp' => now()->toISOString()],
+            ],
+        ]);
+        $meeting->activate();
+
+        $context = $this->makeContext('reunion status');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Derniers messages', $result->reply);
+        $this->assertStringContainsString('Troisieme message', $result->reply);
+    }
+
+    public function test_meeting_session_cancelled_scope(): void
+    {
+        $user = User::factory()->create();
+        $agent = Agent::factory()->create(['user_id' => $user->id]);
+
+        MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agent->id,
+            'group_name' => 'Cancelled Meeting',
+            'status' => 'cancelled',
+            'started_at' => now()->subHour(),
+            'ended_at' => now(),
+            'messages_captured' => [],
+        ]);
+
+        $cancelled = MeetingSession::forUser($this->testPhone)->cancelled()->get();
+        $this->assertCount(1, $cancelled);
+        $this->assertEquals('Cancelled Meeting', $cancelled->first()->group_name);
+    }
+
+    public function test_format_duration_handles_days(): void
+    {
+        // Use a completed meeting with > 24h duration
+        $user = User::factory()->create();
+        $agentModel = Agent::factory()->create(['user_id' => $user->id]);
+
+        MeetingSession::create([
+            'user_phone' => $this->testPhone,
+            'agent_id' => $agentModel->id,
+            'group_name' => 'Long Offsite',
+            'status' => 'completed',
+            'started_at' => now()->subDays(2),
+            'ended_at' => now(),
+            'messages_captured' => [],
+        ]);
+
+        $context = $this->makeContext('reunion list');
+
+        $agent = $this->getMockBuilder(SmartMeetingAgent::class)
+            ->onlyMethods(['sendText'])
+            ->getMock();
+        $agent->expects($this->once())->method('sendText');
+
+        $result = $agent->handle($context);
+        $this->assertStringContainsString('j', $result->reply); // days shown as "Xj"
+    }
 }

@@ -19,7 +19,7 @@ class SmartMeetingAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de reunion intelligent. Capture automatiquement les messages pendant une reunion, genere une synthese structuree avec decisions, actions a faire, risques, participants et prochaines etapes. Permet aussi de lister les reunions passees, verifier le statut en cours, et cree automatiquement des todos et rappels a partir des action items.';
+        return 'Agent de reunion intelligent. Capture automatiquement les messages pendant une reunion, genere une synthese structuree avec decisions, actions a faire, risques, participants et prochaines etapes. Permet aussi de lister les reunions passees, rechercher dans l\'historique, afficher des statistiques, verifier le statut en cours, annuler une reunion, et cree automatiquement des todos et rappels a partir des action items.';
     }
 
     public function keywords(): array
@@ -36,12 +36,15 @@ class SmartMeetingAgent extends BaseAgent
             'prochaines etapes', 'next steps',
             'reunion status', 'statut reunion', 'en cours reunion',
             'reunion list', 'liste reunions', 'historique reunion', 'mes reunions',
+            'reunion cancel', 'annuler reunion', 'supprimer reunion',
+            'reunion stats', 'stats reunion', 'statistiques reunion',
+            'reunion search', 'chercher reunion', 'recherche reunion',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -61,12 +64,24 @@ class SmartMeetingAgent extends BaseAgent
             return $this->endMeeting($context);
         }
 
+        if ($this->isCancelCommand($body)) {
+            return $this->cancelMeeting($context);
+        }
+
         if ($this->isStatusCommand($body)) {
             return $this->showStatus($context);
         }
 
+        if ($this->isStatsCommand($body)) {
+            return $this->showStats($context);
+        }
+
+        if ($this->isSearchCommand($body)) {
+            return $this->searchMeetings($context);
+        }
+
         if ($this->isListCommand($body)) {
-            return $this->listMeetings($context);
+            return $this->listMeetings($context, $body);
         }
 
         if ($this->isSummaryCommand($body)) {
@@ -82,8 +97,11 @@ class SmartMeetingAgent extends BaseAgent
         $reply = "*Reunion Agent* — Commandes disponibles:\n\n"
             . "- *reunion start [nom]* — Demarrer une reunion\n"
             . "- *reunion end* — Terminer et obtenir la synthese\n"
+            . "- *reunion cancel* — Annuler sans generer de synthese\n"
             . "- *reunion status* — Statut de la reunion en cours\n"
             . "- *reunion list* — Historique des 5 dernieres reunions\n"
+            . "- *reunion search [terme]* — Rechercher dans les reunions\n"
+            . "- *reunion stats* — Statistiques de tes reunions\n"
             . "- *synthese reunion [nom]* — Revoir la synthese d'une reunion";
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'meeting_help']);
@@ -103,10 +121,28 @@ class SmartMeetingAgent extends BaseAgent
             || (bool) preg_match('/\b(terminer|finir|fin)\s+r[ée]union\b/iu', $body);
     }
 
+    private function isCancelCommand(string $body): bool
+    {
+        return (bool) preg_match('/\b(r[ée]union|meeting)\s+cancel\b/iu', $body)
+            || (bool) preg_match('/\b(annuler|supprimer)\s+r[ée]union\b/iu', $body);
+    }
+
     private function isStatusCommand(string $body): bool
     {
         return (bool) preg_match('/\b(r[ée]union|meeting)\s+status\b/iu', $body)
-            || (bool) preg_match('/\bstatut\s+r[ée]union\b/iu', $body);
+            || (bool) preg_match('/\bstatut\s+(r[ée]union|meeting)\b/iu', $body);
+    }
+
+    private function isStatsCommand(string $body): bool
+    {
+        return (bool) preg_match('/\b(r[ée]union|meeting)s?\s+stats?\b/iu', $body)
+            || (bool) preg_match('/\b(stats?|statistiques?)\s+(r[ée]union|meeting)s?\b/iu', $body);
+    }
+
+    private function isSearchCommand(string $body): bool
+    {
+        return (bool) preg_match('/\b(r[ée]union|meeting)\s+search\b/iu', $body)
+            || (bool) preg_match('/\b(chercher|recherche)\s+r[ée]union\b/iu', $body);
     }
 
     private function isListCommand(string $body): bool
@@ -117,7 +153,9 @@ class SmartMeetingAgent extends BaseAgent
 
     private function isSummaryCommand(string $body): bool
     {
-        return (bool) preg_match('/\bsynth[eè]se\s+r[ée]union\b/iu', $body);
+        return (bool) preg_match('/\bsynth[eè]se\s+r[ée]union\b/iu', $body)
+            || (bool) preg_match('/\bmeeting\s+summary\b/iu', $body)
+            || (bool) preg_match('/\bcompte[- ]?rendu\s+r[ée]union\b/iu', $body);
     }
 
     // ── Actions ───────────────────────────────────────────────────────────
@@ -130,7 +168,7 @@ class SmartMeetingAgent extends BaseAgent
             $msgCount = count($active->messages_captured ?? []);
             $reply = "Une reunion est deja en cours: *{$active->group_name}*\n"
                 . "Demarree il y a {$elapsed} — {$msgCount} messages captures.\n"
-                . "Termine-la d'abord avec *reunion end*.";
+                . "Termine-la avec *reunion end* ou annule-la avec *reunion cancel*.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'meeting_already_active']);
         }
@@ -160,7 +198,8 @@ class SmartMeetingAgent extends BaseAgent
         $reply = "Reunion *{$groupName}* demarree!\n\n"
             . "Tous tes messages seront captures automatiquement.\n"
             . "Utilise *reunion status* pour voir l'avancement.\n"
-            . "Envoie *reunion end* quand tu as fini pour obtenir la synthese.";
+            . "Envoie *reunion end* quand tu as fini pour obtenir la synthese.\n"
+            . "Ou *reunion cancel* pour annuler sans synthese.";
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'meeting_started', 'meeting_id' => $meeting->id]);
     }
@@ -230,6 +269,40 @@ class SmartMeetingAgent extends BaseAgent
         ]);
     }
 
+    private function cancelMeeting(AgentContext $context): AgentResult
+    {
+        $active = MeetingSession::getActive($context->from);
+        if (!$active) {
+            $reply = "Aucune reunion en cours a annuler.\nDemarre une reunion avec *reunion start [nom]*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'no_active_meeting']);
+        }
+
+        $groupName = $active->group_name;
+        $msgCount = count($active->messages_captured ?? []);
+        $elapsed = $this->formatDuration($active->started_at->diff(now()));
+
+        $active->update([
+            'status' => 'cancelled',
+            'ended_at' => now(),
+        ]);
+        $active->deactivate();
+
+        $this->log($context, "Meeting cancelled: {$groupName}", [
+            'meeting_id' => $active->id,
+            'messages_captured' => $msgCount,
+        ]);
+
+        $reply = "Reunion *{$groupName}* annulee ({$elapsed}, {$msgCount} messages supprimes).\n"
+            . "Aucune synthese generee.\n"
+            . "Lance une nouvelle reunion avec *reunion start [nom]*.";
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, [
+            'action' => 'meeting_cancelled',
+            'meeting_id' => $active->id,
+        ]);
+    }
+
     private function showStatus(AgentContext $context): AgentResult
     {
         $active = MeetingSession::getActive($context->from);
@@ -253,6 +326,18 @@ class SmartMeetingAgent extends BaseAgent
             $reply .= "Participants: " . implode(', ', $participants) . "\n";
         }
 
+        // Show last 3 messages for quick context
+        $lastMessages = array_slice($messages, -3);
+        if (!empty($lastMessages)) {
+            $reply .= "\n*Derniers messages:*\n";
+            foreach ($lastMessages as $msg) {
+                $sender = $msg['sender'] ?? 'Inconnu';
+                $content = mb_substr($msg['content'] ?? '', 0, 60);
+                $suffix = mb_strlen($msg['content'] ?? '') > 60 ? '...' : '';
+                $reply .= "  {$sender}: {$content}{$suffix}\n";
+            }
+        }
+
         $reply .= "\nEnvoie *reunion end* pour terminer et obtenir la synthese.";
 
         $this->sendText($context->from, $reply);
@@ -264,12 +349,18 @@ class SmartMeetingAgent extends BaseAgent
         ]);
     }
 
-    private function listMeetings(AgentContext $context): AgentResult
+    private function listMeetings(AgentContext $context, string $body = ''): AgentResult
     {
+        // Support "reunion list 10" to show more results
+        $limit = 5;
+        if (preg_match('/\b(\d+)\s*$/', $body, $m)) {
+            $limit = min((int) $m[1], 20);
+        }
+
         $meetings = MeetingSession::forUser($context->from)
             ->completed()
             ->latest('ended_at')
-            ->limit(5)
+            ->limit($limit)
             ->get();
 
         if ($meetings->isEmpty()) {
@@ -285,8 +376,14 @@ class SmartMeetingAgent extends BaseAgent
             $duration = ($m->started_at && $m->ended_at)
                 ? $this->formatDuration($m->started_at->diff($m->ended_at))
                 : '?';
-            $lines[] = ($i + 1) . ". *{$m->group_name}*";
+            $hasSummary = !empty($m->summary) ? '' : ' _(pas de synthese)_';
+            $lines[] = ($i + 1) . ". *{$m->group_name}*{$hasSummary}";
             $lines[] = "   {$date} — {$duration} — {$msgCount} msg";
+        }
+
+        $total = MeetingSession::forUser($context->from)->completed()->count();
+        if ($total > $limit) {
+            $lines[] = "\n_({$total} reunions au total — utilise *reunion list {$total}* pour tout voir)_";
         }
 
         $lines[] = "\nPour revoir une synthese: *synthese reunion [nom]*";
@@ -300,7 +397,12 @@ class SmartMeetingAgent extends BaseAgent
     {
         $body = $context->body ?? '';
         $meetingName = null;
+
         if (preg_match('/synth[eè]se\s+r[ée]union\s+(.+)/iu', $body, $matches)) {
+            $meetingName = trim($matches[1]);
+        } elseif (preg_match('/meeting\s+summary\s+(.+)/iu', $body, $matches)) {
+            $meetingName = trim($matches[1]);
+        } elseif (preg_match('/compte[- ]?rendu\s+r[ée]union\s+(.+)/iu', $body, $matches)) {
             $meetingName = trim($matches[1]);
         }
 
@@ -323,10 +425,17 @@ class SmartMeetingAgent extends BaseAgent
         $summary = $meeting->summary ? json_decode($meeting->summary, true) : null;
 
         if (!$summary) {
+            $messages = $meeting->messages_captured ?? [];
+            if (empty($messages)) {
+                $reply = "La reunion *{$meeting->group_name}* n'a pas de messages captures — impossible de generer une synthese.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'meeting_no_messages']);
+            }
+
             $this->sendText($context->from, "Regeneration de la synthese pour *{$meeting->group_name}*...");
             try {
                 $analyzer = new MeetingAnalyzer();
-                $summary = $analyzer->analyze($meeting->messages_captured ?? [], $meeting->group_name);
+                $summary = $analyzer->analyze($messages, $meeting->group_name);
                 $meeting->update(['summary' => json_encode($summary, JSON_UNESCAPED_UNICODE)]);
             } catch (\Throwable $e) {
                 Log::error('SmartMeetingAgent: showSummary re-analyze failed: ' . $e->getMessage());
@@ -344,6 +453,134 @@ class SmartMeetingAgent extends BaseAgent
         $reply = $this->formatAnalysis($meeting->group_name, $summary, $messagesCount, $duration);
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'meeting_summary', 'meeting_id' => $meeting->id]);
+    }
+
+    private function showStats(AgentContext $context): AgentResult
+    {
+        $completed = MeetingSession::forUser($context->from)->completed()->get();
+
+        if ($completed->isEmpty()) {
+            $reply = "Aucune reunion terminee pour afficher des statistiques.\nDemarre une reunion avec *reunion start [nom]*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'stats_no_data']);
+        }
+
+        $totalMeetings = $completed->count();
+        $totalMessages = $completed->sum(fn($m) => count($m->messages_captured ?? []));
+
+        // Compute average duration in seconds
+        $durationsSeconds = $completed
+            ->filter(fn($m) => $m->started_at && $m->ended_at)
+            ->map(fn($m) => $m->started_at->diffInSeconds($m->ended_at));
+
+        $avgDuration = $durationsSeconds->isNotEmpty()
+            ? $this->formatDuration($this->secondsToInterval((int) $durationsSeconds->avg()))
+            : 'N/A';
+
+        $longestMeeting = $completed
+            ->filter(fn($m) => $m->started_at && $m->ended_at)
+            ->sortByDesc(fn($m) => $m->started_at->diffInSeconds($m->ended_at))
+            ->first();
+
+        // Total action items across all summaries
+        $totalActionItems = $completed->sum(function ($m) {
+            if (!$m->summary) return 0;
+            $s = json_decode($m->summary, true);
+            return count($s['action_items'] ?? []);
+        });
+
+        // Collect all participants
+        $allParticipants = [];
+        foreach ($completed as $m) {
+            foreach ($m->messages_captured ?? [] as $msg) {
+                $sender = $msg['sender'] ?? null;
+                if ($sender) {
+                    $allParticipants[$sender] = ($allParticipants[$sender] ?? 0) + 1;
+                }
+            }
+        }
+        arsort($allParticipants);
+        $topParticipants = array_slice(array_keys($allParticipants), 0, 3);
+
+        $lastMeeting = $completed->sortByDesc('ended_at')->first();
+
+        $reply = "*Statistiques de tes reunions*\n\n"
+            . "Reunions terminees: *{$totalMeetings}*\n"
+            . "Messages captures (total): *{$totalMessages}*\n"
+            . "Action items generes: *{$totalActionItems}*\n"
+            . "Duree moyenne: *{$avgDuration}*\n";
+
+        if ($longestMeeting) {
+            $longestDur = $this->formatDuration($longestMeeting->started_at->diff($longestMeeting->ended_at));
+            $reply .= "Reunion la plus longue: *{$longestMeeting->group_name}* ({$longestDur})\n";
+        }
+
+        if (!empty($topParticipants)) {
+            $reply .= "Top participants: " . implode(', ', $topParticipants) . "\n";
+        }
+
+        if ($lastMeeting) {
+            $reply .= "Derniere reunion: *{$lastMeeting->group_name}* le " . $lastMeeting->ended_at->format('d/m/y');
+        }
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, [
+            'action' => 'meeting_stats',
+            'total_meetings' => $totalMeetings,
+            'total_messages' => $totalMessages,
+            'total_action_items' => $totalActionItems,
+        ]);
+    }
+
+    private function searchMeetings(AgentContext $context): AgentResult
+    {
+        $body = $context->body ?? '';
+        $term = null;
+
+        if (preg_match('/(?:r[ée]union|meeting)\s+search\s+(.+)/iu', $body, $matches)) {
+            $term = trim($matches[1]);
+        } elseif (preg_match('/(?:chercher|recherche)\s+r[ée]union\s+(.+)/iu', $body, $matches)) {
+            $term = trim($matches[1]);
+        }
+
+        if (empty($term)) {
+            $reply = "Utilise: *reunion search [terme]*\nEx: *reunion search sprint* pour trouver toutes les reunions sprint.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'search_missing_term']);
+        }
+
+        $lowerTerm = strtolower($term);
+        $meetings = MeetingSession::forUser($context->from)
+            ->where(function ($q) use ($lowerTerm) {
+                $q->whereRaw('LOWER(group_name) LIKE ?', ["%{$lowerTerm}%"])
+                  ->orWhereRaw('LOWER(summary) LIKE ?', ["%{$lowerTerm}%"]);
+            })
+            ->latest('ended_at')
+            ->limit(10)
+            ->get();
+
+        if ($meetings->isEmpty()) {
+            $reply = "Aucune reunion trouvee pour \"{$term}\".\nUtilise *reunion list* pour voir toutes tes reunions.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'search_no_results', 'term' => $term]);
+        }
+
+        $lines = ["*Resultats pour \"{$term}\":*\n"];
+        foreach ($meetings as $i => $m) {
+            $date = $m->ended_at ? $m->ended_at->format('d/m/y') : ($m->started_at ? $m->started_at->format('d/m/y') : '?');
+            $status = $m->status === 'active' ? ' _(en cours)_' : ($m->status === 'cancelled' ? ' _(annulee)_' : '');
+            $lines[] = ($i + 1) . ". *{$m->group_name}*{$status} — {$date}";
+        }
+
+        $lines[] = "\nPour la synthese: *synthese reunion [nom]*";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, [
+            'action' => 'search_results',
+            'term' => $term,
+            'count' => $meetings->count(),
+        ]);
     }
 
     private function captureMessage(AgentContext $context, MeetingSession $meeting): AgentResult
@@ -443,6 +680,10 @@ class SmartMeetingAgent extends BaseAgent
 
     private function formatDuration(\DateInterval $interval): string
     {
+        if ($interval->days >= 1) {
+            $extra = $interval->h > 0 ? " {$interval->h}h" : '';
+            return $interval->days . 'j' . $extra;
+        }
         if ($interval->h > 0) {
             return $interval->h . 'h' . ($interval->i > 0 ? $interval->i . 'min' : '');
         }
@@ -450,6 +691,13 @@ class SmartMeetingAgent extends BaseAgent
             return $interval->i . ' min';
         }
         return $interval->s . ' sec';
+    }
+
+    private function secondsToInterval(int $seconds): \DateInterval
+    {
+        $dt1 = new \DateTime('@0');
+        $dt2 = new \DateTime("@{$seconds}");
+        return $dt1->diff($dt2);
     }
 
     // ── Post-meeting automation ───────────────────────────────────────────
