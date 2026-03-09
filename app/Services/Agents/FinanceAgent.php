@@ -18,7 +18,7 @@ class FinanceAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition de budgets mensuels, alertes de depassement, historique, rapports, projections de fin de mois et detection d\'anomalies de depenses.';
+        return 'Agent de gestion financiere personnelle. Suivi des depenses par categorie, definition et suppression de budgets mensuels, alertes de depassement, historique, rapports, projections de fin de mois, detail par categorie et detection d\'anomalies de depenses.';
     }
 
     public function keywords(): array
@@ -41,14 +41,16 @@ class FinanceAgent extends BaseAgent
             'abonnement', 'abonnements', 'subscription',
             'historique', 'history', 'dernieres depenses', 'recent expenses',
             'supprimer depense', 'annuler depense', 'delete expense',
+            'supprimer budget', 'delete budget', 'enlever budget',
             'aide finance', 'help finance', 'commandes finance',
             'projection', 'prevision', 'fin de mois',
+            'detail', 'details', 'analyse categorie', 'category detail',
         ];
     }
 
     public function version(): string
     {
-        return '1.1.0';
+        return '1.2.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -67,9 +69,10 @@ class FinanceAgent extends BaseAgent
             '/\b\d+[\.,]?\d*\s*€?\s*(euro|eur)?\b/i',
             '/\b(finance|financier|financiere)\b/i',
             '/\b(historique|history)\b/i',
-            '/\b(supprimer|annuler)\s+(depense|derniere)\b/iu',
+            '/\b(supprimer|annuler)\s+(depense|derniere|budget)\b/iu',
             '/\b(aide|help)\s+finance\b/iu',
             '/\bprojection\b/i',
+            '/\bdetail\s+\w+/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -104,26 +107,43 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'help'];
         }
 
+        // supprimer budget [categorie]
+        if (preg_match('/\b(supprimer|annuler|enlever|delete)\b.{0,10}\bbudget\b\s+(\S+)/iu', $lower, $m)) {
+            return ['action' => 'delete_budget', 'category' => trim($m[2])];
+        }
+
         // supprimer / annuler la derniere depense
         if (preg_match('/\b(supprimer|annuler|delete|undo)\b.*(depense|expense|derniere|last)/iu', $lower)) {
             return ['action' => 'delete_last'];
         }
 
-        // historique [n]
+        // historique [n] — extract limit only from explicit digit + context pattern
         if (preg_match('/\b(historique|history|dernieres?)\b/iu', $lower)) {
             $limit = 10;
-            if (preg_match('/(\d+)\s*(?:dernieres?|last|depenses?)?/i', $lower, $m)) {
-                $limit = min((int) $m[1], 20);
+            // Only match patterns like "10 dernieres", "historique 5", "last 15"
+            if (preg_match('/(?:historique|history|dernieres?|last)\s+(\d{1,2})\b|\b(\d{1,2})\s+(?:dernieres?|last|depenses?)/i', $lower, $m)) {
+                $raw   = (int) ($m[1] ?: $m[2]);
+                $limit = min($raw, 20);
             }
             return ['action' => 'history', 'limit' => $limit];
+        }
+
+        // projection / prevision
+        if (preg_match('/\b(projection|prevision|fin de mois)\b/iu', $lower)) {
+            return ['action' => 'projection'];
+        }
+
+        // detail [categorie] — detailed stats for a category
+        if (preg_match('/\bdetail\s+(\S+)/iu', $lower, $m)) {
+            return ['action' => 'category_detail', 'category' => trim($m[1])];
         }
 
         // ajout depense [montant] [categorie] [description]
         if (preg_match('/(?:ajout(?:e|er)?|add|log)\s*(?:depense|expense)?\s*(\d+[\.,]?\d*)\s*€?\s+(\S+)\s*(.*)/iu', $lower, $m)) {
             return [
-                'action' => 'log_expense',
-                'amount' => (float) str_replace(',', '.', $m[1]),
-                'category' => $m[2],
+                'action'      => 'log_expense',
+                'amount'      => (float) str_replace(',', '.', $m[1]),
+                'category'    => $m[2],
                 'description' => trim($m[3]) ?: null,
             ];
         }
@@ -131,9 +151,9 @@ class FinanceAgent extends BaseAgent
         // depense [montant] [categorie] [description] (shorthand)
         if (preg_match('/(?:depense|spent|paye|achete)\s+(\d+[\.,]?\d*)\s*€?\s+(?:en\s+|pour\s+)?(\S+)\s*(.*)/iu', $lower, $m)) {
             return [
-                'action' => 'log_expense',
-                'amount' => (float) str_replace(',', '.', $m[1]),
-                'category' => $m[2],
+                'action'      => 'log_expense',
+                'amount'      => (float) str_replace(',', '.', $m[1]),
+                'category'    => $m[2],
                 'description' => trim($m[3]) ?: null,
             ];
         }
@@ -141,9 +161,9 @@ class FinanceAgent extends BaseAgent
         // budget [categorie] [montant]
         if (preg_match('/budget\s+(\S+)\s+(\d+[\.,]?\d*)\s*€?/iu', $lower, $m)) {
             return [
-                'action' => 'set_budget',
+                'action'   => 'set_budget',
                 'category' => $m[1],
-                'amount' => (float) str_replace(',', '.', $m[2]),
+                'amount'   => (float) str_replace(',', '.', $m[2]),
             ];
         }
 
@@ -168,20 +188,23 @@ class FinanceAgent extends BaseAgent
     private function executeCommand(array $command, AgentContext $context): AgentResult
     {
         $response = match ($command['action']) {
-            'log_expense' => $this->logExpense(
+            'log_expense'     => $this->logExpense(
                 $context->from,
                 $command['amount'],
                 $command['category'],
                 $command['description'] ?? null
             ),
-            'set_budget'  => $this->setBudget($context->from, $command['category'], $command['amount']),
-            'balance'     => $this->getBalance($context->from),
-            'stats'       => $this->generateMonthlyReport($context->from),
-            'alerts'      => $this->getAlerts($context->from),
-            'history'     => $this->getHistory($context->from, $command['limit'] ?? 10),
-            'delete_last' => $this->deleteLastExpense($context->from),
-            'help'        => $this->getHelp(),
-            default       => null,
+            'set_budget'      => $this->setBudget($context->from, $command['category'], $command['amount']),
+            'delete_budget'   => $this->deleteBudget($context->from, $command['category']),
+            'balance'         => $this->getBalance($context->from),
+            'stats'           => $this->generateMonthlyReport($context->from),
+            'alerts'          => $this->getAlerts($context->from),
+            'history'         => $this->getHistory($context->from, $command['limit'] ?? 10),
+            'delete_last'     => $this->deleteLastExpense($context->from),
+            'projection'      => $this->getProjectionReport($context->from),
+            'category_detail' => $this->getCategoryDetail($context->from, $command['category']),
+            'help'            => $this->getHelp(),
+            default           => null,
         };
 
         if ($response) {
@@ -198,10 +221,10 @@ class FinanceAgent extends BaseAgent
     private function handleWithClaude(string $body, AgentContext $context, string $contextMemory): AgentResult
     {
         // Get current financial context
-        $balance = $this->getBalance($context->from);
+        $balance       = $this->getBalance($context->from);
         $topCategories = Expense::getTopCategories($context->from);
 
-        $message = "Message de l'utilisateur: \"{$body}\"\n\n";
+        $message  = "Message de l'utilisateur: \"{$body}\"\n\n";
         $message .= "ETAT FINANCIER ACTUEL:\n{$balance}\n\n";
 
         if (!empty($topCategories)) {
@@ -215,7 +238,9 @@ class FinanceAgent extends BaseAgent
             $message .= "\n{$contextMemory}\n";
         }
 
-        $message .= "\nAnalyse la demande et reponds de facon utile. Si l'utilisateur veut ajouter une depense, extrais le montant, la categorie et la description, puis inclus sur une ligne separee: EXPENSE_LOG:montant|categorie|description";
+        $message .= "\nAnalyse la demande et reponds de facon utile.\n"
+            . "Si l'utilisateur veut ENREGISTRER une depense, inclus sur une ligne separee: EXPENSE_LOG:montant|categorie|description\n"
+            . "Si l'utilisateur veut DEFINIR un budget, inclus sur une ligne separee: BUDGET_SET:categorie|montant";
 
         $response = $this->claude->chat(
             $message,
@@ -227,10 +252,10 @@ class FinanceAgent extends BaseAgent
             $response = $this->getHelp();
         }
 
-        // Try to extract expense from Claude's response if it identified one
+        // Extract expense from Claude's response if identified
         if (preg_match('/EXPENSE_LOG:\s*(\d+[\.,]?\d*)\|([^|\n]+)\|([^\n]*)/i', $response, $m)) {
-            $expenseAmount = (float) str_replace(',', '.', $m[1]);
-            $expenseCategory = trim($m[2]);
+            $expenseAmount      = (float) str_replace(',', '.', $m[1]);
+            $expenseCategory    = trim($m[2]);
             $expenseDescription = trim($m[3]) ?: null;
 
             if ($expenseAmount > 0 && $expenseCategory !== '') {
@@ -242,6 +267,18 @@ class FinanceAgent extends BaseAgent
                 );
                 $response = preg_replace('/EXPENSE_LOG:[^\n]*/m', '', $response);
                 $response = trim($response) . "\n\n" . $logResult;
+            }
+        }
+
+        // Extract budget definition from Claude's response if identified
+        if (preg_match('/BUDGET_SET:\s*([^|\n]+)\|(\d+[\.,]?\d*)/i', $response, $m)) {
+            $budgetCategory = trim($m[1]);
+            $budgetAmount   = (float) str_replace(',', '.', $m[2]);
+
+            if ($budgetAmount > 0 && $budgetCategory !== '') {
+                $budgetResult = $this->setBudget($context->from, $budgetCategory, $budgetAmount);
+                $response     = preg_replace('/BUDGET_SET:[^\n]*/m', '', $response);
+                $response     = trim($response) . "\n\n" . $budgetResult;
             }
         }
 
@@ -268,7 +305,7 @@ FORMAT DE REPONSE:
 - Reponds TOUJOURS en francais
 
 DETECTION DE DEPENSE:
-Si l'utilisateur decrit une depense (ex: "j'ai achete des courses pour 45€", "taxi 12.50", "abonnement netflix 13.99"), extrais les infos et ajoute EXACTEMENT cette ligne (rien avant ni apres):
+Si l'utilisateur decrit une depense (ex: "j'ai achete des courses pour 45€", "taxi 12.50", "abonnement netflix 13.99"), extrais les infos et ajoute EXACTEMENT cette ligne (rien avant ni apres sur la meme ligne):
 EXPENSE_LOG:montant|categorie|description
 
 Exemples:
@@ -276,6 +313,15 @@ Exemples:
 - "courses au supermarche 87.50€" → EXPENSE_LOG:87.5|alimentation|courses supermarche
 - "cinema avec des amis 22€" → EXPENSE_LOG:22|loisirs|cinema
 - "loyer du mois 800€" → EXPENSE_LOG:800|logement|loyer mensuel
+- "abonnement spotify 9.99" → EXPENSE_LOG:9.99|abonnements|spotify
+
+DETECTION DE BUDGET:
+Si l'utilisateur veut definir un budget mensuel pour une categorie, ajoute EXACTEMENT cette ligne:
+BUDGET_SET:categorie|montant
+
+Exemples:
+- "je veux mettre 300€ pour l'alimentation" → BUDGET_SET:alimentation|300
+- "limite transport a 200 euros par mois" → BUDGET_SET:transport|200
 
 CATEGORIES SUGGEREES:
 alimentation, transport, loisirs, sante, logement, shopping, restaurant, abonnements, education, autres
@@ -284,6 +330,7 @@ CONSEILS:
 - Si le budget est serre (>80%), propose des pistes d'economies concretes
 - Si une depense semble anormalement elevee, signale-le avec ⚠️
 - Si aucune depense ce mois, encourage l'utilisateur a commencer le suivi
+- Ne genere PAS de EXPENSE_LOG si l'utilisateur pose juste une question
 PROMPT;
     }
 
@@ -293,7 +340,14 @@ PROMPT;
             return "❌ Le montant doit etre positif.";
         }
 
+        if ($amount > 100000) {
+            return "❌ Montant trop eleve ({$amount}€). Verifie la saisie.";
+        }
+
         $category = mb_strtolower(trim($category));
+        if ($category === '') {
+            return "❌ La categorie ne peut pas etre vide.";
+        }
 
         try {
             Expense::create([
@@ -347,6 +401,9 @@ PROMPT;
         }
 
         $category = mb_strtolower(trim($category));
+        if ($category === '') {
+            return "❌ La categorie ne peut pas etre vide.";
+        }
 
         try {
             Budget::updateOrCreate(
@@ -377,10 +434,38 @@ PROMPT;
         return $response;
     }
 
+    private function deleteBudget(string $userPhone, string $category): string
+    {
+        $category = mb_strtolower(trim($category));
+
+        $budget = Budget::where('user_phone', $userPhone)->where('category', $category)->first();
+        if (!$budget) {
+            return "❌ Aucun budget trouve pour la categorie *{$category}*.\n"
+                . "_Liste tes budgets avec: solde_";
+        }
+
+        $limit = $budget->monthly_limit;
+
+        try {
+            $budget->delete();
+            DB::table('finances_alerts')
+                ->where('user_phone', $userPhone)
+                ->where('category', $category)
+                ->delete();
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] deleteBudget failed: " . $e->getMessage());
+            return "❌ Erreur lors de la suppression du budget. Reessaie.";
+        }
+
+        return "🗑️ Budget *{$category}* supprime !\n"
+            . "_(Limite etait: {$limit}€/mois)_\n"
+            . "Alerte associee desactivee.";
+    }
+
     private function getBalance(string $userPhone): string
     {
         $totalSpent = Expense::calculateTotalMonthlySpent($userPhone);
-        $budgets    = Budget::where('user_phone', $userPhone)->get();
+        $budgets    = Budget::where('user_phone', $userPhone)->get()->keyBy('category');
         $month      = Carbon::now()->translatedFormat('F Y');
 
         $response  = "💰 *Solde financier - {$month}*\n\n";
@@ -397,6 +482,16 @@ PROMPT;
                 $bar   = $this->buildProgressBar($check['percentage']);
                 $icon  = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
                 $response .= "{$icon} *{$check['category']}*: {$check['spent']}€/{$check['limit']}€ {$bar}\n";
+            }
+
+            // Show categories with expenses but no budget
+            $topCategories = Expense::getTopCategories($userPhone);
+            $unbudgeted = array_filter($topCategories, fn($c) => !$budgets->has($c['category']));
+            if (!empty($unbudgeted)) {
+                $response .= "\n_Sans budget:_\n";
+                foreach ($unbudgeted as $cat) {
+                    $response .= "  💳 *{$cat['category']}*: {$cat['total']}€\n";
+                }
             }
         } else {
             $response .= "\n_Aucun budget defini. Utilise 'budget [categorie] [montant]' pour en creer._";
@@ -432,8 +527,8 @@ PROMPT;
         if ($budgets->isNotEmpty()) {
             $response .= "\n📋 *Budgets:*\n";
             foreach ($budgets as $budget) {
-                $check  = $budget->checkBudgetThreshold();
-                $icon   = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
+                $check    = $budget->checkBudgetThreshold();
+                $icon     = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
                 $response .= "{$icon} {$check['category']}: {$check['spent']}€/{$check['limit']}€ ({$check['percentage']}%)\n";
             }
         }
@@ -457,11 +552,116 @@ PROMPT;
         return $response;
     }
 
+    private function getProjectionReport(string $userPhone): string
+    {
+        $today       = Carbon::now();
+        $totalSpent  = Expense::calculateTotalMonthlySpent($userPhone);
+        $dayOfMonth  = $today->day;
+        $daysInMonth = $today->daysInMonth;
+        $daysLeft    = $daysInMonth - $dayOfMonth;
+
+        $response  = "🔮 *Projection fin de mois - " . $today->translatedFormat('F Y') . "*\n\n";
+        $response .= "📅 Jour {$dayOfMonth}/{$daysInMonth} ({$daysLeft} jours restants)\n";
+        $response .= "💳 Depenses actuelles: *{$totalSpent}€*\n";
+
+        if ($totalSpent <= 0) {
+            $response .= "\n_Aucune depense enregistree ce mois._";
+            return $response;
+        }
+
+        if ($dayOfMonth < 3) {
+            $response .= "\n_Pas assez de donnees pour projeter (min 3 jours)._";
+            return $response;
+        }
+
+        $dailyAverage = round($totalSpent / $dayOfMonth, 2);
+        $projection   = round($dailyAverage * $daysInMonth, 2);
+
+        $response .= "📊 Moyenne journaliere: {$dailyAverage}€/jour\n";
+        $response .= "🎯 Projection fin de mois: *~{$projection}€*\n";
+
+        // Compare with total budget
+        $totalBudget = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+        if ($totalBudget > 0) {
+            if ($projection > $totalBudget) {
+                $overrun  = round($projection - $totalBudget, 2);
+                $response .= "\n🚨 *Depassement prevu de {$overrun}€* sur le budget total ({$totalBudget}€)";
+            } else {
+                $margin   = round($totalBudget - $projection, 2);
+                $response .= "\n✅ Dans le budget ({$totalBudget}€) — marge prevue: *{$margin}€*";
+            }
+        }
+
+        return $response;
+    }
+
+    private function getCategoryDetail(string $userPhone, string $category): string
+    {
+        $category = mb_strtolower(trim($category));
+        $month    = Carbon::now();
+
+        // Current month stats
+        $monthlySpent = Expense::calculateMonthlySpent($userPhone, $category, $month);
+        $average3m    = Expense::getAverageForCategory($userPhone, $category, 3);
+
+        // Recent expenses for this category
+        $recentExpenses = Expense::where('user_phone', $userPhone)
+            ->where('category', $category)
+            ->whereYear('date', $month->year)
+            ->whereMonth('date', $month->month)
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get();
+
+        if ($monthlySpent <= 0 && $recentExpenses->isEmpty()) {
+            return "📂 *Detail: {$category}*\n\n_Aucune depense en {$category} ce mois._\n"
+                . "Enregistre une depense: *depense [montant] {$category}*";
+        }
+
+        $count    = $recentExpenses->count();
+        $response = "📂 *Detail: {$category}* — " . $month->translatedFormat('F Y') . "\n\n";
+        $response .= "💳 Total ce mois: *{$monthlySpent}€*\n";
+        $response .= "📊 Moy. mensuelle (3 mois): {$average3m}€\n";
+
+        // Trend
+        $lastMonthSpent = Expense::calculateMonthlySpent($userPhone, $category, Carbon::now()->subMonth());
+        if ($lastMonthSpent > 0) {
+            $diff  = round($monthlySpent - $lastMonthSpent, 2);
+            $trend = $diff > 0 ? "📈 +{$diff}€ vs mois dernier" : "📉 {$diff}€ vs mois dernier";
+            $response .= "{$trend}\n";
+        }
+
+        // Budget for this category
+        $budget = Budget::where('user_phone', $userPhone)->where('category', $category)->first();
+        if ($budget) {
+            $check = $budget->checkBudgetThreshold();
+            $bar   = $this->buildProgressBar($check['percentage']);
+            $icon  = $check['exceeded'] ? '🚨' : ($check['threshold_reached'] ? '⚠️' : '✅');
+            $response .= "{$icon} Budget: {$check['spent']}€/{$check['limit']}€ {$bar}\n";
+        }
+
+        // Recent entries
+        if ($recentExpenses->isNotEmpty()) {
+            $response .= "\n📋 *{$count} derniere(s) depense(s) ce mois:*\n";
+            foreach ($recentExpenses as $expense) {
+                $date = Carbon::parse($expense->date);
+                $dateStr = $date->isToday()
+                    ? "Aujourd'hui"
+                    : ($date->isYesterday() ? 'Hier' : $date->translatedFormat('d M'));
+                $desc = $expense->description ? " — {$expense->description}" : '';
+                $response .= "  {$dateStr}: {$expense->amount}€{$desc}\n";
+            }
+        }
+
+        return $response;
+    }
+
     private function getMonthlyProjection(float $spentSoFar): ?float
     {
-        $today          = Carbon::now();
-        $daysInMonth    = $today->daysInMonth;
-        $dayOfMonth     = $today->day;
+        $today       = Carbon::now();
+        $daysInMonth = $today->daysInMonth;
+        $dayOfMonth  = $today->day;
 
         // Need at least 3 days of data to project
         if ($dayOfMonth < 3 || $spentSoFar <= 0) {
@@ -474,6 +674,7 @@ PROMPT;
 
     private function getHistory(string $userPhone, int $limit = 10): string
     {
+        $limit    = max(1, min($limit, 20));
         $expenses = Expense::where('user_phone', $userPhone)
             ->orderByDesc('date')
             ->orderByDesc('id')
@@ -489,7 +690,7 @@ PROMPT;
 
         $currentDate = null;
         foreach ($expenses as $expense) {
-            $date = Carbon::parse($expense->date);
+            $date    = Carbon::parse($expense->date);
             $dateStr = $date->isToday()
                 ? "Aujourd'hui"
                 : ($date->isYesterday() ? 'Hier' : $date->translatedFormat('d M'));
@@ -591,15 +792,17 @@ PROMPT;
             . "📥 *Enregistrer une depense:*\n"
             . "  `depense 45 alimentation courses`\n"
             . "  `ajouter depense 12.50 transport taxi`\n\n"
-            . "📊 *Definir un budget:*\n"
-            . "  `budget alimentation 300`\n"
-            . "  `budget transport 150`\n\n"
+            . "📊 *Budgets:*\n"
+            . "  `budget alimentation 300` — definir\n"
+            . "  `supprimer budget transport` — supprimer\n\n"
             . "📋 *Consulter:*\n"
             . "  `solde` — solde et budgets\n"
             . "  `stats` — rapport mensuel + projection\n"
             . "  `alertes` — alertes de depassement\n"
             . "  `historique` — 10 dernieres depenses\n"
-            . "  `historique 5` — 5 dernieres depenses\n\n"
+            . "  `historique 5` — 5 dernieres depenses\n"
+            . "  `detail alimentation` — analyse d'une categorie\n"
+            . "  `projection` — prevision fin de mois\n\n"
             . "🗑️ *Annuler:*\n"
             . "  `supprimer derniere depense`\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
