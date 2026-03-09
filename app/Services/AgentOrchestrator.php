@@ -39,6 +39,7 @@ use App\Services\Agents\GameMasterAgent;
 use App\Services\Agents\BudgetTrackerAgent;
 use App\Services\Agents\DailyBriefAgent;
 use App\Services\Agents\CollaborativeTaskAgent;
+use App\Services\Agents\RecipeAgent;
 use App\Models\CollaborativeVote;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
@@ -105,6 +106,7 @@ class AgentOrchestrator
             new BudgetTrackerAgent(),
             new DailyBriefAgent(),
             new CollaborativeTaskAgent(),
+            new RecipeAgent(),
         ];
 
         foreach ($agentClasses as $agent) {

@@ -83,6 +83,9 @@ class RouterAgent
             => ['collaborative_task', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
         '/^(👍|👎|❓)\s*\d+\s*$/u'
             => ['collaborative_task', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
+        // Recipe / cooking → recipe
+        '/\b(recette|cuisiner|cuisine|qu[\x27\x{2019}]est[\s-]ce\s+que\s+je\s+peux\s+faire\s+avec|quoi\s+cuisiner|recipe|cook|meal\s+prep|ingr[eé]dients?\s+disponibles?|plat\s+du\s+jour|liste\s+de\s+courses)\b/iu'
+            => ['recipe', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
             => ['dev', 'claude-haiku-4-5-20251001', 'simple', 'confirm'],
@@ -449,6 +452,7 @@ CATALOG;
                 'budget_tracker',
                 'daily_brief',
                 'collaborative_task',
+                'recipe',
             ];
         }
         if (!in_array($parsed['agent'], $validAgents)) {
