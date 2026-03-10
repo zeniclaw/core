@@ -30,8 +30,8 @@ RUN if [ -n "$HTTP_PROXY" ]; then \
         pecl install redis; \
     fi && docker-php-ext-enable redis
 
-# Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+# Composer (download directly — avoids pulling separate image behind proxy)
+RUN curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer
 
 WORKDIR /var/www/html
 
