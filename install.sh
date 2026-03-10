@@ -355,6 +355,11 @@ ensure_runtime_running() {
                 fi
             fi
 
+            # Ensure pip install path is in PATH (pip installs to /usr/local/bin which may not be in PATH)
+            if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+                export PATH="/usr/local/bin:$PATH"
+            fi
+
             # Re-detect after install
             detect_runtime
             if [[ -z "$COMPOSE_CMD" ]]; then
