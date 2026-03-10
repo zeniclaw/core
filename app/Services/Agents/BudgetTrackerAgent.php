@@ -93,7 +93,7 @@ class BudgetTrackerAgent extends BaseAgent
             // "depense 25 restaurant diner"
             '/(?:d[eé]pense|d[eé]pens[eé]|spent|expense|pay[eé]|paye|achat|achet[eé])\s+(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur(?:os?)?)?\s+(.+)/iu',
             // "j'ai depense/paye 25 en courses"
-            '/j[\'']ai\s+(?:d[eé]pens[eé]|pay[eé]|achet[eé])\s+(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur(?:os?)?)?\s+(?:en\s+|pour\s+|au?\s+)?(.+)/iu',
+            "/j['\x{2019}]ai\\s+(?:d[eé]pens[eé]|pay[eé]|achet[eé])\\s+(\\d+(?:[.,]\\d{1,2})?)\\s*(?:€|eur(?:os?)?)?\\s+(?:en\\s+|pour\\s+|au?\\s+)?(.+)/iu",
             // "25€ restaurant" or "25 resto diner"
             '/^(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur(?:os?)?)\s+(.+)/iu',
             // "restaurant 25€"

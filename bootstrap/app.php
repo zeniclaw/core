@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
         $middleware->validateCsrfTokens(except: [
             'webhook/*',
+            'api/public-chat',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
