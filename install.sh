@@ -326,15 +326,29 @@ ensure_runtime_running() {
         fi
     fi
 
-    # Check compose
+    # Check compose — auto-install if missing
     if [[ -z "$COMPOSE_CMD" ]]; then
         warn "No compose command found."
         if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
-            error "Install podman-compose: pip3 install podman-compose"
+            info "Installing podman-compose..."
+            # Try dnf/apt first (packaged version), then pip
+            if install_package podman-compose 2>/dev/null; then
+                true
+            elif check_command pip3; then
+                sudo -E pip3 install podman-compose 2>/dev/null || pip3 install --user podman-compose 2>/dev/null || true
+            elif check_command pip; then
+                sudo -E pip install podman-compose 2>/dev/null || true
+            fi
+            # Re-detect after install
+            detect_runtime
+            if [[ -z "$COMPOSE_CMD" ]]; then
+                error "Could not install podman-compose. Install manually: pip3 install podman-compose"
+                exit 1
+            fi
         else
             error "Install Docker Compose: https://docs.docker.com/compose/install/"
+            exit 1
         fi
-        exit 1
     fi
     success "Compose command: $COMPOSE_CMD"
 }
