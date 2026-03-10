@@ -36,7 +36,7 @@ services:
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db,redis,waha,ollama,app}
     volumes:
       - app_storage:/var/www/html/storage
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - .:/opt/zeniclaw-repo
     depends_on:
       db:

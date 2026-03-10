@@ -4,6 +4,7 @@ set -euo pipefail
 # ============================================================================
 # ZeniClaw — Host-side Update Script
 # Run this from the project directory to update from ANY version.
+# Supports both Podman and Docker.
 # Usage: ./update.sh
 # ============================================================================
 
@@ -23,24 +24,43 @@ warn()    { echo -e "${YELLOW}-- $1${NC}"; }
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
-# Detect docker compose command
-if docker compose version &>/dev/null; then
-    COMPOSE="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE="docker-compose"
-else
-    error "Docker Compose not found"
+# --- Detect container runtime (Podman preferred, Docker fallback) -----------
+CONTAINER_CMD=""
+COMPOSE=""
+
+if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+    CONTAINER_CMD="podman"
+    if podman compose version &>/dev/null 2>&1; then
+        COMPOSE="podman compose"
+    elif command -v podman-compose &>/dev/null; then
+        COMPOSE="podman-compose"
+    fi
+elif command -v docker &>/dev/null; then
+    CONTAINER_CMD="docker"
+    if docker compose version &>/dev/null 2>&1; then
+        COMPOSE="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        COMPOSE="docker-compose"
+    fi
 fi
 
-echo -e "\n${BOLD}${CYAN}=== ZeniClaw Update ===${NC}\n"
+if [[ -z "$CONTAINER_CMD" ]]; then
+    error "No container runtime found (podman or docker)"
+fi
+if [[ -z "$COMPOSE" ]]; then
+    error "No compose command found (podman compose / docker compose)"
+fi
+
+echo -e "\n${BOLD}${CYAN}=== ZeniClaw Update ===${NC}"
+echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: $COMPOSE${NC}\n"
 
 # 1. Git pull
 info "Pulling latest code from GitLab..."
 
 # Try to get token from the running app container
 TOKEN=""
-if docker inspect zeniclaw_app &>/dev/null; then
-    TOKEN=$(docker exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('gitlab_access_token');" 2>/dev/null || true)
+if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+    TOKEN=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('gitlab_access_token');" 2>/dev/null || true)
 fi
 
 if [ -n "$TOKEN" ]; then
@@ -71,12 +91,12 @@ success "All services up"
 # 4. Run migrations
 info "Running migrations..."
 sleep 3  # wait for container to be ready
-docker exec zeniclaw_app php artisan migrate --force --no-interaction 2>&1 || warn "Migrations skipped"
+$CONTAINER_CMD exec zeniclaw_app php artisan migrate --force --no-interaction 2>&1 || warn "Migrations skipped"
 
 # 5. Clear caches
 info "Clearing caches..."
-docker exec zeniclaw_app php artisan config:cache 2>/dev/null || true
-docker exec zeniclaw_app php artisan route:cache 2>/dev/null || true
-docker exec zeniclaw_app php artisan view:cache 2>/dev/null || true
+$CONTAINER_CMD exec zeniclaw_app php artisan config:cache 2>/dev/null || true
+$CONTAINER_CMD exec zeniclaw_app php artisan route:cache 2>/dev/null || true
+$CONTAINER_CMD exec zeniclaw_app php artisan view:cache 2>/dev/null || true
 
 echo -e "\n${GREEN}${BOLD}=== Update complete: v${VERSION} ===${NC}\n"

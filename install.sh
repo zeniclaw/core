@@ -75,30 +75,48 @@ check_command() {
     command -v "$1" &>/dev/null
 }
 
-# Docker command — set after daemon check (docker or sudo docker)
-DOCKER_CMD="docker"
-DOCKER_COMPOSE_STANDALONE=false
+# Container runtime command — supports Podman and Docker
+CONTAINER_CMD=""
+COMPOSE_CMD=""
 
-set_docker_cmd() {
-    if docker info &>/dev/null; then
-        DOCKER_CMD="docker"
-    elif sudo docker info &>/dev/null; then
-        DOCKER_CMD="sudo docker"
-        warn "Using 'sudo docker' (add your user to the docker group to avoid sudo)"
+detect_runtime() {
+    # Prefer podman, fallback to docker
+    if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+        CONTAINER_CMD="podman"
+    elif command -v docker &>/dev/null; then
+        if docker info &>/dev/null; then
+            CONTAINER_CMD="docker"
+        elif sudo docker info &>/dev/null; then
+            CONTAINER_CMD="sudo docker"
+            warn "Using 'sudo docker' (add your user to the docker group to avoid sudo)"
+        fi
+    fi
+
+    # Detect compose command
+    if [[ -n "$CONTAINER_CMD" ]]; then
+        if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+            if podman compose version &>/dev/null 2>&1; then
+                COMPOSE_CMD="podman compose"
+            elif command -v podman-compose &>/dev/null; then
+                COMPOSE_CMD="podman-compose"
+            fi
+        else
+            if $CONTAINER_CMD compose version &>/dev/null 2>&1; then
+                COMPOSE_CMD="$CONTAINER_CMD compose"
+            elif command -v docker-compose &>/dev/null; then
+                if [[ "$CONTAINER_CMD" == "sudo docker" ]]; then
+                    COMPOSE_CMD="sudo docker-compose"
+                else
+                    COMPOSE_CMD="docker-compose"
+                fi
+            fi
+        fi
     fi
 }
 
-# Wrapper: runs "docker compose ..." or "docker-compose ..." with correct sudo
+# Wrapper for compose commands
 dcompose() {
-    if [[ "$DOCKER_COMPOSE_STANDALONE" == "true" ]]; then
-        if [[ "$DOCKER_CMD" == "sudo docker" ]]; then
-            sudo docker-compose "$@"
-        else
-            docker-compose "$@"
-        fi
-    else
-        $DOCKER_CMD compose "$@"
-    fi
+    $COMPOSE_CMD "$@"
 }
 
 generate_password() {
@@ -210,128 +228,114 @@ offer_install() {
     fi
 }
 
-# --- Docker installer -------------------------------------------------------
+# --- Container runtime installer (Podman or Docker) -------------------------
 
-install_docker() {
-    warn "Docker is not installed."
-    echo -ne "${PURPLE}🔹 Install Docker now? ${DIM}[Y/n]${NC}: "
-    read -r answer
-    if [[ "${answer,,}" == "n" ]]; then
-        error "Docker is required. Aborting."
-        exit 1
-    fi
+install_container_runtime() {
+    warn "No container runtime found (Podman or Docker)."
+    echo -ne "${PURPLE}🔹 Install Podman (recommended) or Docker? ${DIM}[podman/docker]${NC}: "
+    read -r choice
+    choice="${choice,,}"
+    [[ -z "$choice" ]] && choice="podman"
 
     if ! check_command curl; then
-        info "curl is needed to install Docker. Installing curl first..."
-        install_package curl || { error "Cannot install curl. Please install Docker manually."; exit 1; }
+        info "curl is needed for installation. Installing curl first..."
+        install_package curl || { error "Cannot install curl."; exit 1; }
     fi
 
-    info "Installing Docker via official script (https://get.docker.com)..."
-    echo ""
-    if curl -fsSL https://get.docker.com | sudo sh; then
+    if [[ "$choice" == "docker" ]]; then
+        info "Installing Docker via official script (https://get.docker.com)..."
         echo ""
-        if check_command docker; then
-            success "Docker installed successfully!"
-            # Add current user to docker group if not root
-            if [[ $EUID -ne 0 ]]; then
-                sudo usermod -aG docker "$USER" 2>/dev/null || true
-                warn "You were added to the 'docker' group. You may need to log out/in for it to take effect."
+        if curl -fsSL https://get.docker.com | sudo sh; then
+            if check_command docker; then
+                success "Docker installed successfully!"
+                if [[ $EUID -ne 0 ]]; then
+                    sudo usermod -aG docker "$USER" 2>/dev/null || true
+                    warn "You were added to the 'docker' group. You may need to log out/in."
+                fi
+            else
+                error "Docker installation failed. Install manually: https://docs.docker.com/engine/install/"
+                exit 1
             fi
         else
-            error "Docker installation failed. Please install manually: https://docs.docker.com/engine/install/"
+            error "Docker installation failed."
             exit 1
         fi
     else
-        echo ""
-        error "Docker installation script failed. Please install manually: https://docs.docker.com/engine/install/"
-        exit 1
+        info "Installing Podman..."
+        if install_package podman; then
+            success "Podman installed!"
+            # Install podman-compose
+            if check_command pip3; then
+                info "Installing podman-compose..."
+                sudo pip3 install podman-compose 2>/dev/null || pip3 install --user podman-compose 2>/dev/null || true
+            elif check_command pip; then
+                sudo pip install podman-compose 2>/dev/null || true
+            fi
+            if ! command -v podman-compose &>/dev/null && ! podman compose version &>/dev/null 2>&1; then
+                warn "podman-compose not available. Install it: pip3 install podman-compose"
+            fi
+        else
+            error "Podman installation failed. Install manually: https://podman.io/docs/installation"
+            exit 1
+        fi
     fi
 }
 
-# --- Docker daemon check ----------------------------------------------------
+# --- Container runtime daemon check ----------------------------------------
 
-docker_is_running() {
-    # Try without sudo first, then with sudo (user may not be in docker group yet)
-    docker info &>/dev/null || sudo docker info &>/dev/null
-}
+ensure_runtime_running() {
+    detect_runtime
 
-ensure_docker_running() {
-    if docker_is_running; then
-        success "Docker daemon is running"
-        set_docker_cmd
-        return 0
-    fi
-
-    warn "Docker daemon is not running."
-    echo -ne "${PURPLE}🔹 Start Docker daemon now? ${DIM}[Y/n]${NC}: "
-    read -r answer
-    if [[ "${answer,,}" == "n" ]]; then
-        error "Docker daemon must be running. Aborting."
-        exit 1
-    fi
-
-    # Try systemctl first (systemd) — show errors so user sees what's wrong
-    if check_command systemctl; then
-        info "Starting Docker via systemctl..."
-        if sudo systemctl start docker; then
-            sleep 2
-            if docker_is_running; then
-                success "Docker daemon started (systemctl)"
+    if [[ -n "$CONTAINER_CMD" ]]; then
+        success "Container runtime found: $CONTAINER_CMD"
+    else
+        # Nothing running — try to start or install
+        if check_command podman; then
+            # Podman is daemonless, just needs to be available
+            CONTAINER_CMD="podman"
+            success "Podman is available (daemonless)"
+            detect_runtime
+            return 0
+        elif check_command docker; then
+            warn "Docker daemon is not running."
+            echo -ne "${PURPLE}🔹 Start Docker daemon now? ${DIM}[Y/n]${NC}: "
+            read -r answer
+            if [[ "${answer,,}" == "n" ]]; then
+                error "Container runtime must be running. Aborting."
+                exit 1
+            fi
+            if check_command systemctl; then
+                info "Starting Docker via systemctl..."
+                sudo systemctl start docker && sleep 2
+            elif check_command service; then
+                info "Starting Docker via service..."
+                sudo service docker start && sleep 2
+            fi
+            detect_runtime
+            if [[ -n "$CONTAINER_CMD" ]]; then
+                success "Docker daemon started"
                 sudo systemctl enable docker 2>/dev/null || true
-                info "Docker enabled on boot"
-                set_docker_cmd
                 return 0
             fi
+            error "Could not start Docker daemon. Try: sudo systemctl start docker"
+            exit 1
         else
-            warn "systemctl start docker failed (see above)"
+            install_container_runtime
+            detect_runtime
         fi
     fi
 
-    # Try service (SysVinit / upstart)
-    if check_command service; then
-        info "Starting Docker via service..."
-        if sudo service docker start; then
-            sleep 2
-            if docker_is_running; then
-                success "Docker daemon started (service)"
-                set_docker_cmd
-                return 0
-            fi
+    # Check compose
+    if [[ -z "$COMPOSE_CMD" ]]; then
+        warn "No compose command found."
+        if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+            error "Install podman-compose: pip3 install podman-compose"
         else
-            warn "service docker start failed (see above)"
+            error "Install Docker Compose: https://docs.docker.com/compose/install/"
         fi
+        exit 1
     fi
-
-    # Try starting dockerd directly as last resort
-    if check_command dockerd; then
-        info "Starting dockerd directly (last resort)..."
-        sudo dockerd > /tmp/dockerd.log 2>&1 &
-        local dockerd_pid=$!
-        # Wait up to 10 seconds for daemon to be ready
-        local wait=0
-        while [[ $wait -lt 10 ]]; do
-            if docker_is_running; then
-                success "Docker daemon started (dockerd, PID $dockerd_pid)"
-                set_docker_cmd
-                return 0
-            fi
-            sleep 1
-            wait=$((wait + 1))
-        done
-        warn "dockerd started but daemon not responding. Log:"
-        echo -e "    ${DIM}$(tail -5 /tmp/dockerd.log 2>/dev/null)${NC}"
-        sudo kill "$dockerd_pid" 2>/dev/null || true
-    fi
-
-    echo ""
-    error "Could not start Docker daemon."
-    echo -e "    ${DIM}Try manually in another terminal:${NC}"
-    echo -e "    ${DIM}  sudo systemctl start docker${NC}"
-    echo -e "    ${DIM}  sudo service docker start${NC}"
-    echo -e "    ${DIM}  sudo dockerd${NC}"
-    echo -e ""
-    echo -e "    ${DIM}Then re-run: ./install.sh${NC}"
-    exit 1
+    success "Compose command: $COMPOSE_CMD"
 }
 
 # --- Pre-flight Checks ------------------------------------------------------
@@ -399,75 +403,9 @@ preflight_checks() {
         warn "Skipping Claude Code CLI (Node.js not available)"
     fi
 
-    # Check Docker
-    info "Checking Docker..."
-    if ! check_command docker; then
-        install_docker
-    else
-        success "Docker found ($(docker --version | head -1))"
-    fi
-
-    # Check Docker daemon is running
-    info "Checking Docker daemon..."
-    ensure_docker_running
-
-    # Check Docker Compose
-    info "Checking Docker Compose..."
-    if $DOCKER_CMD compose version &>/dev/null; then
-        success "Docker Compose found ($($DOCKER_CMD compose version --short 2>/dev/null || echo 'v2+'))"
-    elif check_command docker-compose; then
-        warn "Found docker-compose v1 (Python) which is incompatible with newer Docker engines."
-        warn "This causes 'KeyError: ContainerConfig' errors. Upgrading to v2..."
-        # Remove old v1 if installed via apt
-        if dpkg -l docker-compose &>/dev/null 2>&1; then
-            info "Removing old docker-compose v1 package..."
-            sudo apt-get remove -y docker-compose &>/dev/null || true
-        fi
-        # Install v2 plugin
-        info "Installing Docker Compose v2 plugin..."
-        sudo mkdir -p /usr/local/lib/docker/cli-plugins
-        local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
-        if sudo curl -fsSL "$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose && \
-           sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; then
-            if $DOCKER_CMD compose version &>/dev/null; then
-                success "Docker Compose v2 installed ($($DOCKER_CMD compose version --short 2>/dev/null))"
-            else
-                error "Docker Compose v2 installation failed. Please install manually."
-                echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
-                exit 1
-            fi
-        else
-            error "Download failed. Please install Docker Compose v2 manually."
-            echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
-            exit 1
-        fi
-    else
-        error "Docker Compose not found."
-        echo -ne "${PURPLE}🔹 Install Docker Compose plugin now? ${DIM}[Y/n]${NC}: "
-        read -r answer
-        if [[ "${answer,,}" != "n" ]]; then
-            info "Installing Docker Compose plugin..."
-            sudo mkdir -p /usr/local/lib/docker/cli-plugins
-            local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
-            if sudo curl -fsSL "$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose && \
-               sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose; then
-                if $DOCKER_CMD compose version &>/dev/null; then
-                    success "Docker Compose plugin installed ($($DOCKER_CMD compose version --short 2>/dev/null))"
-                else
-                    error "Docker Compose installation failed. Please install manually."
-                    echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
-                    exit 1
-                fi
-            else
-                error "Download failed. Please install Docker Compose manually."
-                echo -e "    ${DIM}See: https://docs.docker.com/compose/install/${NC}"
-                exit 1
-            fi
-        else
-            error "Docker Compose is required. Aborting."
-            exit 1
-        fi
-    fi
+    # Check container runtime (Podman or Docker)
+    info "Checking container runtime (Podman/Docker)..."
+    ensure_runtime_running
 
     # Check ports
     local APP_PORT_CHECK="${CONF_APP_PORT:-8080}"
@@ -630,6 +568,13 @@ ENVEOF
         [[ -n "$CONF_NO_PROXY" ]]    && echo "NO_PROXY=${CONF_NO_PROXY}" >> "$ENV_FILE"
     fi
 
+    # Container runtime socket (Podman or Docker)
+    if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+        echo "" >> "$ENV_FILE"
+        echo "# --- Container Runtime ---" >> "$ENV_FILE"
+        echo "CONTAINER_SOCKET=/run/podman/podman.sock" >> "$ENV_FILE"
+    fi
+
     success ".env file generated"
 }
 
@@ -639,16 +584,16 @@ build_and_start() {
     step "4/6 — Building & Starting Services"
 
     # Build
-    info "Building Docker images (this may take a few minutes on first run)..."
+    info "Building container images (this may take a few minutes on first run)..."
     echo ""
     if ! dcompose build 2>&1 | while IFS= read -r line; do
         echo -e "    ${DIM}${line}${NC}"
     done; then
-        error "Docker build failed. Check the output above for details."
+        error "Container build failed. Check the output above for details."
         exit 1
     fi
     echo ""
-    success "Docker images built successfully"
+    success "Container images built successfully"
 
     # Start
     info "Starting services..."
@@ -668,9 +613,9 @@ build_and_start() {
 
     while [[ $elapsed -lt $max_wait ]]; do
         local db_health app_health redis_health
-        db_health=$($DOCKER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_db 2>/dev/null || echo "starting")
-        redis_health=$($DOCKER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_redis 2>/dev/null || echo "starting")
-        app_health=$($DOCKER_CMD inspect --format='{{.State.Status}}' zeniclaw_app 2>/dev/null || echo "starting")
+        db_health=$($CONTAINER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_db 2>/dev/null || echo "starting")
+        redis_health=$($CONTAINER_CMD inspect --format='{{.State.Health.Status}}' zeniclaw_redis 2>/dev/null || echo "starting")
+        app_health=$($CONTAINER_CMD inspect --format='{{.State.Status}}' zeniclaw_app 2>/dev/null || echo "starting")
 
         local status_line="    "
         [[ "$db_health" == "healthy" ]]  && status_line+="${GREEN}● DB${NC}  "    || status_line+="${YELLOW}○ DB${NC}  "
@@ -789,9 +734,9 @@ DONE
 
     for i in "${!services[@]}"; do
         local status
-        status=$($DOCKER_CMD inspect --format='{{.State.Status}}' "${services[$i]}" 2>/dev/null || echo "not found")
+        status=$($CONTAINER_CMD inspect --format='{{.State.Status}}' "${services[$i]}" 2>/dev/null || echo "not found")
         local health
-        health=$($DOCKER_CMD inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${services[$i]}" 2>/dev/null || echo "n/a")
+        health=$($CONTAINER_CMD inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${services[$i]}" 2>/dev/null || echo "n/a")
 
         if [[ "$status" == "running" ]]; then
             echo -e "  │  ${GREEN}●${NC} ${labels[$i]}  ${DIM}running${NC} ${DIM}(${health})${NC}"
@@ -804,10 +749,10 @@ DONE
 
     echo ""
     echo -e "  ${BOLD}Useful commands:${NC}"
-    echo -e "  ${DIM}  docker compose logs -f        ${NC}# View live logs"
-    echo -e "  ${DIM}  docker compose ps              ${NC}# Service status"
-    echo -e "  ${DIM}  docker compose down            ${NC}# Stop all services"
-    echo -e "  ${DIM}  docker compose up -d           ${NC}# Restart services"
+    echo -e "  ${DIM}  $COMPOSE_CMD logs -f        ${NC}# View live logs"
+    echo -e "  ${DIM}  $COMPOSE_CMD ps              ${NC}# Service status"
+    echo -e "  ${DIM}  $COMPOSE_CMD down            ${NC}# Stop all services"
+    echo -e "  ${DIM}  $COMPOSE_CMD up -d           ${NC}# Restart services"
     echo ""
 }
 

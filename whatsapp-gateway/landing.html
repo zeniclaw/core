@@ -909,7 +909,7 @@ footer {
   <div class="section-inner">
     <span class="section-label">// architecture</span>
     <h2 class="section-title">How it <span class="gradient-text">works</span></h2>
-    <p class="section-desc">Four Docker containers, zero external dependencies. Everything runs on your machine.</p>
+    <p class="section-desc">Four containers (Podman or Docker), zero external dependencies. Everything runs on your machine.</p>
 
     <div class="arch-diagram">
 <pre>
@@ -951,7 +951,7 @@ footer {
       <div class="tech-item"><div class="tech-icon">&#x1F5C3;</div><span>PostgreSQL 16</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F534;</div><span>Redis 7</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F4E6;</div><span>Node.js 20</span></div>
-      <div class="tech-item"><div class="tech-icon">&#x1F433;</div><span>Docker</span></div>
+      <div class="tech-item"><div class="tech-icon">&#x1F433;</div><span>Podman / Docker</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F4F1;</div><span>Baileys</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F9E0;</div><span>Claude API</span></div>
     </div>
@@ -963,18 +963,18 @@ footer {
   <div class="section-inner">
     <span class="section-label">// install</span>
     <h2 class="section-title">Up and running in <span class="gradient-text">5 minutes</span></h2>
-    <p class="section-desc">All you need is a Linux server with Docker. The install script handles everything else.</p>
+    <p class="section-desc">All you need is a Linux server with Podman or Docker. The install script handles everything else.</p>
 
     <div class="install-steps">
       <div class="install-step">
         <div class="step-number">1</div>
         <div class="step-content">
           <h3>Prerequisites</h3>
-          <p>You need a Linux server (Ubuntu 20.04+ recommended) with at least 2GB RAM and Docker installed. The install script can auto-install Docker if needed.</p>
+          <p>You need a Linux server (Ubuntu 20.04+ recommended) with at least 2GB RAM and Podman or Docker installed. The install script can auto-install either one.</p>
           <div class="code-block">
             <button class="code-block-copy" onclick="copyCode(this)">Copy</button>
-            <span class="comment"># Install Docker if not present</span><br>
-            curl -fsSL https://get.docker.com | sh
+            <span class="comment"># Install Podman (recommended) or Docker</span><br>
+            sudo apt install -y podman podman-compose
           </div>
         </div>
       </div>

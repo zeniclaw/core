@@ -151,8 +151,8 @@ class DebugController extends Controller
             $info['redis_connection'] = 'ERROR: ' . $e->getMessage();
         }
 
-        // Docker
-        $info['in_docker'] = file_exists('/.dockerenv') || file_exists('/run/.containerenv');
+        // Container runtime
+        $info['in_container'] = file_exists('/.dockerenv') || file_exists('/run/.containerenv');
 
         // Queue
         try {

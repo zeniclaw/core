@@ -56,7 +56,7 @@ class ZeniclawUpdate extends Command
 
     private function updateDirect(string $token, string $repoPath): int
     {
-        // Running on host — do git pull directly, then docker-compose rebuild
+        // Running on host — do git pull directly, then container rebuild
         $this->info('▶ Pulling latest code (host mode)...');
 
         $pullCmd = !empty($token)
@@ -80,13 +80,29 @@ class ZeniclawUpdate extends Command
         $newVersion = $m[1] ?? 'unknown';
         $this->info("▶ New version: v{$newVersion}");
 
-        // Docker rebuild — prefer docker compose v2
-        $this->info('▶ Rebuilding Docker containers...');
-        $composeCmd = trim(shell_exec('docker compose version 2>/dev/null && echo "docker compose" || echo "docker-compose"'));
-        $composeCmd = str_contains($composeCmd, 'docker compose') ? 'docker compose' : 'docker-compose';
+        // Detect container runtime — prefer podman, fallback to docker
+        $runtime = 'docker';
+        $composeCmd = 'docker compose';
+        $pruneCmd = 'sudo docker builder prune -f 2>&1';
+
+        if (trim(shell_exec('command -v podman 2>/dev/null') ?? '') !== '') {
+            $runtime = 'podman';
+            if (trim(shell_exec('podman compose version 2>/dev/null') ?? '') !== '') {
+                $composeCmd = 'podman compose';
+            } elseif (trim(shell_exec('command -v podman-compose 2>/dev/null') ?? '') !== '') {
+                $composeCmd = 'podman-compose';
+            }
+            $pruneCmd = 'podman system prune -f 2>&1';
+        } else {
+            if (trim(shell_exec('docker compose version 2>/dev/null') ?? '') === '') {
+                $composeCmd = 'docker-compose';
+            }
+        }
+
+        $this->info("▶ Rebuilding containers ({$runtime})...");
 
         // Prune builder cache to avoid stale snapshot errors
-        $prune = Process::fromShellCommandline('sudo docker builder prune -f 2>&1', $repoPath);
+        $prune = Process::fromShellCommandline("sudo {$pruneCmd}", $repoPath);
         $prune->setTimeout(60);
         $prune->run(fn($type, $buf) => $this->getOutput()->write($buf));
 
@@ -99,7 +115,7 @@ class ZeniclawUpdate extends Command
         $rebuild->run(fn($type, $buf) => $this->getOutput()->write($buf));
 
         if (!$rebuild->isSuccessful()) {
-            $this->warn('⚠ Docker rebuild may have failed — check logs');
+            $this->warn('⚠ Container rebuild may have failed — check logs');
             // Ensure the app container is at least running with the old image
             $fallback = Process::fromShellCommandline("sudo {$composeCmd} up -d app 2>&1", $repoPath);
             $fallback->setTimeout(60);

@@ -67,8 +67,8 @@
                 <p class="text-sm font-mono font-medium text-gray-900" x-text="sys.uptime">{{ $system['uptime'] ?? '-' }}</p>
             </div>
             <div class="bg-gray-50 rounded-lg p-3">
-                <p class="text-xs text-gray-500 mb-1">Docker</p>
-                <p class="text-sm font-mono font-medium" :class="sys.in_docker ? 'text-green-600' : 'text-gray-600'" x-text="sys.in_docker ? 'Yes' : 'No'">{{ ($system['in_docker'] ?? false) ? 'Yes' : 'No' }}</p>
+                <p class="text-xs text-gray-500 mb-1">Container</p>
+                <p class="text-sm font-mono font-medium" :class="sys.in_container ? 'text-green-600' : 'text-gray-600'" x-text="sys.in_container ? 'Yes' : 'No'">{{ ($system['in_container'] ?? false) ? 'Yes' : 'No' }}</p>
             </div>
         </div>
 

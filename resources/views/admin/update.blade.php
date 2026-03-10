@@ -134,7 +134,7 @@
                     if (attempts > 300) {
                         clearInterval(this.rebuildPolling);
                         this.rebuildPolling = null;
-                        this.rebuildLog += '\n[Timeout — check manually: docker logs zeniclaw_app]\n';
+                        this.rebuildLog += '\n[Timeout — check container logs manually]\n';
                         this.phase = 'done';
                     }
                 }, 3000);
@@ -143,7 +143,7 @@
             get combinedLog() {
                 let log = this.updateLog;
                 if (this.rebuildLog) {
-                    log += '\n=== Docker Rebuild ===\n' + this.rebuildLog;
+                    log += '\n=== Container Rebuild ===\n' + this.rebuildLog;
                 }
                 return log;
             }
@@ -161,7 +161,7 @@
             </span>
             <span x-show="phase === 'rebuilding'" x-cloak class="flex items-center gap-2">
                 <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                Docker rebuild in progress...
+                Container rebuild in progress...
             </span>
         </button>
 
@@ -177,7 +177,7 @@
                 <template x-if="phase === 'rebuilding'"><svg class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
                 <template x-if="phase === 'done' && !error"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg></template>
                 <template x-if="phase === 'done' && error"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg></template>
-                Docker rebuild
+                Container rebuild
             </div>
             <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div class="flex items-center gap-1.5" :class="phase === 'done' && !error ? 'text-green-600 font-medium' : 'text-gray-400'">

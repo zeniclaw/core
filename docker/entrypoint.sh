@@ -57,14 +57,24 @@ echo '[safe]' > /var/www/.config/git/config
 echo '    directory = /opt/zeniclaw-repo' >> /var/www/.config/git/config
 chown -R www-data:www-data /var/www/.config
 
-# Give www-data access to docker socket for self-update
-DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
-if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
-    groupadd -g "$DOCKER_GID" docker-host 2>/dev/null || true
-    usermod -aG "$DOCKER_GID" www-data 2>/dev/null || true
+# Give www-data access to container runtime socket for self-update
+# Supports both Docker (/var/run/docker.sock) and Podman (/run/podman/podman.sock)
+SOCKET_PATH=""
+if [ -S "/var/run/docker.sock" ]; then
+    SOCKET_PATH="/var/run/docker.sock"
+elif [ -S "/run/podman/podman.sock" ]; then
+    SOCKET_PATH="/run/podman/podman.sock"
 fi
-# Fallback: make socket world-readable if group add fails
-chmod 666 /var/run/docker.sock 2>/dev/null || true
+
+if [ -n "$SOCKET_PATH" ]; then
+    SOCKET_GID=$(stat -c '%g' "$SOCKET_PATH" 2>/dev/null || echo "")
+    if [ -n "$SOCKET_GID" ] && [ "$SOCKET_GID" != "0" ]; then
+        groupadd -g "$SOCKET_GID" container-host 2>/dev/null || true
+        usermod -aG "$SOCKET_GID" www-data 2>/dev/null || true
+    fi
+    # Fallback: make socket world-readable if group add fails
+    chmod 666 "$SOCKET_PATH" 2>/dev/null || true
+fi
 
 cd /var/www/html
 

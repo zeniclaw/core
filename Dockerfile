@@ -14,7 +14,7 @@ ENV http_proxy=${HTTP_PROXY} \
 # System deps
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
-    libxml2-dev nginx supervisor procps docker.io docker-compose sudo cron \
+    libxml2-dev nginx supervisor procps sudo cron \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
@@ -55,7 +55,7 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
     && chmod 0440 /etc/sudoers.d/zeniclaw-update
 
 # Version file for health check
-RUN echo "2.28.0" > storage/app/version.txt
+RUN echo "2.29.0" > storage/app/version.txt
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \

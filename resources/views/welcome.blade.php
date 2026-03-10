@@ -445,7 +445,7 @@ footer {
     <div class="stats-row">
       <div class="stat-box fade-up"><div class="stat-number">23</div><div class="stat-label">AI Agents</div></div>
       <div class="stat-box fade-up d1"><div class="stat-number">3+</div><div class="stat-label">LLM Providers</div></div>
-      <div class="stat-box fade-up d2"><div class="stat-number">5</div><div class="stat-label">Docker Containers</div></div>
+      <div class="stat-box fade-up d2"><div class="stat-number">5</div><div class="stat-label">Containers</div></div>
       <div class="stat-box fade-up d3"><div class="stat-number">100%</div><div class="stat-label">Self-Hosted</div></div>
     </div>
   </div>
@@ -510,7 +510,7 @@ footer {
   <div class="section-inner">
     <span class="section-label">// architecture</span>
     <h2 class="section-title">How it <span class="gradient-text">works</span></h2>
-    <p class="section-desc">Five Docker containers, zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</p>
+    <p class="section-desc">Five containers (Podman or Docker), zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</p>
     <div class="arch-diagram">
 <pre>
   <span class="hl-green">WhatsApp</span>                 <span class="hl-blue">ZeniClaw Stack</span>                    <span class="hl-purple">AI Providers</span>
@@ -550,7 +550,7 @@ footer {
       <div class="tech-item"><div class="tech-icon">&#x1F3A8;</div><span>Tailwind CSS</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F5C3;</div><span>PostgreSQL 16</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F534;</div><span>Redis 7</span></div>
-      <div class="tech-item"><div class="tech-icon">&#x1F433;</div><span>Docker Compose</span></div>
+      <div class="tech-item"><div class="tech-icon">&#x1F433;</div><span>Podman / Docker</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F4F1;</div><span>Baileys (WAHA)</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F9E0;</div><span>Claude API</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F5A5;</div><span>Ollama</span></div>
@@ -656,7 +656,7 @@ footer {
             <span class="changelog-tag tag-feat">feat</span>DevAgent upgraded with GitLab integration and smart commands.<br>
             <span class="changelog-tag tag-feat">feat</span>Manager heartbeat for instance monitoring.<br>
             <span class="changelog-tag tag-feat">feat</span>Integrated web chat panel on the dashboard.<br>
-            <span class="changelog-tag tag-fix">fix</span>Supervisor auto-restart for queue workers, Docker build failure protection.
+            <span class="changelog-tag tag-fix">fix</span>Supervisor auto-restart for queue workers, container build failure protection.
           </p>
         </div>
       </div>
@@ -668,14 +668,14 @@ footer {
   <div class="section-inner">
     <span class="section-label">// install</span>
     <h2 class="section-title">Up and running in <span class="gradient-text">5 minutes</span></h2>
-    <p class="section-desc">All you need is a Linux server with Docker. The install script handles everything else.</p>
+    <p class="section-desc">All you need is a Linux server with Podman or Docker. The install script handles everything else.</p>
     <div class="install-steps">
       <div class="install-step">
         <div class="step-number">1</div>
         <div class="step-content">
           <h3>Prerequisites</h3>
-          <p>You need a Linux server (Ubuntu 20.04+ recommended) with at least 2GB RAM and Docker installed. For on-prem LLMs, 8GB+ RAM is recommended.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button><span class="comment"># Install Docker if not present</span><br>curl -fsSL https://get.docker.com | sh</div>
+          <p>You need a Linux server (Ubuntu 20.04+ recommended) with at least 2GB RAM and Podman or Docker installed. For on-prem LLMs, 8GB+ RAM is recommended.</p>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button><span class="comment"># Install Podman (recommended) or Docker</span><br>sudo apt install -y podman podman-compose</div>
         </div>
       </div>
       <div class="install-step">
