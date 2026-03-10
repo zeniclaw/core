@@ -20,8 +20,9 @@ RUN apt-get update && apt-get install -y \
 # PHP extensions
 RUN docker-php-ext-install pdo pdo_pgsql pgsql zip mbstring exif pcntl bcmath gd xml
 
-# Redis extension
-RUN pecl install redis && docker-php-ext-enable redis
+# Redis extension (configure PEAR proxy — pecl ignores env vars)
+RUN if [ -n "$HTTP_PROXY" ]; then pear config-set http_proxy "$HTTP_PROXY"; fi \
+    && pecl install redis && docker-php-ext-enable redis
 
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
