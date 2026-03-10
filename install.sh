@@ -493,6 +493,24 @@ collect_configuration() {
         ask_secret "Chat API key (Enter for random)" "$generated_chat_key" CONF_CHAT_API_KEY
     fi
 
+    # Ollama (local LLMs)
+    echo ""
+    echo -ne "${PURPLE}🔹 Install Ollama for local LLMs? (requires ~8GB disk) ${DIM}[y/N]${NC}: "
+    read -r answer
+    CONF_OLLAMA="false"
+    if [[ "${answer,,}" == "y" ]]; then
+        CONF_OLLAMA="true"
+    fi
+
+    # Container storage path (Podman stores images in /var/lib/containers by default)
+    CONF_STORAGE_PATH=""
+    if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+        echo ""
+        info "Podman stores images in /var/lib/containers (on / partition by default)."
+        info "If your / partition is small, point to a larger partition (e.g. /home/containers)."
+        ask_optional "Container storage path (leave empty for default)" CONF_STORAGE_PATH
+    fi
+
     # LLM API Keys
     echo ""
     info "Optional: Configure AI/LLM API keys (can also be set later in Settings)"
@@ -507,6 +525,8 @@ collect_configuration() {
     echo -e "  │ ${CYAN}Port:${NC}      $CONF_APP_PORT"
     echo -e "  │ ${CYAN}DB Pass:${NC}   ${DIM}$(echo "$CONF_DB_PASSWORD" | head -c 4)****${NC}"
     [[ "$CONF_CHAT_PORT" != "0" ]] && echo -e "  │ ${CYAN}Chat Port:${NC} $CONF_CHAT_PORT"
+    [[ "$CONF_OLLAMA" == "true" ]] && echo -e "  │ ${CYAN}Ollama:${NC}    ${DIM}enabled (local LLMs)${NC}" || echo -e "  │ ${CYAN}Ollama:${NC}    ${DIM}disabled${NC}"
+    [[ -n "$CONF_STORAGE_PATH" ]]  && echo -e "  │ ${CYAN}Storage:${NC}   ${DIM}$CONF_STORAGE_PATH${NC}"
     [[ -n "$CONF_HTTP_PROXY" ]]    && echo -e "  │ ${CYAN}Proxy:${NC}     ${DIM}$CONF_HTTP_PROXY${NC}"
     [[ -n "$CONF_ANTHROPIC_KEY" ]] && echo -e "  │ ${CYAN}Anthropic:${NC} ${DIM}configured${NC}"
     [[ -n "$CONF_OPENAI_KEY" ]]    && echo -e "  │ ${CYAN}OpenAI:${NC}    ${DIM}configured${NC}"
@@ -619,6 +639,44 @@ ENVEOF
 build_and_start() {
     step "4/6 — Building & Starting Services"
 
+    # Setup custom container storage path if configured
+    if [[ -n "$CONF_STORAGE_PATH" ]]; then
+        info "Configuring container storage at: $CONF_STORAGE_PATH"
+        sudo mkdir -p "$CONF_STORAGE_PATH"
+
+        if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+            # Podman: configure via storage.conf
+            sudo mkdir -p /etc/containers
+            if [[ ! -f /etc/containers/storage.conf ]] || ! grep -q "graphroot" /etc/containers/storage.conf 2>/dev/null; then
+                sudo tee /etc/containers/storage.conf > /dev/null << STOREOF
+[storage]
+driver = "overlay"
+graphroot = "$CONF_STORAGE_PATH"
+STOREOF
+                success "Podman storage configured at $CONF_STORAGE_PATH"
+            else
+                warn "storage.conf already exists — update graphroot manually if needed"
+            fi
+        else
+            # Docker: configure via daemon.json
+            sudo mkdir -p /etc/docker
+            if [[ ! -f /etc/docker/daemon.json ]]; then
+                echo "{\"data-root\": \"$CONF_STORAGE_PATH\"}" | sudo tee /etc/docker/daemon.json > /dev/null
+                sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
+                success "Docker storage configured at $CONF_STORAGE_PATH"
+            else
+                warn "daemon.json already exists — update data-root manually if needed"
+            fi
+        fi
+    fi
+
+    # Disable Ollama service if not requested
+    local compose_profiles=""
+    if [[ "$CONF_OLLAMA" != "true" ]]; then
+        info "Ollama disabled — skipping local LLM container"
+        compose_profiles="--scale ollama=0"
+    fi
+
     # Build
     info "Building container images (this may take a few minutes on first run)..."
     echo ""
@@ -633,7 +691,7 @@ build_and_start() {
 
     # Start
     info "Starting services..."
-    if ! dcompose up -d 2>&1; then
+    if ! dcompose up -d $compose_profiles 2>&1; then
         error "Failed to start services."
         exit 1
     fi
@@ -767,6 +825,10 @@ DONE
 
     local services=("zeniclaw_app" "zeniclaw_db" "zeniclaw_redis" "zeniclaw_waha")
     local labels=("App      " "Database " "Redis    " "WhatsApp ")
+    if [[ "${CONF_OLLAMA:-}" == "true" ]]; then
+        services+=("zeniclaw_ollama")
+        labels+=("Ollama   ")
+    fi
 
     for i in "${!services[@]}"; do
         local status
@@ -781,8 +843,12 @@ DONE
         fi
     done
 
-    echo -e "  └──────────────────────────────────────────────────"
+    if [[ -n "${CONF_STORAGE_PATH:-}" ]]; then
+        echo -e "  │"
+        echo -e "  │  ${CYAN}Storage:${NC}  ${DIM}$CONF_STORAGE_PATH${NC}"
+    fi
 
+    echo -e "  └──────────────────────────────────────────────────"
     echo ""
     echo -e "  ${BOLD}Useful commands:${NC}"
     echo -e "  ${DIM}  $COMPOSE_CMD logs -f        ${NC}# View live logs"
