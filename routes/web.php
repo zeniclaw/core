@@ -149,6 +149,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/settings/auto-update', [SettingsController::class, 'toggleAutoUpdate'])->name('settings.auto-update');
     Route::post('/settings/timezone', [SettingsController::class, 'saveTimezone'])->name('settings.timezone');
     Route::post('/settings/public-chat', [SettingsController::class, 'savePublicChat'])->name('settings.public-chat');
+    Route::post('/settings/proxy', [SettingsController::class, 'saveProxy'])->name('settings.proxy');
 
     // Ollama model management
     Route::get('/api/ollama/models', [OllamaController::class, 'models'])->name('api.ollama.models');

@@ -31,7 +31,13 @@ class SettingsController extends Controller
             'placeholder' => AppSetting::get('public_chat_placeholder') ?? '',
         ];
 
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat'));
+        $proxyConfig = [
+            'http'     => AppSetting::get('proxy_http') ?? env('HTTP_PROXY', ''),
+            'https'    => AppSetting::get('proxy_https') ?? env('HTTPS_PROXY', ''),
+            'no_proxy' => AppSetting::get('proxy_no_proxy') ?? env('NO_PROXY', ''),
+        ];
+
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -89,6 +95,32 @@ class SettingsController extends Controller
         AppSetting::set('app_timezone', $request->app_timezone);
 
         return redirect()->route('settings.index')->with('success', 'Fuseau horaire mis à jour : ' . $request->app_timezone);
+    }
+
+    public function saveProxy(Request $request)
+    {
+        if ($request->input('clear_proxy')) {
+            foreach (['proxy_http', 'proxy_https', 'proxy_no_proxy'] as $key) {
+                AppSetting::where('key', $key)->delete();
+            }
+            return redirect()->route('settings.index')->with('success', 'Proxy supprime.');
+        }
+
+        $httpProxy = $request->input('http_proxy', '');
+        $httpsProxy = $request->input('https_proxy', '');
+        $noProxy = $request->input('no_proxy', '');
+
+        if ($httpProxy) {
+            AppSetting::set('proxy_http', $httpProxy);
+        }
+        if ($httpsProxy) {
+            AppSetting::set('proxy_https', $httpsProxy);
+        }
+        if ($noProxy) {
+            AppSetting::set('proxy_no_proxy', $noProxy);
+        }
+
+        return redirect()->route('settings.index')->with('success', 'Configuration proxy sauvegardee. Redemarrez le container pour appliquer.');
     }
 
     public function savePublicChat(Request $request)

@@ -519,17 +519,6 @@ collect_configuration() {
         ask_secret "Chat API key (Enter for random)" "$generated_chat_key" CONF_CHAT_API_KEY
     fi
 
-    # Enterprise Proxy
-    echo ""
-    info "Enterprise proxy (leave empty if not behind a corporate proxy)"
-    ask_optional "HTTP Proxy (e.g. http://proxy:8080)" CONF_HTTP_PROXY
-    CONF_HTTPS_PROXY=""
-    CONF_NO_PROXY=""
-    if [[ -n "$CONF_HTTP_PROXY" ]]; then
-        ask "HTTPS Proxy" "$CONF_HTTP_PROXY" CONF_HTTPS_PROXY
-        ask "No-Proxy exclusions" "localhost,127.0.0.1,db,redis,waha,ollama,app" CONF_NO_PROXY
-    fi
-
     # LLM API Keys
     echo ""
     info "Optional: Configure AI/LLM API keys (can also be set later in Settings)"
@@ -822,6 +811,31 @@ DONE
     echo ""
 }
 
+# --- Early Proxy Config (before any downloads) --------------------------------
+
+ask_proxy_early() {
+    echo ""
+    info "Si vous etes derriere un proxy d'entreprise, configurez-le maintenant."
+    info "Sinon, appuyez sur Entree pour passer."
+    ask_optional "HTTP Proxy (e.g. http://proxy:8080)" CONF_HTTP_PROXY
+
+    CONF_HTTPS_PROXY=""
+    CONF_NO_PROXY=""
+    if [[ -n "$CONF_HTTP_PROXY" ]]; then
+        ask "HTTPS Proxy" "$CONF_HTTP_PROXY" CONF_HTTPS_PROXY
+        ask "No-Proxy exclusions" "localhost,127.0.0.1,db,redis,waha,ollama,app" CONF_NO_PROXY
+
+        # Export immediately so curl/apt/git/npm use the proxy
+        export http_proxy="$CONF_HTTP_PROXY"
+        export https_proxy="$CONF_HTTPS_PROXY"
+        export HTTP_PROXY="$CONF_HTTP_PROXY"
+        export HTTPS_PROXY="$CONF_HTTPS_PROXY"
+        export no_proxy="$CONF_NO_PROXY"
+        export NO_PROXY="$CONF_NO_PROXY"
+        success "Proxy configure: $CONF_HTTP_PROXY"
+    fi
+}
+
 # --- Clone or Update Repository ----------------------------------------------
 
 REPO_URL="https://gitlab.com/zenidev/zeniclaw.git"
@@ -880,6 +894,8 @@ main() {
         exit 1
     fi
 
+    # Ask for proxy FIRST — needed before any curl/download in preflight
+    ask_proxy_early
     preflight_checks
     collect_configuration
     generate_env

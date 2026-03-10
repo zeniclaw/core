@@ -656,6 +656,54 @@
         </div>
     </div>
 
+    {{-- Enterprise Proxy --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-1">🌐 Proxy Entreprise</h2>
+        <p class="text-sm text-gray-500 mb-5">Configurez un proxy HTTP si votre installation est derriere un pare-feu d'entreprise. Affecte tous les appels sortants (API IA, GitLab, telechargement modeles, etc.).</p>
+
+        <form method="POST" action="{{ route('settings.proxy') }}" class="space-y-4">
+            @csrf
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">HTTP Proxy</label>
+                    <input type="text" name="http_proxy" value="{{ $proxyConfig['http'] ?? '' }}"
+                           placeholder="http://proxy.company.com:8080"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">HTTPS Proxy</label>
+                    <input type="text" name="https_proxy" value="{{ $proxyConfig['https'] ?? '' }}"
+                           placeholder="http://proxy.company.com:8080"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">No-Proxy (exclusions, separes par virgule)</label>
+                <input type="text" name="no_proxy" value="{{ $proxyConfig['no_proxy'] ?? '' }}"
+                       placeholder="localhost,127.0.0.1,db,redis,waha,ollama,app"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                <p class="text-xs text-gray-400 mt-1">Les services internes (db, redis, waha, ollama) sont automatiquement exclus.</p>
+            </div>
+
+            @if($proxyConfig['http'] || $proxyConfig['https'])
+            <div class="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                ✓ Proxy configure — tous les appels HTTP sortants passeront par le proxy.
+            </div>
+            @endif
+
+            <div class="flex items-center gap-3">
+                <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                    💾 Sauvegarder le proxy
+                </button>
+                @if($proxyConfig['http'] || $proxyConfig['https'])
+                <button type="submit" name="clear_proxy" value="1" class="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors border border-red-200">
+                    Supprimer le proxy
+                </button>
+                @endif
+            </div>
+        </form>
+    </div>
+
     {{-- API Tokens --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🔑 API Tokens</h2>

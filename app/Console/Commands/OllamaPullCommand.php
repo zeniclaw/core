@@ -33,7 +33,7 @@ class OllamaPullCommand extends Command
         $body = json_encode(['name' => $model, 'stream' => true]);
 
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $curlOpts = [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => $headers,
@@ -62,7 +62,19 @@ class OllamaPullCommand extends Command
                 }
                 return strlen($data);
             },
-        ]);
+        ];
+
+        // Enterprise proxy support
+        $proxy = env('HTTPS_PROXY') ?: env('HTTP_PROXY');
+        if ($proxy) {
+            $curlOpts[CURLOPT_PROXY] = $proxy;
+            $noProxy = env('NO_PROXY', '');
+            if ($noProxy) {
+                $curlOpts[CURLOPT_NOPROXY] = $noProxy;
+            }
+        }
+
+        curl_setopt_array($ch, $curlOpts);
 
         $result = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
