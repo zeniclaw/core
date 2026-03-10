@@ -20,10 +20,12 @@ RUN apt-get update && apt-get install -y \
 # PHP extensions
 RUN docker-php-ext-install pdo pdo_pgsql pgsql zip mbstring exif pcntl bcmath gd xml
 
-# Redis extension (download via curl for proxy compatibility, then install locally)
+# Redis extension (compile from source when behind proxy, pecl otherwise)
 RUN if [ -n "$HTTP_PROXY" ]; then \
-        curl -fsSL -o /tmp/redis.tgz https://pecl.php.net/get/redis && \
-        pecl install /tmp/redis.tgz && rm -f /tmp/redis.tgz; \
+        curl -fsSL -o /tmp/redis.tar.gz https://github.com/phpredis/phpredis/archive/refs/tags/6.1.0.tar.gz && \
+        mkdir -p /tmp/phpredis && tar xzf /tmp/redis.tar.gz -C /tmp/phpredis --strip-components=1 && \
+        cd /tmp/phpredis && phpize && ./configure && make -j$(nproc) && make install && \
+        rm -rf /tmp/phpredis /tmp/redis.tar.gz; \
     else \
         pecl install redis; \
     fi && docker-php-ext-enable redis
