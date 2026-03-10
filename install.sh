@@ -331,14 +331,30 @@ ensure_runtime_running() {
         warn "No compose command found."
         if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
             info "Installing podman-compose..."
-            # Try dnf/apt first (packaged version), then pip
+            local compose_installed=false
+
+            # 1. Try distro package (works on Fedora/Ubuntu, not RHEL)
             if install_package podman-compose 2>/dev/null; then
-                true
-            elif check_command pip3; then
-                sudo -E pip3 install podman-compose 2>/dev/null || pip3 install --user podman-compose 2>/dev/null || true
-            elif check_command pip; then
-                sudo -E pip install podman-compose 2>/dev/null || true
+                compose_installed=true
             fi
+
+            # 2. Try pip3 / python3 -m pip
+            if ! $compose_installed; then
+                # Ensure pip is available
+                if ! check_command pip3 && ! python3 -m pip --version &>/dev/null 2>&1; then
+                    info "Installing python3-pip..."
+                    install_package python3-pip 2>/dev/null || true
+                fi
+                # Install via pip
+                if check_command pip3; then
+                    info "Installing podman-compose via pip3..."
+                    sudo -E pip3 install podman-compose 2>&1 && compose_installed=true
+                elif python3 -m pip --version &>/dev/null 2>&1; then
+                    info "Installing podman-compose via python3 -m pip..."
+                    sudo -E python3 -m pip install podman-compose 2>&1 && compose_installed=true
+                fi
+            fi
+
             # Re-detect after install
             detect_runtime
             if [[ -z "$COMPOSE_CMD" ]]; then
