@@ -82,6 +82,8 @@ services:
     image: ollama/ollama:latest
     container_name: zeniclaw_ollama
     restart: unless-stopped
+    profiles:
+      - ollama
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:

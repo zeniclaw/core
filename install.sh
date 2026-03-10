@@ -647,15 +647,21 @@ build_and_start() {
         if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
             # Podman: configure via storage.conf
             sudo mkdir -p /etc/containers
-            if [[ ! -f /etc/containers/storage.conf ]] || ! grep -q "graphroot" /etc/containers/storage.conf 2>/dev/null; then
+            local need_reset=false
+            if [[ ! -f /etc/containers/storage.conf ]] || ! grep -q "graphroot.*$CONF_STORAGE_PATH" /etc/containers/storage.conf 2>/dev/null; then
+                # Stop all containers first
+                $CONTAINER_CMD stop -a 2>/dev/null || true
                 sudo tee /etc/containers/storage.conf > /dev/null << STOREOF
 [storage]
 driver = "overlay"
 graphroot = "$CONF_STORAGE_PATH"
 STOREOF
+                # Reset Podman storage to apply new path
+                info "Applying new storage path (podman system reset)..."
+                $CONTAINER_CMD system reset --force 2>/dev/null || sudo podman system reset --force 2>/dev/null || true
                 success "Podman storage configured at $CONF_STORAGE_PATH"
             else
-                warn "storage.conf already exists — update graphroot manually if needed"
+                success "Podman storage already set to $CONF_STORAGE_PATH"
             fi
         else
             # Docker: configure via daemon.json
@@ -670,17 +676,19 @@ STOREOF
         fi
     fi
 
-    # Disable Ollama service if not requested
-    local compose_profiles=""
-    if [[ "$CONF_OLLAMA" != "true" ]]; then
+    # Ollama: only start if user opted in (uses docker-compose profiles)
+    if [[ "$CONF_OLLAMA" == "true" ]]; then
+        OLLAMA_PROFILE="--profile ollama"
+        info "Ollama enabled — will pull ollama image (~7 GB)"
+    else
+        OLLAMA_PROFILE=""
         info "Ollama disabled — skipping local LLM container"
-        compose_profiles="--scale ollama=0"
     fi
 
     # Build
     info "Building container images (this may take a few minutes on first run)..."
     echo ""
-    if ! dcompose build 2>&1 | while IFS= read -r line; do
+    if ! dcompose $OLLAMA_PROFILE build 2>&1 | while IFS= read -r line; do
         echo -e "    ${DIM}${line}${NC}"
     done; then
         error "Container build failed. Check the output above for details."
@@ -691,7 +699,7 @@ STOREOF
 
     # Start
     info "Starting services..."
-    if ! dcompose up -d $compose_profiles 2>&1; then
+    if ! dcompose $OLLAMA_PROFILE up -d 2>&1; then
         error "Failed to start services."
         exit 1
     fi
