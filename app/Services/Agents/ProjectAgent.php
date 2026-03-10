@@ -17,7 +17,7 @@ class ProjectAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de projets. Permet de changer de projet actif, creer/supprimer un projet, voir les statistiques et les details, archiver/restaurer, renommer, mettre a jour l\'URL GitLab ou la description, definir une priorite, voir les taches recentes, et lister tous les projets.';
+        return 'Agent de gestion de projets. Permet de changer de projet actif, creer/supprimer un projet, voir les statistiques et la progression hebdomadaire, archiver/restaurer, renommer, mettre a jour l\'URL GitLab ou la description, definir une priorite, voir les taches recentes, ajouter/consulter des notes, et lister tous les projets.';
     }
 
     public function keywords(): array
@@ -40,12 +40,14 @@ class ProjectAgent extends BaseAgent
             'supprimer projet', 'delete projet', 'effacer projet', 'enlever projet',
             'priorite projet', 'priorite', 'urgent', 'haute priorite', 'basse priorite', 'priority',
             'taches recentes', 'dernieres taches', 'historique projet', 'activite projet', 'recent tasks',
+            'note projet', 'noter projet', 'ajouter note', 'notes projet', 'memo projet', 'notes du projet',
+            'progression projet', 'progres projet', 'avancement projet', 'progress projet', 'progression cette semaine',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -84,6 +86,8 @@ class ProjectAgent extends BaseAgent
             'delete'   => $this->handleDelete($context, $action),
             'priority' => $this->handlePriority($context, $action),
             'recent'   => $this->handleRecent($context, $action),
+            'notes'    => $this->handleNotes($context, $action),
+            'progress' => $this->handleProgress($context, $action),
             default    => $this->handleProjectSwitch($context),
         };
     }
@@ -121,7 +125,7 @@ class ProjectAgent extends BaseAgent
 Tu es un assistant de gestion de projets. L'utilisateur te donne un message et tu dois determiner l'action a effectuer.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "switch|create|stats|archive|restore|rename|list|update|info|delete|priority|recent", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false, "priority": null}
+{"action": "switch|create|stats|archive|restore|rename|list|update|info|delete|priority|recent|notes|progress", "project_name": "...", "new_name": "...", "gitlab_url": "...", "description": "...", "show_all": false, "priority": null, "note_text": null, "filter_priority": null}
 
 ACTIONS:
 - "switch": changer de projet actif (ex: "bosse sur mon-app", "switch zeniclaw", "projet X")
@@ -130,12 +134,14 @@ ACTIONS:
 - "archive": archiver un projet (ex: "archive le projet X", "archive mon-app")
 - "restore": restaurer/desarchiver un projet (ex: "restaure le projet X", "reactive le projet Y")
 - "rename": renommer un projet (ex: "renomme zeniclaw en zeniclaw-v2", "le projet X s'appelle maintenant Y")
-- "list": lister les projets (ex: "mes projets", "liste des projets", "tous mes projets", "quels projets")
+- "list": lister les projets (ex: "mes projets", "liste des projets", "tous mes projets", "quels projets", "projets urgents")
 - "update": mettre a jour l'URL GitLab ou la description d'un projet (ex: "change l'url gitlab de mon-app", "met a jour la description", "l'url du projet est maintenant https://...")
 - "info": voir les details complets d'un projet (ex: "infos sur le projet", "details du projet X", "montre moi le projet Y")
 - "delete": supprimer definitivement un projet archive (ex: "supprime le projet test", "efface le projet archive X")
 - "priority": definir ou voir la priorite d'un projet (ex: "met le projet en urgent", "priorite haute pour zeniclaw", "quelle est la priorite", "priorite normale")
 - "recent": voir les dernieres taches d'un projet (ex: "dernieres taches", "activite recente du projet", "historique zeniclaw", "quoi de neuf sur le projet")
+- "notes": ajouter ou consulter les notes d'un projet (ex: "note sur zeniclaw: surveiller la migration", "notes du projet", "voir mes notes", "memo mon-app: RDV client vendredi")
+- "progress": voir la progression hebdomadaire d'un projet (ex: "progression du projet", "avancement cette semaine", "progres zeniclaw")
 
 CHAMPS:
 - project_name: nom actuel du projet mentionne (ou null si non mentionne)
@@ -144,6 +150,8 @@ CHAMPS:
 - description: description courte du projet si fournie (ou null)
 - show_all: true si l'utilisateur demande "tous" les projets (inclut les archives)
 - priority: "urgent"|"haute"|"normale"|"basse" si action=priority et une valeur est donnee (ou null pour juste consulter)
+- note_text: texte de la note si action=notes et qu'il y a un texte a ajouter (ou null pour juste consulter)
+- filter_priority: "urgent"|"haute"|"normale"|"basse" si l'utilisateur filtre la liste par priorite (ou null)
 
 EXEMPLES:
 - "bosse sur zeniclaw" → {"action": "switch", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
@@ -163,7 +171,12 @@ EXEMPLES:
 - "priorite normale pour mon-app" → {"action": "priority", "project_name": "mon-app", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": "normale"}
 - "quelle est la priorite du projet" → {"action": "priority", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
 - "dernieres taches du projet zeniclaw" → {"action": "recent", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
-- "activite recente" → {"action": "recent", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null}
+- "activite recente" → {"action": "recent", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": null, "filter_priority": null}
+- "note sur zeniclaw: surveiller la migration DB" → {"action": "notes", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": "surveiller la migration DB", "filter_priority": null}
+- "notes du projet" → {"action": "notes", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": null, "filter_priority": null}
+- "progression du projet" → {"action": "progress", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": null, "filter_priority": null}
+- "avancement zeniclaw cette semaine" → {"action": "progress", "project_name": "zeniclaw", "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": null, "filter_priority": null}
+- "mes projets urgents" → {"action": "list", "project_name": null, "new_name": null, "gitlab_url": null, "description": null, "show_all": false, "priority": null, "note_text": null, "filter_priority": "urgent"}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -389,21 +402,32 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'project_stats_no_project']);
         }
 
-        $subAgents = SubAgent::where('project_id', $project->id)->get();
+        // Aggregate counts in DB (compatible SQLite + MySQL)
+        $counts = SubAgent::where('project_id', $project->id)
+            ->selectRaw("COUNT(*) as total,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END) as running,
+                SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END) as pending")
+            ->first();
 
-        $completed = $subAgents->where('status', 'completed')->count();
-        $failed    = $subAgents->where('status', 'failed')->count();
-        $running   = $subAgents->where('status', 'running')->count();
-        $pending   = $subAgents->where('status', 'pending')->count();
-        $total     = $subAgents->count();
+        $total     = (int) ($counts->total ?? 0);
+        $completed = (int) ($counts->completed ?? 0);
+        $running   = (int) ($counts->running ?? 0);
+        $failed    = (int) ($counts->failed ?? 0);
+        $pending   = (int) ($counts->pending ?? 0);
 
         // Success rate (completed vs completed+failed)
         $doneCount   = $completed + $failed;
         $successRate = $doneCount > 0 ? round(($completed / $doneCount) * 100) : null;
 
-        // Average execution time for completed tasks
+        // Average execution time for completed tasks (only load those with times)
         $avgTime            = null;
-        $completedWithTimes = $subAgents->filter(fn($s) => $s->status === 'completed' && $s->started_at && $s->completed_at);
+        $completedWithTimes = SubAgent::where('project_id', $project->id)
+            ->where('status', 'completed')
+            ->whereNotNull('started_at')
+            ->whereNotNull('completed_at')
+            ->get(['started_at', 'completed_at']);
         if ($completedWithTimes->isNotEmpty()) {
             $totalSeconds = $completedWithTimes->sum(
                 fn($s) => Carbon::parse($s->completed_at)->diffInSeconds(Carbon::parse($s->started_at))
@@ -413,7 +437,7 @@ PROMPT;
         }
 
         // Last activity
-        $lastActivity     = $subAgents->sortByDesc('updated_at')->first();
+        $lastActivity     = SubAgent::where('project_id', $project->id)->orderByDesc('updated_at')->first(['updated_at']);
         $lastActivityText = $lastActivity
             ? Carbon::parse($lastActivity->updated_at)->diffForHumans()
             : 'aucune';
@@ -454,7 +478,11 @@ PROMPT;
 
         // Show running task names if any
         if ($running > 0) {
-            $runningTasks = $subAgents->where('status', 'running')->take(3);
+            $runningTasks = SubAgent::where('project_id', $project->id)
+                ->where('status', 'running')
+                ->orderByDesc('updated_at')
+                ->limit(3)
+                ->get(['task_description']);
             $lines[] = "";
             $lines[] = "Taches en cours :";
             foreach ($runningTasks as $task) {
@@ -641,7 +669,11 @@ PROMPT;
 
     private function handleList(AgentContext $context, array $action): AgentResult
     {
-        $showAll = $action['show_all'] ?? false;
+        $showAll        = $action['show_all'] ?? false;
+        $filterPriority = $action['filter_priority'] ?? null;
+        if ($filterPriority) {
+            $filterPriority = mb_strtolower($filterPriority);
+        }
 
         $query = Project::withCount([
             'subAgents as completed_tasks_count' => fn($q) => $q->where('status', 'completed'),
@@ -657,8 +689,15 @@ PROMPT;
 
         $projects = $query->limit(20)->get();
 
+        // Filter by priority if requested (settings JSON filter in PHP)
+        if ($filterPriority) {
+            $projects = $projects->filter(fn($p) => $p->getSetting('priority') === $filterPriority)->values();
+        }
+
         if ($projects->isEmpty()) {
-            $reply = "Aucun projet trouve. Dis \"cree un projet mon-app\" pour en creer un.";
+            $reply = $filterPriority
+                ? "Aucun projet avec priorite \"{$filterPriority}\". Dis \"mes projets\" pour voir tous tes projets."
+                : "Aucun projet trouve. Dis \"cree un projet mon-app\" pour en creer un.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'project_list_empty']);
         }
@@ -666,7 +705,11 @@ PROMPT;
         $activeId = $context->session->active_project_id;
         $count    = $projects->count();
 
-        $lines = ["📁 *" . ($showAll ? "Tous tes projets" : "Tes projets") . "* ({$count}) :"];
+        $title = $filterPriority
+            ? "Projets priorite " . ucfirst($filterPriority)
+            : ($showAll ? "Tous tes projets" : "Tes projets");
+
+        $lines = ["📁 *{$title}* ({$count}) :"];
         foreach ($projects as $p) {
             $isActive      = $p->id === $activeId;
             $marker        = $isActive ? ' 👈' : '';
@@ -773,9 +816,13 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'project_info_no_project']);
         }
 
-        // Single query for all task counts
+        // Single query for all task counts (CASE WHEN for SQLite + MySQL compatibility)
         $taskCounts = SubAgent::where('project_id', $project->id)
-            ->selectRaw('COUNT(*) as total, SUM(status="completed") as completed, SUM(status="running") as running, SUM(status="failed") as failed, SUM(status="pending") as pending')
+            ->selectRaw("COUNT(*) as total,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'running'   THEN 1 ELSE 0 END) as running,
+                SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END) as pending")
             ->first();
 
         $totalTasks     = (int) ($taskCounts->total ?? 0);
@@ -1070,6 +1117,168 @@ PROMPT;
         $this->log($context, 'Project recent tasks requested', ['project_id' => $project->id]);
 
         return AgentResult::reply($reply, ['action' => 'project_recent', 'project_id' => $project->id]);
+    }
+
+    // ─── Notes ─────────────────────────────────────────────────────────
+
+    private function handleNotes(AgentContext $context, array $action): AgentResult
+    {
+        $project  = $this->resolveTargetProject($context, $action);
+        $noteText = trim($action['note_text'] ?? '');
+
+        if (!$project) {
+            $reply = "Aucun projet actif. Precise le nom du projet ou active-en un d'abord.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_notes_no_project']);
+        }
+
+        // Add a new note
+        if ($noteText) {
+            if (mb_strlen($noteText) > 500) {
+                $reply = "La note est trop longue (max 500 caracteres).";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'project_notes_too_long']);
+            }
+
+            $notes = $project->getSetting('notes', []);
+            if (!is_array($notes)) {
+                $notes = [];
+            }
+
+            $notes[] = [
+                'text' => $noteText,
+                'at'   => now()->toISOString(),
+            ];
+
+            // Keep only the last 10 notes
+            if (count($notes) > 10) {
+                $notes = array_slice($notes, -10);
+            }
+
+            try {
+                $project->setSetting('notes', $notes);
+            } catch (\Exception $e) {
+                Log::error("[project] handleNotes setSetting failed: " . $e->getMessage());
+                $reply = "Erreur lors de l'enregistrement de la note. Reessaie dans un moment.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'project_notes_error']);
+            }
+
+            $reply = "📌 Note ajoutee au projet *{$project->name}* :\n\"{$noteText}\"";
+            $this->sendText($context->from, $reply);
+
+            $this->log($context, 'Project note added', [
+                'project_id'   => $project->id,
+                'project_name' => $project->name,
+            ]);
+
+            return AgentResult::reply($reply, ['action' => 'project_note_added', 'project_id' => $project->id]);
+        }
+
+        // View notes
+        $notes = $project->getSetting('notes', []);
+        if (empty($notes)) {
+            $reply = "Aucune note pour le projet *{$project->name}*.\n\n"
+                . "Ajoute-en une : \"note sur {$project->name}: ton texte\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_notes_empty', 'project_id' => $project->id]);
+        }
+
+        $lines = ["📌 *Notes : {$project->name}* (" . count($notes) . ")", ""];
+        foreach (array_reverse($notes) as $i => $note) {
+            $text = is_array($note) ? ($note['text'] ?? '') : (string) $note;
+            $at   = is_array($note) && isset($note['at'])
+                ? ' _(' . Carbon::parse($note['at'])->diffForHumans() . ')_'
+                : '';
+            $lines[] = ($i + 1) . ". {$text}{$at}";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project notes viewed', ['project_id' => $project->id]);
+
+        return AgentResult::reply($reply, ['action' => 'project_notes_view', 'project_id' => $project->id]);
+    }
+
+    // ─── Progress ──────────────────────────────────────────────────────
+
+    private function handleProgress(AgentContext $context, array $action): AgentResult
+    {
+        $project = $this->resolveTargetProject($context, $action);
+
+        if (!$project) {
+            $reply = "Aucun projet actif. Precise le nom du projet ou active-en un d'abord.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'project_progress_no_project']);
+        }
+
+        $weekStart     = Carbon::now()->startOfWeek(\Carbon\Carbon::MONDAY)->setTime(0, 0, 0);
+        $lastWeekStart = $weekStart->copy()->subWeek();
+        $lastWeekEnd   = $weekStart->copy()->subSecond();
+
+        // This week completed
+        $thisWeek = SubAgent::where('project_id', $project->id)
+            ->where('status', 'completed')
+            ->where('completed_at', '>=', $weekStart)
+            ->count();
+
+        // Last week completed
+        $lastWeek = SubAgent::where('project_id', $project->id)
+            ->where('status', 'completed')
+            ->whereBetween('completed_at', [$lastWeekStart, $lastWeekEnd])
+            ->count();
+
+        // Currently running
+        $running = SubAgent::where('project_id', $project->id)
+            ->where('status', 'running')
+            ->count();
+
+        // Total completed all time
+        $totalCompleted = SubAgent::where('project_id', $project->id)
+            ->where('status', 'completed')
+            ->count();
+
+        // Trend indicator
+        $trend = '';
+        if ($lastWeek > 0) {
+            $delta = $thisWeek - $lastWeek;
+            if ($delta > 0)      $trend = " 📈 +{$delta} vs sem. derniere";
+            elseif ($delta < 0)  $trend = " 📉 {$delta} vs sem. derniere";
+            else                  $trend = " → stable vs sem. derniere";
+        }
+
+        $priorityBadge = $this->priorityBadge($project->getSetting('priority'));
+
+        $lines = [
+            "📈 *Progression : {$project->name}*" . ($priorityBadge ? " {$priorityBadge}" : ''),
+            "",
+            "Cette semaine  : {$thisWeek} tache" . ($thisWeek !== 1 ? 's' : '') . " completee" . ($thisWeek !== 1 ? 's' : '') . $trend,
+            "Semaine passee : {$lastWeek} tache" . ($lastWeek !== 1 ? 's' : '') . " completee" . ($lastWeek !== 1 ? 's' : ''),
+        ];
+
+        if ($running > 0) {
+            $lines[] = "🔄 En cours : {$running} tache" . ($running !== 1 ? 's' : '');
+        }
+
+        $lines[] = "";
+        $lines[] = "Total completes : {$totalCompleted}";
+
+        if ($thisWeek === 0 && $lastWeek === 0 && $running === 0) {
+            $lines[] = "_Aucune activite recente sur ce projet._";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Project progress viewed', [
+            'project_id'     => $project->id,
+            'this_week'      => $thisWeek,
+            'last_week'      => $lastWeek,
+            'total_completed'=> $totalCompleted,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'project_progress', 'project_id' => $project->id]);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────

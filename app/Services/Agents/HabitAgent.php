@@ -22,7 +22,7 @@ class HabitAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour (ou plusieurs a la fois), suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks, le rapport hebdomadaire, le rapport mensuel des 30 derniers jours, analyser son meilleur jour de la semaine, et mettre en pause/reprendre une habitude temporairement.';
+        return 'Agent de suivi d\'habitudes (habit tracker). Permet de creer des habitudes quotidiennes ou hebdomadaires, les cocher chaque jour (ou plusieurs a la fois), suivre les streaks (series consecutives en jours ou semaines), voir les statistiques et taux de completion sur 30 jours, voir ce qu\'il reste a faire aujourd\'hui (daily ET weekly), renommer une habitude, changer la frequence, voir l\'historique des 7 derniers jours, annuler un log accidentel, recevoir de la motivation, voir le classement des streaks, le rapport hebdomadaire, le rapport mensuel des 30 derniers jours, analyser son meilleur jour de la semaine, mettre en pause/reprendre une habitude temporairement, fixer un objectif quotidien de nombre d\'habitudes a realiser, voir sa serie de jours parfaits (tous les daily faits dans la journee), obtenir des suggestions d\'habitudes complementaires via IA, visualiser un calendrier heatmap des 28 derniers jours, rattraper un oubli en loggant pour hier (backdate), et fixer un defi de streak personnel pour une habitude (streak challenge avec suivi de progression).';
     }
 
     public function keywords(): array
@@ -58,12 +58,22 @@ class HabitAgent extends BaseAgent
             'pause habitude', 'pauser habitude', 'mettre en pause', 'suspendre habitude',
             'reprendre habitude', 'reactiver habitude', 'resume habit',
             'cocher plusieurs', 'log multiple', 'j\'ai fait sport et', 'j\'ai fait meditation et',
+            'objectif habitude', 'objectif habitudes', 'fixer objectif', 'but habitude', 'goal habitude',
+            'mon objectif', 'objectif du jour', 'objectif quotidien', 'target habitude',
+            'jours parfaits', 'jour parfait', 'perfect day', 'serie parfaite', 'jours 100%',
+            'jours parfaitement', 'combien jours parfaits', 'serie jours parfaits',
+            'comparer semaine', 'compare semaine', 'vs semaine', 'progression semaine', 'comparaison semaine', 'semaine precedente',
+            'top habitudes', 'meilleures habitudes', 'habitudes regulieres', 'plus regulier', 'podium habitudes', 'habitudes top',
+            'suggerer habitude', 'suggestions habitudes', 'idee habitude', 'nouvelles idees habitude', 'conseils habitude', 'propose habitude',
+            'heatmap habitude', 'calendrier habitude', 'carte habitude', 'visual habitude', 'grille habitude', 'heatmap',
+            'hier', 'j\'ai fait hier', 'j\'ai medite hier', 'j\'ai couru hier', 'rattrapage', 'backdate', 'logger hier', 'oublie hier', 'j\'ai oublie', 'log hier',
+            'defi streak', 'objectif streak', 'challenge habitude', 'challenge streak', 'viser streak', 'mon defi', 'defi habitude', 'objectif nombre jours',
         ];
     }
 
     public function version(): string
     {
-        return '1.6.0';
+        return '1.10.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -83,7 +93,7 @@ class HabitAgent extends BaseAgent
 
         $response = $this->claude->chat(
             "Date et heure actuelles (heure de Paris): {$now}\nMessage: \"{$context->body}\"\n\nHabitudes actives:\n{$listText}",
-            'claude-haiku-4-5-20251001',
+            $this->resolveModel($context),
             $this->buildPrompt()
         );
 
@@ -125,8 +135,16 @@ class HabitAgent extends BaseAgent
             'log_multiple'     => $this->handleLogMultiple($context, $habits, $parsed),
             'pause'            => $this->handlePause($context, $habits, $parsed),
             'resume'           => $this->handleResume($context, $habits, $parsed),
-            'help'             => $this->handleHelp($context),
-            default            => $this->handleUnknown($context),
+            'set_goal'         => $this->handleSetGoal($context, $parsed),
+            'perfect_streak'   => $this->handlePerfectStreak($context, $habits),
+            'compare_week'     => $this->handleCompareWeek($context, $habits),
+            'top_habits'       => $this->handleTopHabits($context, $habits),
+            'suggest'           => $this->handleSuggest($context, $habits),
+            'heatmap'           => $this->handleHeatmap($context, $habits, $parsed),
+            'backdate'          => $this->handleBackdate($context, $habits, $parsed),
+            'streak_challenge'  => $this->handleStreakChallenge($context, $habits, $parsed),
+            'help'              => $this->handleHelp($context),
+            default             => $this->handleUnknown($context),
         };
     }
 
@@ -202,6 +220,13 @@ Utilise quand l'utilisateur mentionne plusieurs habitudes a la fois. 'items' = t
 20. REPRENDRE (reactiver) une habitude mise en pause:
 {"action": "resume", "item": 1}
 
+21. FIXER UN OBJECTIF QUOTIDIEN (nombre minimum d'habitudes a faire par jour):
+{"action": "set_goal", "count": 3}
+count = nombre d'habitudes cible (entier >= 1). Pour supprimer l'objectif: count = 0.
+
+22. VOIR LA SERIE DE JOURS PARFAITS (jours consecutifs ou toutes les habitudes daily actives ont ete faites):
+{"action": "perfect_streak"}
+
 REGLES:
 - 'name' = nom court et clair de l'habitude (ex: "Meditation", "Sport", "Lecture")
 - 'frequency' = "daily" (quotidienne) ou "weekly" (hebdomadaire). Par defaut "daily".
@@ -236,6 +261,43 @@ EXEMPLES:
 - "J'ai fait sport et meditation" ou "Cocher 1 et 3" -> {"action": "log_multiple", "items": [X, Y]}
 - "Mettre en pause habitude 2" ou "Pause sport" ou "Je pars en vacances" -> {"action": "pause", "item": X}
 - "Reprendre habitude 2" ou "Reactiver sport" -> {"action": "resume", "item": X}
+- "Objectif 3 habitudes" ou "Je veux faire 4 habitudes par jour" -> {"action": "set_goal", "count": 3}
+- "Supprimer mon objectif" ou "Pas d'objectif" -> {"action": "set_goal", "count": 0}
+- "Mes jours parfaits" ou "Serie jours parfaits" ou "Combien de jours parfaits" -> {"action": "perfect_streak"}
+
+23. COMPARER LA PROGRESSION semaine courante vs semaine precedente:
+{"action": "compare_week"}
+
+24. TOP HABITUDES les plus regulieres (30 derniers jours), podium:
+{"action": "top_habits"}
+
+- "Comparer semaine" ou "Ma semaine vs semaine derniere" ou "Progression cette semaine" -> {"action": "compare_week"}
+- "Top habitudes" ou "Mes meilleures habitudes" ou "Habitudes les plus regulieres" -> {"action": "top_habits"}
+
+25. SUGGESTIONS d'habitudes complementaires (IA coach):
+{"action": "suggest"}
+
+26. HEATMAP / CALENDRIER VISUEL des 28 derniers jours pour une ou toutes les habitudes:
+{"action": "heatmap", "item": 1}
+Si l'utilisateur veut voir toutes les habitudes, item = null.
+
+- "Suggere-moi des habitudes" ou "Nouvelles idees d'habitudes" ou "Conseils habitudes" -> {"action": "suggest"}
+- "Heatmap" ou "Calendrier habitude" ou "Montre-moi le calendrier de mes habitudes" -> {"action": "heatmap", "item": null}
+- "Heatmap habitude 2" ou "Calendrier meditation" -> {"action": "heatmap", "item": X}
+
+27. RATTRAPAGE / BACKDATE — logger une habitude pour HIER (oubli de la veille):
+{"action": "backdate", "item": 1}
+Utilise UNIQUEMENT quand l'utilisateur dit explicitement "hier", "la veille", "j'ai oublie de logger", etc.
+Le backdating est limite a 1 jour en arriere (hier seulement).
+
+28. DEFI STREAK — fixer un objectif de streak personnel pour une habitude:
+{"action": "streak_challenge", "item": 1, "target": 30}
+target = nombre de jours/semaines cible (entier >= 1). Pour supprimer le defi: target = 0. Pour voir l'etat du defi sans le modifier: target = null.
+
+- "J'ai fait sport hier" ou "J'ai oublie de logger meditation hier" -> {"action": "backdate", "item": X}
+- "Je veux atteindre 30 jours de streak sur meditation" -> {"action": "streak_challenge", "item": X, "target": 30}
+- "Quel est mon defi streak sport" ou "Mon defi pour habitude 2" -> {"action": "streak_challenge", "item": X, "target": null}
+- "Supprimer mon defi sport" -> {"action": "streak_challenge", "item": X, "target": 0}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -392,6 +454,38 @@ PROMPT;
         $milestone = $this->getMilestoneMessage($newStreak, $isNewRecord, $habit->frequency);
         if ($milestone) {
             $reply .= "\n\n{$milestone}";
+        }
+
+        // Show streak challenge progress if a challenge is set
+        $challengeKey = 'habit_challenge_' . $habit->id;
+        $challengeVal = AppSetting::get($challengeKey);
+        if ($challengeVal !== null) {
+            $challengeTarget = (int) $challengeVal;
+            $unit2           = $habit->frequency === 'weekly' ? 'semaines' : 'jours';
+            if ($newStreak >= $challengeTarget) {
+                $reply .= "\n\nDEFI ACCOMPLI ({$challengeTarget} {$unit2}) !";
+            } else {
+                $remaining2 = $challengeTarget - $newStreak;
+                $reply .= "\n\nDefi : {$newStreak}/{$challengeTarget} {$unit2} (encore {$remaining2})";
+            }
+        }
+
+        // Show remaining daily habits count
+        if ($habit->frequency === 'daily' && $habits->count() > 1) {
+            $allDailyIds = $habits->where('frequency', 'daily')->where('paused_at', null)->pluck('id')->toArray();
+            if (count($allDailyIds) > 1) {
+                $doneTodayIds   = HabitLog::whereIn('habit_id', $allDailyIds)
+                    ->where('completed_date', $today)
+                    ->pluck('habit_id')
+                    ->toArray();
+                $doneTodayIds[] = $habit->id; // include the one we just logged
+                $pendingDaily   = count(array_filter($allDailyIds, fn($id) => !in_array($id, $doneTodayIds)));
+                if ($pendingDaily > 0) {
+                    $reply .= "\n\nEncore {$pendingDaily} habitude(s) journaliere(s) a faire aujourd'hui.";
+                } elseif (count($allDailyIds) > 1) {
+                    $reply .= "\n\nToutes tes habitudes journalieres sont faites !";
+                }
+            }
         }
 
         $this->sendText($context->from, $reply);
@@ -601,6 +695,21 @@ PROMPT;
 
         $lines[] = "\n{$doneCount}/{$activeTotal} habitudes actives completees.";
 
+        // Show goal progress if set
+        $goalKey = 'habit_goal_' . md5($context->from);
+        $goalRaw = AppSetting::get($goalKey);
+        if ($goalRaw !== null) {
+            $goal = (int) $goalRaw;
+            if ($goal > 0) {
+                if ($doneCount >= $goal) {
+                    $lines[] = "Objectif du jour atteint : {$doneCount}/{$goal} !";
+                } else {
+                    $remaining = $goal - $doneCount;
+                    $lines[] = "Objectif du jour : {$doneCount}/{$goal} (encore {$remaining} a faire)";
+                }
+            }
+        }
+
         if ($pendingCount === 0 && $activeTotal > 0) {
             $lines[] = "Bravo, toutes les habitudes actives sont a jour !";
         }
@@ -676,9 +785,10 @@ PROMPT;
             $streakUnit = $habit->frequency === 'weekly' ? 'sem' : 'j';
             $status     = $isDone ? ' [FAIT]' : '';
 
+            $bar30 = $this->buildMiniBar($rate, 100);
             $lines[] = "\n{$num}. {$habit->name}{$status} [{$freqLabel}]";
             $lines[] = "   Streak: {$streak}{$streakUnit} | Record: {$bestStreak}{$streakUnit} | Total: {$totalLogs}";
-            $lines[] = "   Taux 30j: {$rate}%";
+            $lines[] = "   Taux 30j: {$bar30} {$rate}%";
         }
 
         $lines[] = "\n---";
@@ -1040,6 +1150,144 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'habit_history']);
     }
 
+    /**
+     * Set (or remove) a daily habit count goal stored in AppSetting.
+     * goal = 0 removes the goal.
+     */
+    private function handleSetGoal(AgentContext $context, array $parsed): AgentResult
+    {
+        $count = isset($parsed['count']) ? (int) $parsed['count'] : null;
+
+        if ($count === null || $count < 0) {
+            $reply = "Indique un nombre d'habitudes comme objectif.\nEx: \"Objectif 3 habitudes par jour\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_set_goal_invalid']);
+        }
+
+        $key = 'habit_goal_' . md5($context->from);
+
+        if ($count === 0) {
+            AppSetting::where('key', $key)->delete();
+            $reply = "Objectif quotidien supprime.";
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Habit goal removed');
+            return AgentResult::reply($reply, ['action' => 'habit_goal_removed']);
+        }
+
+        AppSetting::set($key, (string) $count);
+
+        $reply = "Objectif fixe : {$count} habitude(s) par jour.\n"
+            . "Dis \"aujourd'hui\" pour voir ta progression !";
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit goal set', ['goal' => $count]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_set_goal', 'goal' => $count]);
+    }
+
+    /**
+     * Show consecutive "perfect days" streak (all active daily habits done each day).
+     */
+    private function handlePerfectStreak(AgentContext $context, $habits): AgentResult
+    {
+        $dailyHabits = $habits->filter(fn($h) => $h->frequency === 'daily' && $h->paused_at === null);
+
+        if ($dailyHabits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude quotidienne active.\n"
+                . "Ajoute une habitude daily pour suivre les jours parfaits.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_perfect_streak_no_daily']);
+        }
+
+        $tz          = AppSetting::timezone();
+        $today       = now($tz)->toDateString();
+        $since       = now($tz)->subDays(59)->toDateString();
+        $totalHabits = $dailyHabits->count();
+        $habitIds    = $dailyHabits->pluck('id')->toArray();
+
+        // Get all logs for the last 60 days grouped by date
+        $logsByDate = HabitLog::whereIn('habit_id', $habitIds)
+            ->where('completed_date', '>=', $since)
+            ->get()
+            ->groupBy(fn($log) => $log->completed_date instanceof Carbon
+                ? $log->completed_date->toDateString()
+                : Carbon::parse($log->completed_date)->toDateString());
+
+        $isPerfect = fn(string $date) => $logsByDate->get($date, collect())
+            ->pluck('habit_id')->unique()->count() >= $totalHabits;
+
+        // Calculate current consecutive perfect streak
+        $streak  = 0;
+        $current = Carbon::parse($today, $tz);
+
+        // If today isn't perfect yet, start streak check from yesterday
+        if (!$isPerfect($today)) {
+            $current->subDay();
+        }
+
+        while ($current->toDateString() >= $since) {
+            if ($isPerfect($current->toDateString())) {
+                $streak++;
+                $current->subDay();
+            } else {
+                break;
+            }
+        }
+
+        // Count total perfect days in the last 60 days
+        $totalPerfect = 0;
+        $cursor       = Carbon::parse($since, $tz);
+        $end          = Carbon::parse($today, $tz);
+        while ($cursor->lte($end)) {
+            if ($isPerfect($cursor->toDateString())) {
+                $totalPerfect++;
+            }
+            $cursor->addDay();
+        }
+
+        $todayPerfect = $isPerfect($today);
+
+        $habitsLabel = $totalHabits === 1 ? '1 habitude quotidienne' : "{$totalHabits} habitudes quotidiennes";
+        $lines       = ["Serie de jours parfaits ({$habitsLabel} actives) :"];
+        $lines[]     = '';
+
+        if ($streak === 0) {
+            $lines[] = "Pas de serie en cours.";
+            if ($todayPerfect) {
+                $lines[] = "Aujourd'hui est parfait, mais hier etait rate.";
+            } else {
+                $lines[] = "Fais TOUTES tes habitudes aujourd'hui pour lancer une serie !";
+            }
+        } else {
+            $unit    = $streak <= 1 ? 'jour parfait' : 'jours parfaits';
+            $lines[] = "Serie actuelle : {$streak} {$unit} consecutifs";
+            if ($todayPerfect) {
+                $lines[] = "Aujourd'hui compte dans la serie !";
+            } else {
+                $lines[] = "Fais toutes tes habitudes aujourd'hui pour continuer !";
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = "Total jours parfaits (60 derniers jours) : {$totalPerfect}";
+
+        if ($streak >= 7) {
+            $lines[] = "Semaine parfaite consecutive — tu es en feu !";
+        } elseif ($streak >= 3) {
+            $lines[] = "Belle serie — continue comme ca !";
+        } elseif ($totalPerfect > 0) {
+            $lines[] = "Continue a viser les jours parfaits !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit perfect streak viewed', [
+            'streak'        => $streak,
+            'total_perfect' => $totalPerfect,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_perfect_streak', 'streak' => $streak]);
+    }
+
     private function handleHelp(AgentContext $context): AgentResult
     {
         $reply = "Guide Habit Tracker :\n\n"
@@ -1056,16 +1304,32 @@ PROMPT;
             . "PAUSE / REPRISE\n"
             . "  \"Mettre en pause habitude 2\" — suspend sans casser le streak\n"
             . "  \"Reprendre habitude 2\" — reactive l'habitude\n\n"
+            . "OBJECTIF QUOTIDIEN\n"
+            . "  \"Objectif 3 habitudes par jour\" — fixe une cible daily\n"
+            . "  \"Supprimer mon objectif\" — enleve la cible\n\n"
             . "VOIR\n"
             . "  \"Mes habitudes\" — liste avec streaks\n"
-            . "  \"Aujourd'hui\" — ce qu'il reste a faire\n"
+            . "  \"Aujourd'hui\" — ce qu'il reste a faire + progression objectif\n"
             . "  \"Stats habitudes\" — statistiques completes\n"
             . "  \"Historique habitude 2\" — 7 derniers jours\n"
             . "  \"Motivation\" — bilan streaks en jeu\n"
             . "  \"Classement streaks\" — top streaks de tes habitudes\n"
             . "  \"Rapport semaine\" — bilan de la semaine en cours\n"
             . "  \"Rapport mensuel\" — bilan des 30 derniers jours\n"
-            . "  \"Mon meilleur jour\" — analyse par jour de semaine\n\n"
+            . "  \"Mon meilleur jour\" — analyse par jour de semaine\n"
+            . "  \"Jours parfaits\" — serie de jours ou tout a ete fait\n"
+            . "  \"Comparer semaine\" — semaine courante vs semaine precedente\n"
+            . "  \"Top habitudes\" — podium des 3 habitudes les plus regulieres\n"
+            . "  \"Heatmap\" — calendrier visuel 28 jours\n\n"
+            . "IA / SUGGESTIONS\n"
+            . "  \"Suggere-moi des habitudes\" — idees complementaires via IA\n\n"
+            . "RATTRAPAGE (oubli de la veille)\n"
+            . "  \"J'ai fait sport hier\" — log pour hier si non deja fait\n"
+            . "  \"J'ai oublie de logger meditation hier\"\n\n"
+            . "DEFI STREAK\n"
+            . "  \"Defi 30 jours sur meditation\" — fixe un objectif de streak\n"
+            . "  \"Mon defi streak sport\" — voir l'avancement du defi\n"
+            . "  \"Supprimer mon defi sport\" — efface le defi\n\n"
             . "GERER\n"
             . "  \"Renommer habitude 2 en Course a pied\"\n"
             . "  \"Passer habitude 2 en hebdo\" (changer frequence)\n"
@@ -1800,6 +2064,515 @@ PROMPT;
         }
 
         return '';
+    }
+
+    /**
+     * Compare current week completion vs previous week, per habit and globally.
+     */
+    private function handleCompareWeek(AgentContext $context, $habits): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_compare_week_empty']);
+        }
+
+        $tz       = AppSetting::timezone();
+        $now      = now($tz);
+        $today    = $now->toDateString();
+
+        // Semaine courante : lundi -> aujourd'hui
+        $curStart = $now->copy()->startOfWeek(Carbon::MONDAY)->toDateString();
+        $curEnd   = $today;
+        $curDays  = Carbon::parse($curStart, $tz)->diffInDays(Carbon::parse($curEnd, $tz)) + 1;
+
+        // Semaine précédente : lundi-7 -> dimanche-7
+        $prevStart = $now->copy()->subWeek()->startOfWeek(Carbon::MONDAY)->toDateString();
+        $prevEnd   = $now->copy()->subWeek()->endOfWeek()->toDateString();
+        $prevDays  = 7;
+
+        $habitIds = $habits->pluck('id')->toArray();
+
+        $curLogs  = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$curStart, $curEnd])
+            ->get()
+            ->groupBy('habit_id');
+
+        $prevLogs = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$prevStart, $prevEnd])
+            ->get()
+            ->groupBy('habit_id');
+
+        $curWeekLabel  = Carbon::parse($curStart, $tz)->format('d/m') . '-' . Carbon::parse($curEnd, $tz)->format('d/m');
+        $prevWeekLabel = Carbon::parse($prevStart, $tz)->format('d/m') . '-' . Carbon::parse($prevEnd, $tz)->format('d/m');
+
+        $lines = [
+            "Comparaison des semaines :",
+            "Prec ({$prevWeekLabel}) -> Courante ({$curWeekLabel})",
+        ];
+
+        $totalCurDone  = 0;
+        $totalPrevDone = 0;
+        $totalCurPoss  = 0;
+        $totalPrevPoss = 0;
+
+        foreach ($habits->values() as $i => $habit) {
+            $num = $i + 1;
+
+            if ($habit->frequency === 'daily') {
+                $curDone   = $curLogs->get($habit->id, collect())->count();
+                $prevDone  = $prevLogs->get($habit->id, collect())->count();
+                $curPoss   = $curDays;
+                $prevPoss  = $prevDays;
+            } else {
+                $curDone  = $curLogs->get($habit->id, collect())->isNotEmpty() ? 1 : 0;
+                $prevDone = $prevLogs->get($habit->id, collect())->isNotEmpty() ? 1 : 0;
+                $curPoss  = 1;
+                $prevPoss = 1;
+            }
+
+            $curRate  = $curPoss  > 0 ? round(($curDone  / $curPoss)  * 100) : 0;
+            $prevRate = $prevPoss > 0 ? round(($prevDone / $prevPoss) * 100) : 0;
+            $diff     = $curRate - $prevRate;
+
+            if ($diff > 0) {
+                $trend = "+{$diff}% (progres)";
+            } elseif ($diff < 0) {
+                $trend = "{$diff}% (baisse)";
+            } else {
+                $trend = "stable";
+            }
+
+            $totalCurDone  += $curDone;
+            $totalPrevDone += $prevDone;
+            $totalCurPoss  += $curPoss;
+            $totalPrevPoss += $prevPoss;
+
+            $lines[] = "\n{$num}. {$habit->name}";
+            $lines[] = "   Prec: {$prevDone}/{$prevPoss} ({$prevRate}%) -> Courante: {$curDone}/{$curPoss} ({$curRate}%) [{$trend}]";
+        }
+
+        $globalCurRate  = $totalCurPoss  > 0 ? (int) round(($totalCurDone  / $totalCurPoss)  * 100) : 0;
+        $globalPrevRate = $totalPrevPoss > 0 ? (int) round(($totalPrevDone / $totalPrevPoss) * 100) : 0;
+        $globalDiff     = $globalCurRate - $globalPrevRate;
+
+        $lines[] = "\n---";
+        $lines[] = "Global: {$globalPrevRate}% -> {$globalCurRate}%";
+
+        if ($globalDiff > 0) {
+            $lines[] = "Progression de +{$globalDiff}% — continue comme ca !";
+        } elseif ($globalDiff < 0) {
+            $lines[] = "Baisse de " . abs($globalDiff) . "% — rattrape le retard !";
+        } else {
+            $lines[] = "Meme niveau que la semaine derniere. Vise plus haut !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit compare week viewed', [
+            'cur_rate'  => $globalCurRate,
+            'prev_rate' => $globalPrevRate,
+        ]);
+
+        return AgentResult::reply($reply, [
+            'action'    => 'habit_compare_week',
+            'cur_rate'  => $globalCurRate,
+            'prev_rate' => $globalPrevRate,
+        ]);
+    }
+
+    /**
+     * Show the top 3 most consistent habits over the last 30 days (by completion rate).
+     */
+    private function handleTopHabits(AgentContext $context, $habits): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_top_habits_empty']);
+        }
+
+        $tz      = AppSetting::timezone();
+        $now     = now($tz);
+        $since30 = $now->copy()->subDays(29)->toDateString();
+
+        $habitIds  = $habits->pluck('id')->toArray();
+        $last30Map = HabitLog::whereIn('habit_id', $habitIds)
+            ->where('completed_date', '>=', $since30)
+            ->selectRaw('habit_id, COUNT(*) as cnt')
+            ->groupBy('habit_id')
+            ->pluck('cnt', 'habit_id')
+            ->toArray();
+
+        $ranked = [];
+        foreach ($habits->values() as $i => $habit) {
+            $last30      = $last30Map[$habit->id] ?? 0;
+            $denominator = $habit->frequency === 'daily' ? 30 : 4;
+            $rate        = $denominator > 0 ? min(100, (int) round(($last30 / $denominator) * 100)) : 0;
+            $streak      = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
+            $ranked[]    = [
+                'num'    => $i + 1,
+                'name'   => $habit->name,
+                'rate'   => $rate,
+                'streak' => $streak,
+                'unit'   => $habit->frequency === 'weekly' ? 'sem' : 'j',
+                'last30' => $last30,
+                'denom'  => $denominator,
+            ];
+        }
+
+        usort($ranked, fn($a, $b) => $b['rate'] <=> $a['rate'] ?: $b['streak'] <=> $a['streak']);
+
+        $medals   = ['1er', '2eme', '3eme'];
+        $topCount = min(3, count($ranked));
+        $lines    = ["Top habitudes (30 derniers jours) :"];
+
+        for ($i = 0; $i < $topCount; $i++) {
+            $data    = $ranked[$i];
+            $bar     = $this->buildMiniBar($data['rate'], 100);
+            $lines[] = "\n{$medals[$i]}. {$data['name']}";
+            $lines[] = "   {$bar} {$data['rate']}% ({$data['last30']}/{$data['denom']}) | Streak: {$data['streak']}{$data['unit']}";
+        }
+
+        if (count($ranked) > 3) {
+            $lines[] = "\n--- Autres ---";
+            for ($i = 3; $i < count($ranked); $i++) {
+                $data    = $ranked[$i];
+                $pos     = $i + 1;
+                $lines[] = "   {$pos}. {$data['name']}: {$data['rate']}%";
+            }
+        }
+
+        $topRate = $ranked[0]['rate'] ?? 0;
+        $lines[] = "";
+        if ($topRate >= 90) {
+            $lines[] = "Tes meilleures habitudes sont vraiment solides !";
+        } elseif ($topRate >= 70) {
+            $lines[] = "Bonne regularite sur tes top habitudes — continue !";
+        } else {
+            $lines[] = "Il y a de la place pour progresser — vise 80% !";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit top habits viewed', ['top_rate' => $topRate]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_top_habits', 'top_rate' => $topRate]);
+    }
+
+    /**
+     * Ask Claude to suggest complementary habits based on the user's current habits.
+     */
+    private function handleSuggest(AgentContext $context, $habits): AgentResult
+    {
+        $habitList = $habits->isEmpty()
+            ? 'Aucune habitude pour le moment.'
+            : $habits->pluck('name')->implode(', ');
+
+        $prompt = "L'utilisateur suit actuellement ces habitudes : {$habitList}.\n"
+            . "Suggere 3 nouvelles habitudes complementaires, courtes et actionables.\n"
+            . "Reponds en JSON valide uniquement : {\"suggestions\": [{\"name\": \"...\", \"reason\": \"...\", \"frequency\": \"daily|weekly\"}, ...]}\n"
+            . "Les suggestions doivent etre differentes de celles deja trackees et adaptees au profil.";
+
+        $response = $this->claude->chat(
+            $prompt,
+            $this->resolveModel($context),
+            "Tu es un coach de bien-etre et de productivite. Suggere des habitudes saines, realistes et complementaires aux habitudes existantes. Reponds UNIQUEMENT en JSON valide, sans markdown."
+        );
+
+        $parsed      = $this->parseJson($response);
+        $suggestions = $parsed['suggestions'] ?? [];
+
+        if (empty($suggestions) || !is_array($suggestions)) {
+            $reply = "Je n'ai pas pu generer des suggestions pour le moment. Reessaie dans quelques instants !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_suggest_failed']);
+        }
+
+        $lines = ["Suggestions d'habitudes complementaires :"];
+
+        foreach (array_slice($suggestions, 0, 3) as $i => $s) {
+            $num      = $i + 1;
+            $name     = trim($s['name'] ?? '');
+            $reason   = trim($s['reason'] ?? '');
+            $freq     = ($s['frequency'] ?? 'daily') === 'weekly' ? 'hebdomadaire' : 'quotidienne';
+
+            if (!$name) continue;
+
+            $lines[] = "\n{$num}. {$name} [{$freq}]";
+            if ($reason) {
+                $lines[] = "   {$reason}";
+            }
+        }
+
+        $lines[] = "\nDis \"Ajouter habitude [nom]\" pour en ajouter une !";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit suggest viewed', ['count' => count($suggestions)]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_suggest', 'count' => count($suggestions)]);
+    }
+
+    /**
+     * Show a 28-day heatmap (4 rows of 7 days) for one or all habits.
+     * Each cell: X = done, _ = not done. Compact text-based visual.
+     */
+    private function handleHeatmap(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        if ($habits->isEmpty()) {
+            $reply = "Tu n'as aucune habitude enregistree.\nDis \"ajouter habitude Meditation\" pour commencer !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_heatmap_empty']);
+        }
+
+        $item = $parsed['item'] ?? null;
+
+        if ($item !== null) {
+            $targetHabit = $habits->values()[(int) $item - 1] ?? null;
+            if (!$targetHabit) {
+                $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'habit_heatmap_not_found']);
+            }
+            $targetHabits = collect([$targetHabit]);
+        } else {
+            // Limit to 5 to avoid too long a message on WhatsApp
+            $targetHabits = $habits->take(5);
+        }
+
+        $tz      = AppSetting::timezone();
+        $now     = now($tz);
+        $endDate = $now->toDateString();
+
+        // Build exactly 28 days ending today
+        $days = [];
+        for ($i = 27; $i >= 0; $i--) {
+            $days[] = $now->copy()->subDays($i)->toDateString();
+        }
+
+        $habitIds    = $targetHabits->pluck('id')->toArray();
+        $logsByHabit = HabitLog::whereIn('habit_id', $habitIds)
+            ->whereBetween('completed_date', [$days[0], $endDate])
+            ->get()
+            ->groupBy('habit_id');
+
+        $startLabel = Carbon::parse($days[0], $tz)->format('d/m');
+        $endLabel   = Carbon::parse($endDate, $tz)->format('d/m');
+        $lines      = ["Heatmap ({$startLabel} - {$endLabel}) :"];
+        $lines[]    = "L  M  M  J  V  S  D";
+
+        foreach ($targetHabits->values() as $habit) {
+            $num       = $habits->values()->search(fn($h) => $h->id === $habit->id) + 1;
+            $habitLogs = $logsByHabit->get($habit->id, collect());
+            $logDates  = $habitLogs->pluck('completed_date')
+                ->map(fn($d) => $d instanceof Carbon ? $d->toDateString() : Carbon::parse($d)->toDateString())
+                ->toArray();
+
+            $doneCount = count(array_intersect($days, $logDates));
+            $rate      = round($doneCount / 28 * 100);
+
+            $freqLabel = $habit->frequency === 'weekly' ? ' [hebdo]' : '';
+            $lines[]   = "\n{$num}. {$habit->name}{$freqLabel} ({$doneCount}/28j, {$rate}%)";
+
+            // 4 rows of 7 days
+            $chunks = array_chunk($days, 7);
+            foreach ($chunks as $week) {
+                $cells = [];
+                foreach ($week as $day) {
+                    $cells[] = in_array($day, $logDates) ? 'X' : '_';
+                }
+                $lines[] = "   " . implode("  ", $cells);
+            }
+        }
+
+        if ($targetHabits->count() < $habits->count()) {
+            $lines[] = "\n(Affichage limite aux 5 premieres habitudes. Dis \"Heatmap habitude N\" pour une habitude specifique.)";
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit heatmap viewed', ['count' => $targetHabits->count()]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_heatmap', 'count' => $targetHabits->count()]);
+    }
+
+    /**
+     * Backdate: log a habit for yesterday (1-day backdating to recover a forgotten log).
+     * Only allowed if the habit was NOT already logged for yesterday.
+     */
+    private function handleBackdate(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $item = $parsed['item'] ?? null;
+        if (!$item || $habits->isEmpty()) {
+            $reply = "Quelle habitude veux-tu logger pour hier ? Donne le numero.\nEx: \"J'ai fait sport hier\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_backdate_no_item']);
+        }
+
+        $habit = $habits->values()[(int) $item - 1] ?? null;
+
+        if (!$habit) {
+            $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_backdate_not_found']);
+        }
+
+        $tz        = AppSetting::timezone();
+        $yesterday = now($tz)->subDay()->toDateString();
+
+        // For weekly habits: check the week containing yesterday
+        if ($habit->frequency === 'weekly') {
+            $weekStart = now($tz)->subDay()->startOfWeek()->toDateString();
+            $weekEnd   = now($tz)->subDay()->endOfWeek()->toDateString();
+            $existing  = HabitLog::where('habit_id', $habit->id)
+                ->whereBetween('completed_date', [$weekStart, $weekEnd])
+                ->first();
+        } else {
+            $existing = HabitLog::where('habit_id', $habit->id)
+                ->where('completed_date', $yesterday)
+                ->first();
+        }
+
+        if ($existing) {
+            $scope = $habit->frequency === 'weekly' ? 'la semaine precedente' : 'hier';
+            $reply = "\"{$habit->name}\" est deja loggee pour {$scope}. Pas de rattrapage necessaire !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_backdate_already_logged']);
+        }
+
+        // Auto-resume if paused
+        if ($habit->paused_at !== null) {
+            $habit->update(['paused_at' => null]);
+        }
+
+        // Clear cache so streak is recalculated fresh after inserting the backdated log
+        Cache::forget("habit_streak:{$habit->id}");
+        Cache::forget("habit_best_streak:{$habit->id}");
+
+        $oldBest    = $this->getBestStreak($habit->id);
+        $streak     = $this->calculateStreak($habit->id, $habit->frequency);
+        $newStreak  = $streak + 1;
+        $bestStreak = max($oldBest, $newStreak);
+
+        HabitLog::create([
+            'habit_id'       => $habit->id,
+            'completed_date' => $yesterday,
+            'streak_count'   => $newStreak,
+            'best_streak'    => $bestStreak,
+        ]);
+
+        $this->cacheStreak($habit->id, $newStreak, $bestStreak);
+
+        $unit  = $habit->frequency === 'weekly'
+            ? ($newStreak <= 1 ? 'semaine' : 'semaines')
+            : ($newStreak <= 1 ? 'jour' : 'jours');
+        $reply = "Rattrapage effectue ! \"{$habit->name}\" loggee pour hier.\n"
+            . "Streak : {$newStreak} {$unit}";
+
+        $milestone = $this->getMilestoneMessage($newStreak, $newStreak > $oldBest && $newStreak > 1, $habit->frequency);
+        if ($milestone) {
+            $reply .= "\n\n{$milestone}";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit backdated', ['habit_id' => $habit->id, 'date' => $yesterday, 'streak' => $newStreak]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_backdate', 'habit_id' => $habit->id, 'streak' => $newStreak]);
+    }
+
+    /**
+     * Streak challenge: set, view or clear a personal streak target for a specific habit.
+     * Stored in AppSetting as "habit_challenge_{habit_id}".
+     * target = null  → view current challenge status
+     * target = 0     → remove the challenge
+     * target >= 1    → set a new challenge
+     */
+    private function handleStreakChallenge(AgentContext $context, $habits, array $parsed): AgentResult
+    {
+        $item   = $parsed['item'] ?? null;
+        $target = array_key_exists('target', $parsed) ? $parsed['target'] : 'view';
+
+        if (!$item || $habits->isEmpty()) {
+            $reply = "Quelle habitude veux-tu defier ? Donne le numero.\n"
+                . "Ex: \"Defi 30 jours sur meditation\" ou \"Mon defi streak sport\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_challenge_no_item']);
+        }
+
+        $habit = $habits->values()[(int) $item - 1] ?? null;
+
+        if (!$habit) {
+            $reply = "Habitude #{$item} introuvable. Dis \"mes habitudes\" pour voir ta liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_challenge_not_found']);
+        }
+
+        $key      = 'habit_challenge_' . $habit->id;
+        $existing = AppSetting::get($key);
+        $streak   = $this->getCachedStreak($habit->id) ?? $this->calculateStreak($habit->id, $habit->frequency);
+        $unit     = $habit->frequency === 'weekly' ? 'semaines' : 'jours';
+
+        // VIEW mode (target = null or not provided)
+        if ($target === 'view' || $target === null) {
+            if ($existing === null) {
+                $reply = "Aucun defi fixe pour \"{$habit->name}\".\n"
+                    . "Fixe-toi un objectif ! Ex: \"Defi 30 jours sur {$habit->name}\"";
+            } else {
+                $challengeTarget = (int) $existing;
+                $progress        = min($streak, $challengeTarget);
+                $bar             = $this->buildMiniBar($progress, $challengeTarget, 8);
+                $pct             = $challengeTarget > 0 ? min(100, (int) round(($streak / $challengeTarget) * 100)) : 0;
+
+                if ($streak >= $challengeTarget) {
+                    $reply = "DEFI ACCOMPLI ! \"{$habit->name}\"\n"
+                        . "Objectif : {$challengeTarget} {$unit} — Streak actuel : {$streak} {$unit}\n"
+                        . "{$bar} 100%\n"
+                        . "Felicitations — tu as releve le defi !";
+                } else {
+                    $remaining = $challengeTarget - $streak;
+                    $reply = "Defi \"{$habit->name}\" : {$challengeTarget} {$unit}\n"
+                        . "Progression : {$streak}/{$challengeTarget} {$unit} ({$pct}%)\n"
+                        . "{$bar}\n"
+                        . "Encore {$remaining} {$unit} pour accomplir le defi !";
+                }
+            }
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_challenge_view', 'habit_id' => $habit->id]);
+        }
+
+        $targetInt = (int) $target;
+
+        // REMOVE mode (target = 0)
+        if ($targetInt === 0) {
+            AppSetting::where('key', $key)->delete();
+            $reply = "Defi supprime pour \"{$habit->name}\".";
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Habit challenge removed', ['habit_id' => $habit->id]);
+            return AgentResult::reply($reply, ['action' => 'habit_challenge_removed', 'habit_id' => $habit->id]);
+        }
+
+        // SET mode (target >= 1)
+        if ($targetInt < 1) {
+            $reply = "L'objectif de streak doit etre un nombre positif. Ex: \"Defi 30 jours sur {$habit->name}\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'habit_challenge_invalid']);
+        }
+
+        AppSetting::set($key, (string) $targetInt);
+
+        $pct   = $targetInt > 0 ? min(100, (int) round(($streak / $targetInt) * 100)) : 0;
+        $bar   = $this->buildMiniBar($streak, $targetInt, 8);
+        $reply = "Defi fixe pour \"{$habit->name}\" !\n"
+            . "Objectif : {$targetInt} {$unit}\n"
+            . "Progression actuelle : {$streak}/{$targetInt} ({$pct}%)\n"
+            . "{$bar}\n"
+            . "Dis \"mon defi streak {$habit->name}\" pour suivre ta progression !";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Habit challenge set', ['habit_id' => $habit->id, 'target' => $targetInt, 'current_streak' => $streak]);
+
+        return AgentResult::reply($reply, ['action' => 'habit_challenge_set', 'habit_id' => $habit->id, 'target' => $targetInt]);
     }
 
     private function parseJson(?string $response): ?array

@@ -24,10 +24,10 @@ class DocumentAgentTest extends TestCase
         $this->assertEquals('document', $agent->name());
     }
 
-    public function test_agent_version_is_1_2_0(): void
+    public function test_agent_version_is_1_5_0(): void
     {
         $agent = new DocumentAgent();
-        $this->assertEquals('1.2.0', $agent->version());
+        $this->assertEquals('1.5.0', $agent->version());
     }
 
     public function test_agent_has_description(): void
@@ -681,6 +681,194 @@ class DocumentAgentTest extends TestCase
         $this->assertContains('note encadree', $agent->keywords());
     }
 
+    // ── callout: danger style ─────────────────────────────────────────────────
+
+    public function test_build_pdf_html_callout_danger(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'callout', 'text' => 'CRITIQUE: action irreversible', 'style' => 'danger']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('CRITIQUE: action irreversible', $html);
+        $this->assertStringContainsString('#FDEDEC', $html);
+        $this->assertStringContainsString('#E74C3C', $html);
+        $this->assertStringContainsString('[X]', $html);
+    }
+
+    public function test_generate_docx_with_callout_danger(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'callout', 'text' => 'Clause critique: attention!', 'style' => 'danger'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_danger_' . uniqid(), 'Test Danger', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── quote block ───────────────────────────────────────────────────────────
+
+    public function test_build_pdf_html_quote(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'quote', 'text' => 'Article L.1234-56 du Code du travail.']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('<blockquote', $html);
+        $this->assertStringContainsString('Article L.1234-56 du Code du travail.', $html);
+        $this->assertStringContainsString('font-style:italic', $html);
+    }
+
+    public function test_generate_docx_with_quote(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Contrat', 'level' => 1],
+                ['type' => 'quote', 'text' => 'Selon l\'article 12, le prestataire doit...'],
+                ['type' => 'paragraph', 'text' => 'Suite du texte.'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_quote_' . uniqid(), 'Contrat Quote', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── highlight block ───────────────────────────────────────────────────────
+
+    public function test_build_pdf_html_highlight_yellow(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'highlight', 'text' => 'Montant TTC: 2 520 EUR', 'color' => 'yellow']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Montant TTC: 2 520 EUR', $html);
+        $this->assertStringContainsString('#FFF9C4', $html);
+    }
+
+    public function test_build_pdf_html_highlight_defaults_to_yellow(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'highlight', 'text' => 'Texte important']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Texte important', $html);
+        $this->assertStringContainsString('#FFF9C4', $html);
+    }
+
+    public function test_build_pdf_html_highlight_green(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'highlight', 'text' => 'Valide', 'color' => 'green']];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('#C8F7C5', $html);
+    }
+
+    public function test_generate_docx_with_highlight(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'highlight', 'text' => 'ECHEANCE: 31 mars 2026', 'color' => 'yellow'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_highlight_' . uniqid(), 'Doc Highlight', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── XLSX: currency format ─────────────────────────────────────────────────
+
+    public function test_generate_xlsx_currency_format_on_monetary_column(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateXlsx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sheets' => [[
+                'name'    => 'Facture',
+                'headers' => ['Description', 'Montant HT', 'TVA', 'Total TTC'],
+                'rows'    => [
+                    ['Prestation A', 1000, 200, 1200],
+                    ['Prestation B', 500, 100, 600],
+                    ['TOTAL', 1500, 300, 1800],
+                ],
+            ]],
+        ];
+
+        $path = $method->invoke($agent, 'test_xlsx_currency_' . uniqid(), 'Facture', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── Keywords: nouvelles entrees v1.3.0 ───────────────────────────────────
+
+    public function test_keywords_include_citation(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('citation', $agent->keywords());
+    }
+
+    public function test_keywords_include_surlignage(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('surlignage', $agent->keywords());
+    }
+
+    public function test_keywords_include_alerte_critique(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('alerte critique', $agent->keywords());
+    }
+
     // ── Filename sanitization ─────────────────────────────────────────────────
 
     public function test_filename_sanitization_removes_spaces(): void
@@ -695,6 +883,791 @@ class DocumentAgentTest extends TestCase
         $path = $method->invoke($agent, 'fichier_sans_espace', []);
         $this->assertStringContainsString('fichier_sans_espace', $path);
         @unlink($path);
+    }
+
+    // ── Keywords: nouvelles entrees v1.4.0 ───────────────────────────────────
+
+    public function test_keywords_include_signature(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('signature', $agent->keywords());
+    }
+
+    public function test_keywords_include_paysage(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('paysage', $agent->keywords());
+    }
+
+    public function test_keywords_include_orientation_paysage(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('orientation paysage', $agent->keywords());
+    }
+
+    // ── signature block: PDF ──────────────────────────────────────────────────
+
+    public function test_build_pdf_html_signature_single_signer(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'    => 'signature',
+            'signers' => [
+                ['name' => 'Jean Dupont', 'title' => 'Directeur General'],
+            ],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Jean Dupont', $html);
+        $this->assertStringContainsString('Directeur General', $html);
+        $this->assertStringContainsString('border-top', $html);
+    }
+
+    public function test_build_pdf_html_signature_multiple_signers(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'    => 'signature',
+            'signers' => [
+                ['name' => 'Jean Dupont', 'title' => 'Vendeur'],
+                ['name' => 'Marie Martin', 'title' => 'Acheteur'],
+            ],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Jean Dupont', $html);
+        $this->assertStringContainsString('Marie Martin', $html);
+        $this->assertStringContainsString('Vendeur', $html);
+        $this->assertStringContainsString('Acheteur', $html);
+    }
+
+    public function test_build_pdf_html_signature_empty_signers_renders_nothing(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'signature', 'signers' => []]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        // Should not add any signature table with empty signers
+        $this->assertStringNotContainsString('border-top:1px solid', $html);
+    }
+
+    public function test_build_pdf_html_signature_escapes_special_chars(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'    => 'signature',
+            'signers' => [['name' => '<script>xss</script>', 'title' => 'Test']],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringNotContainsString('<script>xss</script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+    }
+
+    public function test_generate_pdf_with_signature(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Contrat de prestation', 'level' => 1],
+                ['type' => 'paragraph', 'text' => 'Les parties conviennent des conditions suivantes.'],
+                ['type' => 'signature', 'signers' => [
+                    ['name' => 'Jean Dupont', 'title' => 'Prestataire'],
+                    ['name' => 'ACME Corp', 'title' => 'Client'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_signature_' . uniqid(), 'Contrat', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── signature block: DOCX ─────────────────────────────────────────────────
+
+    public function test_generate_docx_with_signature(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'paragraph', 'text' => 'Contrat entre les parties.'],
+                ['type' => 'signature', 'signers' => [
+                    ['name' => 'Jean Dupont', 'title' => 'Directeur'],
+                    ['name' => 'Marie Martin', 'title' => 'Client'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_sig_' . uniqid(), 'Contrat Sig', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_docx_with_signature_empty_signers(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'signature', 'signers' => []],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_sig_empty_' . uniqid(), 'Empty Sig', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    // ── key_value block: PDF ──────────────────────────────────────────────────
+
+    public function test_build_pdf_html_key_value(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'  => 'key_value',
+            'pairs' => [
+                ['label' => 'Client', 'value' => 'ACME Corp'],
+                ['label' => 'Date', 'value' => '09/03/2026'],
+                ['label' => 'Reference', 'value' => 'FC-2026-001'],
+            ],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('ACME Corp', $html);
+        $this->assertStringContainsString('09/03/2026', $html);
+        $this->assertStringContainsString('FC-2026-001', $html);
+        $this->assertStringContainsString('font-weight:bold', $html);
+    }
+
+    public function test_build_pdf_html_key_value_escapes_html(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'  => 'key_value',
+            'pairs' => [['label' => '<b>Bold</b>', 'value' => '<script>alert(1)</script>']],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringNotContainsString('<b>Bold</b>', $html);
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;b&gt;Bold&lt;/b&gt;', $html);
+    }
+
+    public function test_build_pdf_html_key_value_empty_pairs(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'key_value', 'pairs' => []]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        // Should not add any table if pairs empty
+        $this->assertStringNotContainsString('font-weight:bold', $html);
+    }
+
+    public function test_generate_pdf_with_key_value(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'key_value', 'pairs' => [
+                    ['label' => 'Client', 'value' => 'Test Corp'],
+                    ['label' => 'Montant', 'value' => '1 500 EUR TTC'],
+                ]],
+                ['type' => 'separator'],
+                ['type' => 'paragraph', 'text' => 'Merci de votre confiance.'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_kv_' . uniqid(), 'Facture Test', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── key_value block: DOCX ─────────────────────────────────────────────────
+
+    public function test_generate_docx_with_key_value(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'key_value', 'pairs' => [
+                    ['label' => 'Client', 'value' => 'ACME Corp'],
+                    ['label' => 'Objet', 'value' => 'Prestation de service'],
+                ]],
+                ['type' => 'paragraph', 'text' => 'Description des services rendus.'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_kv_' . uniqid(), 'Doc KV', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_docx_with_key_value_empty(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = ['sections' => [['type' => 'key_value', 'pairs' => []]]];
+        $path    = $method->invoke($agent, 'test_docx_kv_empty_' . uniqid(), 'KV Empty', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    // ── Landscape orientation: PDF ────────────────────────────────────────────
+
+    public function test_generate_pdf_landscape_creates_file(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'orientation' => 'landscape',
+            'sections'    => [
+                ['type' => 'heading', 'text' => 'Rapport Large', 'level' => 1],
+                ['type' => 'table', 'headers' => ['Col1', 'Col2', 'Col3', 'Col4', 'Col5', 'Col6', 'Col7'], 'rows' => [
+                    ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_landscape_' . uniqid(), 'Rapport Paysage', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_pdf_portrait_is_default(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        // No orientation key = default portrait
+        $content = ['sections' => [['type' => 'paragraph', 'text' => 'Test portrait']]];
+        $path    = $method->invoke($agent, 'test_pdf_portrait_' . uniqid(), 'Portrait', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    public function test_generate_pdf_invalid_orientation_defaults_to_portrait(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'orientation' => 'invalid_value',
+            'sections'    => [['type' => 'paragraph', 'text' => 'Test']],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_inv_orient_' . uniqid(), 'Test', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    // ── Landscape orientation: DOCX ───────────────────────────────────────────
+
+    public function test_generate_docx_landscape_creates_file(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'orientation' => 'landscape',
+            'sections'    => [
+                ['type' => 'heading', 'text' => 'Tableau de bord', 'level' => 1],
+                ['type' => 'table', 'headers' => ['Metrique', 'Jan', 'Fev', 'Mar', 'Avr', 'Mai'], 'rows' => [
+                    ['Ventes', '1000', '1200', '900', '1400', '1100'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_landscape_' . uniqid(), 'Dashboard Paysage', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_docx_portrait_is_default(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = ['sections' => [['type' => 'paragraph', 'text' => 'Portrait par defaut']]];
+        $path    = $method->invoke($agent, 'test_docx_portrait_' . uniqid(), 'Portrait', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    // ── Description mentions new features ─────────────────────────────────────
+
+    public function test_description_mentions_signature(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertStringContainsStringIgnoringCase('signature', $agent->description());
+    }
+
+    public function test_description_mentions_paysage(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertStringContainsStringIgnoringCase('paysage', $agent->description());
+    }
+
+    // ── Keywords: nouvelles entrees v1.5.0 ───────────────────────────────────
+
+    public function test_keywords_include_badge(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('badge', $agent->keywords());
+    }
+
+    public function test_keywords_include_footer(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('footer', $agent->keywords());
+    }
+
+    public function test_keywords_include_recapitulatif(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertContains('recapitulatif', $agent->keywords());
+    }
+
+    // ── badge block: PDF ──────────────────────────────────────────────────────
+
+    public function test_build_pdf_html_badge_renders_spans(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'  => 'badge',
+            'items' => [
+                ['label' => 'Actif',     'color' => 'green'],
+                ['label' => 'En attente', 'color' => 'orange'],
+                ['label' => 'Cloture',   'color' => 'red'],
+            ],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Actif', $html);
+        $this->assertStringContainsString('En attente', $html);
+        $this->assertStringContainsString('Cloture', $html);
+        $this->assertStringContainsString('border-radius:12px', $html);
+    }
+
+    public function test_build_pdf_html_badge_uses_correct_colors(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'badge', 'items' => [['label' => 'OK', 'color' => 'green']]]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('#D5F5E3', $html); // green bg
+        $this->assertStringContainsString('#27AE60', $html); // green border
+    }
+
+    public function test_build_pdf_html_badge_defaults_to_blue(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'badge', 'items' => [['label' => 'Default']]]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('#EBF5FB', $html); // blue bg
+    }
+
+    public function test_build_pdf_html_badge_escapes_label(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'badge', 'items' => [['label' => '<script>xss</script>', 'color' => 'red']]]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+    }
+
+    public function test_generate_pdf_with_badge(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Tableau de bord', 'level' => 1],
+                ['type' => 'badge', 'items' => [
+                    ['label' => 'Actif',    'color' => 'green'],
+                    ['label' => 'Urgent',   'color' => 'red'],
+                    ['label' => 'En cours', 'color' => 'orange'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_badge_' . uniqid(), 'Dashboard', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── badge block: DOCX ────────────────────────────────────────────────────
+
+    public function test_generate_docx_with_badge(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'paragraph', 'text' => 'Statuts des projets:'],
+                ['type' => 'badge', 'items' => [
+                    ['label' => 'Termine',    'color' => 'green'],
+                    ['label' => 'En attente', 'color' => 'gray'],
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_badge_' . uniqid(), 'Badge Test', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── summary_box block: PDF ───────────────────────────────────────────────
+
+    public function test_build_pdf_html_summary_box_renders_div(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'  => 'summary_box',
+            'title' => 'Points Cles',
+            'items' => ['CA en hausse de 12%', '3 nouveaux clients', 'Objectif Q1 atteint'],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Points Cles', $html);
+        $this->assertStringContainsString('CA en hausse de 12%', $html);
+        $this->assertStringContainsString('3 nouveaux clients', $html);
+        $this->assertStringContainsString('border:2px solid #4472C4', $html);
+        $this->assertStringContainsString('#F0F4FF', $html);
+    }
+
+    public function test_build_pdf_html_summary_box_defaults_title(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [['type' => 'summary_box', 'items' => ['Point A']]];
+        $html     = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringContainsString('Recapitulatif', $html);
+    }
+
+    public function test_build_pdf_html_summary_box_escapes_items(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $sections = [[
+            'type'  => 'summary_box',
+            'title' => 'Test',
+            'items' => ['<b>bold</b>', '<script>xss</script>'],
+        ]];
+
+        $html = $method->invoke($agent, 'Test', $sections);
+
+        $this->assertStringNotContainsString('<b>bold</b>', $html);
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;b&gt;bold&lt;/b&gt;', $html);
+    }
+
+    public function test_generate_pdf_with_summary_box(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Bilan mensuel', 'level' => 1],
+                ['type' => 'paragraph', 'text' => 'Synthese des indicateurs cles du mois.'],
+                ['type' => 'summary_box', 'title' => 'Points Cles', 'items' => [
+                    'Chiffre d\'affaires: 45 000 EUR',
+                    '12 nouveaux clients',
+                    'Taux de satisfaction: 94%',
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_summary_' . uniqid(), 'Bilan', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── summary_box block: DOCX ──────────────────────────────────────────────
+
+    public function test_generate_docx_with_summary_box(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateDocx');
+        $method->setAccessible(true);
+
+        $content = [
+            'sections' => [
+                ['type' => 'summary_box', 'title' => 'Conclusions', 'items' => [
+                    'Projet livre dans les delais',
+                    'Budget respecte a 98%',
+                ]],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_docx_summary_' . uniqid(), 'Summary Doc', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── footer: PDF ───────────────────────────────────────────────────────────
+
+    public function test_build_pdf_html_footer_is_rendered(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $html = $method->invoke($agent, 'Test', [], 'Entreprise XYZ — SIRET 123 456 789');
+
+        $this->assertStringContainsString('Entreprise XYZ', $html);
+        $this->assertStringContainsString('class="footer"', $html);
+        $this->assertStringContainsString('position: fixed', $html);
+        $this->assertStringContainsString('bottom: 0', $html);
+    }
+
+    public function test_build_pdf_html_no_footer_when_null(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $html = $method->invoke($agent, 'Test', []);
+
+        $this->assertStringNotContainsString('class="footer"', $html);
+        $this->assertStringNotContainsString('position: fixed', $html);
+    }
+
+    public function test_build_pdf_html_footer_escapes_html(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('buildPdfHtml');
+        $method->setAccessible(true);
+
+        $html = $method->invoke($agent, 'Test', [], '<script>alert(1)</script>');
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+    }
+
+    public function test_generate_pdf_with_footer(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = [
+            'footer'   => 'ACME Corp — SIRET 123 456 789 — Confidentiel',
+            'sections' => [
+                ['type' => 'heading', 'text' => 'Rapport Annuel', 'level' => 1],
+                ['type' => 'paragraph', 'text' => 'Ce document est confidentiel.'],
+            ],
+        ];
+
+        $path = $method->invoke($agent, 'test_pdf_footer_' . uniqid(), 'Rapport', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_pdf_without_footer_still_works(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generatePdf');
+        $method->setAccessible(true);
+
+        $content = ['sections' => [['type' => 'paragraph', 'text' => 'Sans footer.']]];
+
+        $path = $method->invoke($agent, 'test_pdf_no_footer_' . uniqid(), 'No Footer', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    // ── XLSX: orientation paysage ─────────────────────────────────────────────
+
+    public function test_generate_xlsx_landscape_creates_file(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateXlsx');
+        $method->setAccessible(true);
+
+        $content = [
+            'orientation' => 'landscape',
+            'sheets'      => [[
+                'name'    => 'Rapport',
+                'headers' => ['Col1', 'Col2', 'Col3', 'Col4', 'Col5', 'Col6', 'Col7', 'Col8'],
+                'rows'    => [['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']],
+            ]],
+        ];
+
+        $path = $method->invoke($agent, 'test_xlsx_landscape_' . uniqid(), 'Paysage', $content);
+
+        $this->assertFileExists($path);
+        $this->assertGreaterThan(0, filesize($path));
+        @unlink($path);
+    }
+
+    public function test_generate_xlsx_portrait_is_default(): void
+    {
+        $agent      = new DocumentAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('generateXlsx');
+        $method->setAccessible(true);
+
+        $content = ['sheets' => [['name' => 'Test', 'headers' => ['A'], 'rows' => [['1']]]]];
+        $path    = $method->invoke($agent, 'test_xlsx_portrait_' . uniqid(), 'Portrait', $content);
+
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    // ── description: nouvelles mentions v1.5.0 ───────────────────────────────
+
+    public function test_description_mentions_badge(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertStringContainsStringIgnoringCase('badge', $agent->description());
+    }
+
+    public function test_description_mentions_footer(): void
+    {
+        $agent = new DocumentAgent();
+        $this->assertStringContainsStringIgnoringCase('pied de page', $agent->description());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

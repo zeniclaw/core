@@ -2,6 +2,7 @@
 
 namespace App\Services\Agents;
 
+use App\Models\AppSetting;
 use App\Models\Budget;
 use App\Models\Expense;
 use App\Services\AgentContext;
@@ -53,12 +54,14 @@ class FinanceAgent extends BaseAgent
             'recurrent', 'recurrents', 'recurrentes', 'abonnements actifs', 'depenses recurrentes', 'recurring',
             'budget journalier', 'budget du jour', 'combien par jour', 'par jour', 'disponible jour', 'quota journalier',
             'export', 'exporter', 'liste complete', 'tout le mois', 'toutes depenses', 'toutes les depenses',
+            'epargne', 'economies', 'objectif epargne', 'objectif savings', 'bilan epargne', 'objectif mensuel',
+            'modifier depense', 'corriger depense', 'modifier derniere', 'corriger derniere', 'edit expense',
         ];
     }
 
     public function version(): string
     {
-        return '1.6.0';
+        return '1.7.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -90,6 +93,8 @@ class FinanceAgent extends BaseAgent
             '/\b(recurrents?|recurrentes?|abonnements?\s+actifs?|depenses?\s+recurrentes?)\b/iu',
             '/\b(budget\s+journalier|budget\s+du\s+jour|combien\s+par\s+jour|disponible\s+jour|quota\s+journalier)\b/iu',
             '/\b(export(?:er)?|liste\s+compl[eè]te|tout\s+le\s+mois|toutes?\s+(?:les\s+)?depenses?)\b/iu',
+            '/\b(epargne|economies|objectif\s+epargne|bilan\s+epargne|objectif\s+mensuel)\b/iu',
+            '/\b(modifier|corriger)\s+(depense|derniere|last)\b/iu',
         ];
 
         foreach ($patterns as $pattern) {
@@ -129,9 +134,19 @@ class FinanceAgent extends BaseAgent
             return ['action' => 'delete_budget', 'category' => trim($m[2])];
         }
 
-        // supprimer / annuler la derniere depense
+        // supprimer / annuler la derniere depense (must be before edit_last and history)
         if (preg_match('/\b(supprimer|annuler|delete|undo)\b.*(depense|expense|derniere|last)/iu', $lower)) {
             return ['action' => 'delete_last'];
+        }
+
+        // modifier / corriger derniere depense [montant] [categorie?] (must be before history)
+        if (preg_match('/\b(modifier|corriger|edit)\b.{0,15}\b(depense|derniere|last)\b\s+(\d+[\.,]?\d*)\s*€?\s*(\S+)?\s*(.*)/iu', $lower, $m)) {
+            return [
+                'action'      => 'edit_last',
+                'amount'      => (float) str_replace(',', '.', $m[3]),
+                'category'    => $m[4] ? trim($m[4]) : null,
+                'description' => $m[5] ? trim($m[5]) : null,
+            ];
         }
 
         // historique [n] — extract limit only from explicit digit + context pattern
@@ -184,7 +199,17 @@ class FinanceAgent extends BaseAgent
             ];
         }
 
-        // solde / balance
+        // objectif epargne [montant] — set savings goal (must be before savings_status)
+        if (preg_match('/\b(objectif\s+(?:epargne|savings?|mensuel)|epargne\s+(?:objectif|goal))\s+(\d+[\.,]?\d*)/iu', $lower, $m)) {
+            return ['action' => 'set_savings_goal', 'amount' => (float) str_replace(',', '.', $m[2])];
+        }
+
+        // bilan epargne / epargne stats / epargne — savings status (must be before balance)
+        if (preg_match('/\b(bilan\s+epargne|epargne\s+(?:stats?|bilan|status)|objectif\s+epargne|epargne)\b/iu', $lower)) {
+            return ['action' => 'savings_status'];
+        }
+
+        // solde / balance (bilan seul matches here, not bilan epargne which is caught above)
         if (preg_match('/\b(solde|balance|reste|remaining|bilan)\b/iu', $lower)) {
             return ['action' => 'balance'];
         }
@@ -272,6 +297,14 @@ class FinanceAgent extends BaseAgent
             'recurring_expenses' => $this->getRecurringExpenses($context->from),
             'daily_budget'       => $this->getDailyBudget($context->from),
             'export_month'       => $this->exportMonth($context->from),
+            'set_savings_goal'   => $this->setSavingsGoal($context->from, $command['amount']),
+            'savings_status'     => $this->getSavingsStatus($context->from),
+            'edit_last'          => $this->editLastExpense(
+                $context->from,
+                $command['amount'],
+                $command['category'] ?? null,
+                $command['description'] ?? null
+            ),
             'help'               => $this->getHelp(),
             default              => null,
         };
@@ -399,6 +432,7 @@ alimentation, transport, loisirs, sante, logement, shopping, restaurant, abonnem
 
 COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
 - depense [montant] [categorie] [description] — enregistrer une depense
+- modifier derniere [montant] [categorie] — corriger la derniere depense
 - budget [categorie] [montant] — definir un budget mensuel
 - solde — voir solde et budgets
 - stats — rapport mensuel avec moyenne journaliere
@@ -414,6 +448,8 @@ COMMANDES DISPONIBLES (rappel si l'utilisateur demande de l'aide):
 - budget journalier — budget disponible par jour pour le reste du mois
 - export — liste complete de toutes les depenses du mois
 - alertes — alertes de depassement
+- objectif epargne [montant] — definir un objectif d'epargne mensuel
+- epargne — voir le bilan d'epargne (budget - depenses)
 - supprimer derniere depense — annuler la derniere depense
 
 CONSEILS:
@@ -938,6 +974,9 @@ PROMPT;
             . "📊 *Budgets:*\n"
             . "  `budget alimentation 300` — definir\n"
             . "  `supprimer budget transport` — supprimer\n\n"
+            . "🎯 *Epargne:*\n"
+            . "  `objectif epargne 500` — fixer un objectif\n"
+            . "  `epargne` — voir ton bilan d'epargne\n\n"
             . "📋 *Consulter:*\n"
             . "  `solde` — solde et budgets\n"
             . "  `stats` — rapport mensuel + projection\n"
@@ -954,8 +993,9 @@ PROMPT;
             . "  `recurrents` — depenses/abonnements recurrents\n"
             . "  `budget journalier` — budget dispo par jour\n"
             . "  `export` — liste complete du mois\n\n"
-            . "🗑️ *Annuler:*\n"
-            . "  `supprimer derniere depense`\n\n"
+            . "✏️ *Corriger / Annuler:*\n"
+            . "  `modifier derniere 45 alimentation` — corriger la derniere depense\n"
+            . "  `supprimer derniere depense` — supprimer la derniere depense\n\n"
             . "💬 _Tu peux aussi parler naturellement et je comprendrai !_";
     }
 
@@ -1410,6 +1450,150 @@ PROMPT;
                 $response .= " • Restant: {$remaining}€";
             } else {
                 $response .= " • ⚠️ Depassement: " . abs($remaining) . "€";
+            }
+        }
+
+        return $response;
+    }
+
+    private function setSavingsGoal(string $userPhone, float $amount): string
+    {
+        if ($amount <= 0) {
+            return "❌ L'objectif d'epargne doit etre positif.";
+        }
+
+        if ($amount > 100000) {
+            return "❌ Objectif trop eleve ({$amount}€). Verifie la saisie.";
+        }
+
+        $key = 'finance_savings_goal_' . md5($userPhone);
+        AppSetting::set($key, (string) $amount);
+
+        // Show current savings projection
+        $totalBudget = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+        $totalSpent  = Expense::calculateTotalMonthlySpent($userPhone);
+        $saved       = $totalBudget > 0 ? round($totalBudget - $totalSpent, 2) : null;
+        $month       = Carbon::now()->translatedFormat('F Y');
+
+        $response  = "🎯 *Objectif d'epargne defini !*\n";
+        $response .= "💰 Objectif: *{$amount}€/mois*\n";
+        $response .= "📅 *{$month}*\n";
+
+        if ($saved !== null && $totalBudget > 0) {
+            $pct     = $amount > 0 ? round(($saved / $amount) * 100, 1) : 0;
+            $bar     = $this->buildProgressBar(min($pct, 100));
+            $icon    = $pct >= 100 ? '🎉' : ($pct >= 50 ? '📈' : '⏳');
+            $response .= "\n{$icon} Avancement: {$saved}€ / {$amount}€ ({$pct}%) {$bar}";
+            if ($saved >= $amount) {
+                $response .= "\n✨ *Objectif atteint !*";
+            } else {
+                $remaining = round($amount - $saved, 2);
+                $response .= "\n💡 Il te faut encore epargner {$remaining}€ ce mois.";
+            }
+        } else {
+            $response .= "\n💡 Definis des budgets pour suivre ton epargne automatiquement.";
+        }
+
+        return $response;
+    }
+
+    private function getSavingsStatus(string $userPhone): string
+    {
+        $key    = 'finance_savings_goal_' . md5($userPhone);
+        $goal   = (float) (AppSetting::get($key) ?? 0);
+        $month  = Carbon::now()->translatedFormat('F Y');
+
+        $totalBudget = (float) Budget::where('user_phone', $userPhone)->sum('monthly_limit');
+        $totalSpent  = Expense::calculateTotalMonthlySpent($userPhone);
+        $saved       = round($totalBudget - $totalSpent, 2);
+
+        $response  = "🎯 *Bilan Epargne — {$month}*\n\n";
+        $response .= "💳 Depenses: *{$totalSpent}€*\n";
+
+        if ($totalBudget > 0) {
+            $response .= "📊 Budget total: {$totalBudget}€\n";
+            $savedLabel = $saved >= 0 ? "*{$saved}€ economises*" : "*" . abs($saved) . "€ de depassement*";
+            $response  .= "💰 " . ($saved >= 0 ? "Economises" : "Depassement") . ": {$savedLabel}\n";
+        } else {
+            $response .= "⚠️ _Aucun budget defini — impossible de calculer l'epargne._\n";
+            $response .= "Cree des budgets: *budget [categorie] [montant]*";
+        }
+
+        if ($goal > 0) {
+            $response .= "\n🎯 Objectif: {$goal}€\n";
+            if ($totalBudget > 0) {
+                $pct  = round(($saved / $goal) * 100, 1);
+                $bar  = $this->buildProgressBar(max(0, min($pct, 100)));
+                $icon = $pct >= 100 ? '🎉' : ($pct >= 50 ? '📈' : '⏳');
+                $response .= "{$icon} Progression: {$bar} {$pct}%\n";
+                if ($saved >= $goal) {
+                    $response .= "✨ *Bravo, objectif atteint !*";
+                } else {
+                    $needed = round($goal - $saved, 2);
+                    $response .= "💡 Encore {$needed}€ a economiser ce mois.";
+                }
+            }
+        } else {
+            $response .= "\n_Aucun objectif defini. Utilise:_ *objectif epargne [montant]*";
+        }
+
+        return $response;
+    }
+
+    private function editLastExpense(string $userPhone, float $amount, ?string $category, ?string $description): string
+    {
+        if ($amount <= 0) {
+            return "❌ Le nouveau montant doit etre positif.";
+        }
+
+        if ($amount > 100000) {
+            return "❌ Montant trop eleve ({$amount}€). Verifie la saisie.";
+        }
+
+        $last = Expense::where('user_phone', $userPhone)
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$last) {
+            return "❌ Aucune depense a modifier.";
+        }
+
+        $oldAmount   = $last->amount;
+        $oldCategory = $last->category;
+        $newCategory = $category ? mb_strtolower(trim($category)) : $oldCategory;
+
+        if (mb_strlen($newCategory) > 30) {
+            return "❌ Le nom de categorie est trop long (max 30 caracteres).";
+        }
+
+        try {
+            $last->amount      = $amount;
+            $last->category    = $newCategory;
+            if ($description !== null) {
+                $last->description = $description ?: null;
+            }
+            $last->save();
+        } catch (\Throwable $e) {
+            Log::error("[FinanceAgent] editLastExpense failed: " . $e->getMessage());
+            return "❌ Erreur lors de la modification. Reessaie.";
+        }
+
+        $date     = Carbon::parse($last->date)->translatedFormat('d M Y');
+        $response = "✏️ *Depense modifiee !*\n";
+        $response .= "Avant: {$oldAmount}€ *{$oldCategory}*\n";
+        $response .= "Apres: *{$amount}€* *{$newCategory}*\n";
+        $response .= "📅 Date: {$date}\n\n";
+        $response .= "💰 Total ce mois: *" . Expense::calculateTotalMonthlySpent($userPhone) . "€*";
+
+        // Budget check for new category
+        $budget = Budget::where('user_phone', $userPhone)->where('category', $newCategory)->first();
+        if ($budget) {
+            $check = $budget->checkBudgetThreshold();
+            if ($check['exceeded']) {
+                $response .= "\n🚨 Budget *{$newCategory}* depasse: {$check['spent']}€/{$check['limit']}€";
+            } elseif ($check['threshold_reached']) {
+                $response .= "\n⚠️ Budget *{$newCategory}*: {$check['percentage']}% utilise";
             }
         }
 

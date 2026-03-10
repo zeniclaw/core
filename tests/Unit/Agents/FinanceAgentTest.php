@@ -26,9 +26,9 @@ class FinanceAgentTest extends TestCase
         $this->assertEquals('finance', (new FinanceAgent())->name());
     }
 
-    public function test_agent_version_is_1_6_0(): void
+    public function test_agent_version_is_1_7_0(): void
     {
-        $this->assertEquals('1.6.0', (new FinanceAgent())->version());
+        $this->assertEquals('1.7.0', (new FinanceAgent())->version());
     }
 
     public function test_agent_has_description(): void
@@ -1650,6 +1650,310 @@ class FinanceAgentTest extends TestCase
 
         $this->assertStringContainsString('budget journalier', $help);
         $this->assertStringContainsString('export', $help);
+    }
+
+    // ── keywords v1.7.0 ───────────────────────────────────────────────────────
+
+    public function test_keywords_include_epargne(): void
+    {
+        $this->assertContains('epargne', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_objectif_epargne(): void
+    {
+        $this->assertContains('objectif epargne', (new FinanceAgent())->keywords());
+    }
+
+    public function test_keywords_include_modifier_depense(): void
+    {
+        $this->assertContains('modifier depense', (new FinanceAgent())->keywords());
+    }
+
+    // ── canHandle v1.7.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_epargne(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('epargne')));
+    }
+
+    public function test_can_handle_objectif_epargne(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('objectif epargne 500')));
+    }
+
+    public function test_can_handle_bilan_epargne(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('bilan epargne')));
+    }
+
+    public function test_can_handle_modifier_depense(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('modifier derniere depense')));
+    }
+
+    public function test_can_handle_corriger_derniere(): void
+    {
+        $this->assertTrue((new FinanceAgent())->canHandle($this->makeContext('corriger derniere depense')));
+    }
+
+    // ── parseCommand v1.7.0 ───────────────────────────────────────────────────
+
+    public function test_parse_command_set_savings_goal(): void
+    {
+        $cmd = $this->parseCommand('objectif epargne 500');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('set_savings_goal', $cmd['action']);
+        $this->assertEquals(500.0, $cmd['amount']);
+    }
+
+    public function test_parse_command_set_savings_goal_with_comma(): void
+    {
+        $cmd = $this->parseCommand('objectif epargne 250,50');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('set_savings_goal', $cmd['action']);
+        $this->assertEquals(250.50, $cmd['amount']);
+    }
+
+    public function test_parse_command_savings_status(): void
+    {
+        $cmd = $this->parseCommand('epargne');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('savings_status', $cmd['action']);
+    }
+
+    public function test_parse_command_savings_status_bilan(): void
+    {
+        $cmd = $this->parseCommand('bilan epargne');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('savings_status', $cmd['action']);
+    }
+
+    public function test_parse_command_edit_last_expense(): void
+    {
+        $cmd = $this->parseCommand('modifier derniere depense 35 transport');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('edit_last', $cmd['action']);
+        $this->assertEquals(35.0, $cmd['amount']);
+        $this->assertEquals('transport', $cmd['category']);
+    }
+
+    public function test_parse_command_edit_last_amount_only(): void
+    {
+        $cmd = $this->parseCommand('corriger derniere depense 20');
+        $this->assertNotNull($cmd);
+        $this->assertEquals('edit_last', $cmd['action']);
+        $this->assertEquals(20.0, $cmd['amount']);
+    }
+
+    // ── setSavingsGoal (via reflection) ───────────────────────────────────────
+
+    private function callSetSavingsGoal(float $amount): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('setSavingsGoal');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone, $amount);
+    }
+
+    public function test_set_savings_goal_returns_confirmation(): void
+    {
+        $result = $this->callSetSavingsGoal(500.0);
+        $this->assertStringContainsString('🎯', $result);
+        $this->assertStringContainsString('500', $result);
+    }
+
+    public function test_set_savings_goal_rejects_zero(): void
+    {
+        $result = $this->callSetSavingsGoal(0.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_set_savings_goal_rejects_negative(): void
+    {
+        $result = $this->callSetSavingsGoal(-100.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_set_savings_goal_rejects_excessive_amount(): void
+    {
+        $result = $this->callSetSavingsGoal(200000.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_set_savings_goal_persists_in_app_setting(): void
+    {
+        $this->callSetSavingsGoal(300.0);
+        $key = 'finance_savings_goal_' . md5($this->testPhone);
+        $this->assertEquals('300', \App\Models\AppSetting::get($key));
+    }
+
+    public function test_set_savings_goal_shows_progress_when_budget_defined(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 400.0]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 100.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $result = $this->callSetSavingsGoal(200.0);
+        $this->assertStringContainsString('Avancement', $result);
+    }
+
+    // ── getSavingsStatus (via reflection) ─────────────────────────────────────
+
+    private function callGetSavingsStatus(): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getSavingsStatus');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone);
+    }
+
+    public function test_savings_status_no_budget_no_goal(): void
+    {
+        $result = $this->callGetSavingsStatus();
+        $this->assertStringContainsString('🎯', $result);
+        $this->assertStringContainsString('Aucun budget', $result);
+    }
+
+    public function test_savings_status_with_budget_and_expenses(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 300.0]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 100.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $result = $this->callGetSavingsStatus();
+        $this->assertStringContainsString('300', $result);
+        $this->assertStringContainsString('100', $result);
+        $this->assertStringContainsString('Economises', $result);
+    }
+
+    public function test_savings_status_shows_goal_progress_when_set(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 500.0]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 200.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $key = 'finance_savings_goal_' . md5($this->testPhone);
+        \App\Models\AppSetting::set($key, '300');
+
+        $result = $this->callGetSavingsStatus();
+        $this->assertStringContainsString('300', $result); // goal
+        $this->assertStringContainsString('Progression', $result);
+    }
+
+    public function test_savings_status_shows_goal_achieved_when_saved_enough(): void
+    {
+        Budget::create(['user_phone' => $this->testPhone, 'category' => 'alimentation', 'monthly_limit' => 500.0]);
+        Expense::create(['user_phone' => $this->testPhone, 'amount' => 50.0, 'category' => 'alimentation', 'date' => Carbon::now()->toDateString()]);
+
+        $key = 'finance_savings_goal_' . md5($this->testPhone);
+        \App\Models\AppSetting::set($key, '100'); // goal 100€, saved 450€
+
+        $result = $this->callGetSavingsStatus();
+        $this->assertStringContainsString('Bravo', $result);
+    }
+
+    // ── editLastExpense (via reflection) ──────────────────────────────────────
+
+    private function callEditLastExpense(float $amount, ?string $category = null, ?string $description = null): string
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('editLastExpense');
+        $method->setAccessible(true);
+        return $method->invoke($agent, $this->testPhone, $amount, $category, $description);
+    }
+
+    public function test_edit_last_expense_no_expense(): void
+    {
+        $result = $this->callEditLastExpense(30.0);
+        $this->assertStringContainsString('❌', $result);
+        $this->assertStringContainsString('Aucune depense', $result);
+    }
+
+    public function test_edit_last_expense_updates_amount(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 50.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callEditLastExpense(35.0);
+        $this->assertStringContainsString('✏️', $result);
+        $this->assertStringContainsString('50', $result); // old amount
+        $this->assertStringContainsString('35', $result); // new amount
+
+        $this->assertDatabaseHas('finances_expenses', [
+            'user_phone' => $this->testPhone,
+            'amount'     => 35.0,
+        ]);
+    }
+
+    public function test_edit_last_expense_updates_category(): void
+    {
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 20.0,
+            'category'   => 'alimentation',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callEditLastExpense(20.0, 'transport');
+        $this->assertStringContainsString('transport', $result);
+        $this->assertDatabaseHas('finances_expenses', [
+            'user_phone' => $this->testPhone,
+            'category'   => 'transport',
+        ]);
+    }
+
+    public function test_edit_last_expense_rejects_zero_amount(): void
+    {
+        $result = $this->callEditLastExpense(0.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_edit_last_expense_rejects_negative_amount(): void
+    {
+        $result = $this->callEditLastExpense(-10.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_edit_last_expense_rejects_excessive_amount(): void
+    {
+        $result = $this->callEditLastExpense(200000.0);
+        $this->assertStringContainsString('❌', $result);
+    }
+
+    public function test_edit_last_expense_shows_budget_warning_if_exceeded(): void
+    {
+        Budget::create([
+            'user_phone'    => $this->testPhone,
+            'category'      => 'transport',
+            'monthly_limit' => 10.0,
+        ]);
+        Expense::create([
+            'user_phone' => $this->testPhone,
+            'amount'     => 5.0,
+            'category'   => 'transport',
+            'date'       => Carbon::now()->toDateString(),
+        ]);
+
+        $result = $this->callEditLastExpense(50.0, 'transport');
+        $this->assertStringContainsString('🚨', $result);
+    }
+
+    // ── getHelp v1.7.0 ────────────────────────────────────────────────────────
+
+    public function test_help_contains_savings_goal_command(): void
+    {
+        $agent      = new FinanceAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method     = $reflection->getMethod('getHelp');
+        $method->setAccessible(true);
+        $help = $method->invoke($agent);
+
+        $this->assertStringContainsString('objectif epargne', $help);
+        $this->assertStringContainsString('modifier derniere', $help);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -356,6 +356,147 @@ class ImageProcessor
         }
     }
 
+    /**
+     * Flip an image horizontally or vertically.
+     */
+    public function flipImage(string $imagePath, string $direction = 'horizontal'): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for flip', ['path' => $imagePath]);
+            return null;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            $mode = ($direction === 'vertical') ? IMG_FLIP_VERTICAL : IMG_FLIP_HORIZONTAL;
+            imageflip($src, $mode);
+
+            $outputPath = $this->generateOutputPath('flipped', 'png');
+            imagepng($src, $outputPath);
+            imagedestroy($src);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor flip failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Convert an image to grayscale (noir et blanc).
+     */
+    public function grayscaleImage(string $imagePath): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for grayscale', ['path' => $imagePath]);
+            return null;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            imagefilter($src, IMG_FILTER_GRAYSCALE);
+
+            $outputPath = $this->generateOutputPath('grayscale', 'png');
+            imagepng($src, $outputPath);
+            imagedestroy($src);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor grayscale failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Crop an image to the specified region.
+     * x, y: top-left corner; width, height: size of the cropped region.
+     */
+    public function cropImage(string $imagePath, int $x, int $y, int $width, int $height): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for crop', ['path' => $imagePath]);
+            return null;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            $origW = imagesx($src);
+            $origH = imagesy($src);
+
+            // Clamp values to image boundaries
+            $x      = max(0, min($x, $origW - 1));
+            $y      = max(0, min($y, $origH - 1));
+            $width  = max(1, min($width,  $origW - $x));
+            $height = max(1, min($height, $origH - $y));
+
+            $dst = imagecreatetruecolor($width, $height);
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
+            $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+            imagefill($dst, 0, 0, $transparent);
+
+            imagecopy($dst, $src, 0, 0, $x, $y, $width, $height);
+            imagedestroy($src);
+
+            $outputPath = $this->generateOutputPath('cropped', 'png');
+            imagepng($dst, $outputPath);
+            imagedestroy($dst);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor crop failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Adjust brightness and/or contrast of an image using GD filters.
+     * brightness: -255 (very dark) to +255 (very bright)
+     * contrast:   -100 (more contrast) to +100 (less contrast)
+     */
+    public function adjustBrightness(string $imagePath, int $brightness = 0, int $contrast = 0): ?string
+    {
+        if (!file_exists($imagePath)) {
+            Log::warning('ImageProcessor: file not found for brightness', ['path' => $imagePath]);
+            return null;
+        }
+
+        try {
+            $src = imagecreatefromstring(file_get_contents($imagePath));
+            if (!$src) {
+                return null;
+            }
+
+            if ($brightness !== 0) {
+                imagefilter($src, IMG_FILTER_BRIGHTNESS, $brightness);
+            }
+            if ($contrast !== 0) {
+                imagefilter($src, IMG_FILTER_CONTRAST, $contrast);
+            }
+
+            $outputPath = $this->generateOutputPath('brightness', 'png');
+            imagepng($src, $outputPath);
+            imagedestroy($src);
+
+            return $outputPath;
+        } catch (\Throwable $e) {
+            Log::error('ImageProcessor brightness failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
     private function drawArrowHead($image, int $x1, int $y1, int $x2, int $y2, $color): void
     {
         $angle = atan2($y2 - $y1, $x2 - $x1);

@@ -26,7 +26,7 @@ class ScreenshotAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de traitement d\'images et OCR. Extraction de texte (OCR) depuis des images, analyse visuelle avec IA (Claude Vision), annotation d\'images (fleches, rectangles, cercles), comparaison d\'images en 2 etapes, redimensionnement, rotation, et informations detaillees sur les images.';
+        return 'Agent de traitement d\'images et OCR. Extraction de texte (OCR), analyse visuelle IA (Claude Vision), annotation (fleches, rectangles, cercles), comparaison d\'images, recadrage (crop), reglage luminosite/contraste, redimensionnement, rotation, miroir, noir et blanc, detection QR code.';
     }
 
     public function keywords(): array
@@ -46,12 +46,18 @@ class ScreenshotAgent extends BaseAgent
             'que vois-tu', 'qu est-ce que', 'identifie', 'reconnnais',
             'resize', 'redimensionner', 'redimensionne', 'retailler',
             'rotate', 'rotation', 'pivoter', 'tourner', 'retourner',
+            'flip', 'miroir', 'mirror', 'retourner', 'inverser',
+            'grayscale', 'noir et blanc', 'niveaux de gris', 'desaturer', 'monochrome',
+            'qr code', 'qrcode', 'qr', 'code qr', 'lire qr', 'decoder qr',
+            'crop', 'rogner', 'recadrer', 'recadrage', 'decouper image', 'couper image',
+            'luminosite', 'luminosité', 'brightness', 'eclaircir', 'assombrir',
+            'contraste', 'contrast', 'saturation',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -62,8 +68,13 @@ class ScreenshotAgent extends BaseAgent
 
         $body = mb_strtolower($context->body ?? '');
 
-        // Explicit screenshot/OCR/annotation/compare/resize/rotate commands
-        if (preg_match('/\b(screenshot|capture|annotate|ocr|extract[\s-]?text|compare[r]?|extraire[\s-]?texte|resize|redimensionn[e]?r?|rotation|rotate|pivoter|tourner|retailler)\b/i', $body)) {
+        // Explicit screenshot/OCR/annotation/compare/resize/rotate/flip/grayscale/qr/crop/brightness commands
+        if (preg_match('/\b(screenshot|capture|annotate|ocr|extract[\s-]?text|compare[r]?|extraire[\s-]?texte|resize|redimensionn[e]?r?|rotation|rotate|pivoter|tourner|retailler|flip|miroir|mirror|inverser|grayscale|monochrome|qr[\s-]?code|qrcode|lire[\s-]?qr|decoder[\s-]?qr|code[\s-]?qr|crop|rogner|recadr[e]?r?|luminosit[eé]|brightness|eclaircir|assombrir|contraste?)\b/iu', $body)) {
+            return true;
+        }
+
+        // "noir et blanc" or "niveaux de gris"
+        if (preg_match('/\b(noir[\s-]et[\s-]blanc|niveaux[\s-]de[\s-]gris|desatur[e]?r?)\b/iu', $body)) {
             return true;
         }
 
@@ -107,6 +118,11 @@ class ScreenshotAgent extends BaseAgent
             'analyze'      => $this->handleAnalyze($context, $body),
             'resize'       => $this->handleResize($context, $command),
             'rotate'       => $this->handleRotate($context, $command),
+            'flip'         => $this->handleFlip($context, $command),
+            'grayscale'    => $this->handleGrayscale($context),
+            'qr'           => $this->handleQrCode($context),
+            'crop'         => $this->handleCrop($context, $command),
+            'brightness'   => $this->handleBrightness($context, $command),
             default        => $this->handleWithClaude($context, $body),
         };
     }
@@ -166,6 +182,32 @@ class ScreenshotAgent extends BaseAgent
         // Rotate
         if (preg_match('/\b(rotat[e]?r?|rotation|pivoter|tourner)\b/iu', $lower)) {
             return $this->parseRotateCommand($body);
+        }
+
+        // Flip / Mirror
+        if (preg_match('/\b(flip|miroir|mirror|inverser)\b/iu', $lower)) {
+            return $this->parseFlipCommand($body);
+        }
+
+        // Grayscale / Noir et blanc
+        if (preg_match('/\b(grayscale|monochrome|desatur[e]?r?)\b/iu', $lower)
+            || preg_match('/\b(noir[\s-]et[\s-]blanc|niveaux[\s-]de[\s-]gris)\b/iu', $lower)) {
+            return ['action' => 'grayscale'];
+        }
+
+        // QR Code detection
+        if (preg_match('/\b(qr[\s-]?code|qrcode|decoder[\s-]?qr|lire[\s-]?qr|code[\s-]?qr)\b/iu', $lower)) {
+            return ['action' => 'qr'];
+        }
+
+        // Crop / recadrer
+        if (preg_match('/\b(crop|rogner|recadr[e]?r?|recadrage|decouper|couper)\b/iu', $lower)) {
+            return $this->parseCropCommand($body);
+        }
+
+        // Brightness / contrast adjustment
+        if (preg_match('/\b(luminosit[eé]|brightness|eclaircir|assombrir|contraste?|saturation)\b/iu', $lower)) {
+            return $this->parseBrightnessCommand($body);
         }
 
         // Capture (description-based)
@@ -273,6 +315,79 @@ class ScreenshotAgent extends BaseAgent
         }
 
         return ['action' => 'rotate', 'degrees' => $degrees];
+    }
+
+    private function parseFlipCommand(string $body): array
+    {
+        $direction = 'horizontal'; // default
+
+        if (preg_match('/\b(vertical|vertic|haut|bas|up|down)\b/iu', $body)) {
+            $direction = 'vertical';
+        } elseif (preg_match('/\b(horizontal|horiz|gauche|droite|left|right)\b/iu', $body)) {
+            $direction = 'horizontal';
+        }
+
+        return ['action' => 'flip', 'direction' => $direction];
+    }
+
+    private function parseCropCommand(string $body): array
+    {
+        $params = [
+            'action' => 'crop',
+            'x'      => 0,
+            'y'      => 0,
+            'width'  => 200,
+            'height' => 200,
+        ];
+
+        // Parse [x,y,w,h] format
+        if (preg_match('/\[(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\]/', $body, $m)) {
+            $params['x']      = (int) $m[1];
+            $params['y']      = (int) $m[2];
+            $params['width']  = max(1, (int) $m[3]);
+            $params['height'] = max(1, (int) $m[4]);
+        }
+        // Parse x=N y=N w=N h=N style
+        elseif (preg_match('/x[=:\s](\d+)/i', $body, $mx) && preg_match('/y[=:\s](\d+)/i', $body, $my)) {
+            $params['x'] = (int) $mx[1];
+            $params['y'] = (int) $my[1];
+            if (preg_match('/w(?:idth)?[=:\s](\d+)/i', $body, $mw)) {
+                $params['width'] = max(1, (int) $mw[1]);
+            }
+            if (preg_match('/h(?:eight)?[=:\s](\d+)/i', $body, $mh)) {
+                $params['height'] = max(1, (int) $mh[1]);
+            }
+        }
+
+        return $params;
+    }
+
+    private function parseBrightnessCommand(string $body): array
+    {
+        $params = [
+            'action'     => 'brightness',
+            'brightness' => 0,
+            'contrast'   => 0,
+        ];
+
+        // Preset keywords
+        if (preg_match('/\b(eclaircir|lighten)\b/iu', $body)) {
+            $params['brightness'] = 60;
+        } elseif (preg_match('/\b(assombrir|darken)\b/iu', $body)) {
+            $params['brightness'] = -60;
+        }
+
+        // Explicit brightness value: luminosite +80 / brightness -50 / luminosite 100
+        if (preg_match('/\b(?:luminosit[eé]|brightness)\s*([+-]?\d+)/iu', $body, $m)) {
+            $params['brightness'] = max(-255, min(255, (int) $m[1]));
+        }
+
+        // Explicit contrast value: contraste +30 / contrast -20
+        if (preg_match('/\b(?:contraste?)\s*([+-]?\d+)/iu', $body, $m)) {
+            $params['contrast'] = max(-100, min(100, (int) $m[1]));
+        }
+
+        return $params;
     }
 
     // ── Handlers ───────────────────────────────────────────────────────────────
@@ -614,10 +729,15 @@ class ScreenshotAgent extends BaseAgent
             . "Je ne peux pas capturer ton ecran directement depuis WhatsApp, mais je peux traiter les images que tu m'envoies :\n\n"
             . "- *Extraire du texte* : Image + 'extract-text'\n"
             . "- *Analyser* : Image + 'analyse' (description IA)\n"
+            . "- *Decoder QR code* : Image + 'qr code'\n"
             . "- *Annoter* : Image + 'annotate arrow [x1,y1,x2,y2] red'\n"
             . "- *Comparer* : Image + 'compare'\n"
+            . "- *Recadrer* : Image + 'crop [x,y,w,h]'\n"
+            . "- *Luminosite* : Image + 'luminosite +80' ou 'eclaircir'\n"
             . "- *Redimensionner* : Image + 'resize 800x600'\n"
             . "- *Pivoter* : Image + 'rotate 90'\n"
+            . "- *Miroir* : Image + 'flip' ou 'flip vertical'\n"
+            . "- *Noir et blanc* : Image + 'grayscale'\n"
             . "- *Infos* : Image + 'info'"
             . ($description ? "\n\n_Ta description : {$description}_" : '')
         );
@@ -825,6 +945,400 @@ class ScreenshotAgent extends BaseAgent
     }
 
     /**
+     * Flip image horizontally or vertically.
+     */
+    private function handleFlip(AgentContext $context, array $command): AgentResult
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return AgentResult::reply(
+                "*Miroir / Retournement d'image*\n\n"
+                . "Envoie-moi une image a retourner.\n\n"
+                . "*Syntaxe :*\n"
+                . "Image + 'flip' ou 'miroir'\n\n"
+                . "*Options :*\n"
+                . "- 'flip horizontal' (miroir gauche/droite) — *defaut*\n"
+                . "- 'flip vertical' (miroir haut/bas)\n\n"
+                . "*Exemples :*\n"
+                . "- Image + 'flip'\n"
+                . "- Image + 'miroir vertical'\n"
+                . "- Image + 'inverser horizontalement'"
+            );
+        }
+
+        if (!$this->isImageMedia($context->mimetype)) {
+            return AgentResult::reply("Ce fichier n'est pas une image. Envoie une image (JPG, PNG, WEBP...) pour la retourner.");
+        }
+
+        $mediaUrl = $this->resolveMediaUrl($context);
+        if (!$mediaUrl) {
+            return AgentResult::reply("Impossible de recuperer l'image. Reessaie.");
+        }
+
+        $direction = $command['direction'] ?? 'horizontal';
+
+        $imagePath = $this->imageProcessor->downloadFromWaha($mediaUrl);
+        if (!$imagePath) {
+            return AgentResult::reply("Erreur lors du telechargement de l'image.");
+        }
+
+        $outputPath = $this->imageProcessor->flipImage($imagePath, $direction);
+        @unlink($imagePath);
+
+        if (!$outputPath || !file_exists($outputPath)) {
+            return AgentResult::reply(
+                "Erreur lors du retournement de l'image.\n\n"
+                . "Verifie que l'image est valide (JPG, PNG, WEBP)."
+            );
+        }
+
+        $newInfo = $this->imageProcessor->getImageInfo($outputPath);
+        $newW    = $newInfo['width']      ?? '?';
+        $newH    = $newInfo['height']     ?? '?';
+        $newSize = $newInfo['size_human'] ?? '?';
+
+        $dirLabel = $direction === 'vertical' ? 'vertical (haut/bas)' : 'horizontal (gauche/droite)';
+        $filename = "flipped_{$direction}.png";
+
+        $this->sendFile($context->from, $outputPath, $filename, "*Image retournee* : miroir {$dirLabel} | {$newW}x{$newH}px");
+        @unlink($outputPath);
+
+        $this->log($context, 'Image flipped', ['direction' => $direction]);
+
+        return AgentResult::reply(
+            "*Retournement reussi !*\n\n"
+            . "Miroir : *{$dirLabel}*\n"
+            . "Dimensions : {$newW}x{$newH}px | {$newSize}"
+        );
+    }
+
+    /**
+     * Convert image to grayscale (noir et blanc).
+     */
+    private function handleGrayscale(AgentContext $context): AgentResult
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return AgentResult::reply(
+                "*Noir et blanc / Niveaux de gris*\n\n"
+                . "Envoie-moi une image a convertir en noir et blanc.\n\n"
+                . "*Exemples :*\n"
+                . "- Image + 'grayscale'\n"
+                . "- Image + 'noir et blanc'\n"
+                . "- Image + 'niveaux de gris'\n"
+                . "- Image + 'monochrome'"
+            );
+        }
+
+        if (!$this->isImageMedia($context->mimetype)) {
+            return AgentResult::reply("Ce fichier n'est pas une image. Envoie une image (JPG, PNG, WEBP...) pour la convertir.");
+        }
+
+        $mediaUrl = $this->resolveMediaUrl($context);
+        if (!$mediaUrl) {
+            return AgentResult::reply("Impossible de recuperer l'image. Reessaie.");
+        }
+
+        $imagePath = $this->imageProcessor->downloadFromWaha($mediaUrl);
+        if (!$imagePath) {
+            return AgentResult::reply("Erreur lors du telechargement de l'image.");
+        }
+
+        $originalInfo = $this->imageProcessor->getImageInfo($imagePath);
+        $outputPath   = $this->imageProcessor->grayscaleImage($imagePath);
+        @unlink($imagePath);
+
+        if (!$outputPath || !file_exists($outputPath)) {
+            return AgentResult::reply(
+                "Erreur lors de la conversion en noir et blanc.\n\n"
+                . "Verifie que l'image est valide (JPG, PNG, WEBP)."
+            );
+        }
+
+        $newInfo = $this->imageProcessor->getImageInfo($outputPath);
+        $origSize = $originalInfo['size_human'] ?? '?';
+        $newSize  = $newInfo['size_human']       ?? '?';
+        $newW     = $newInfo['width']             ?? '?';
+        $newH     = $newInfo['height']            ?? '?';
+
+        $this->sendFile($context->from, $outputPath, 'grayscale.png', "*Image noir et blanc* | {$newW}x{$newH}px | {$newSize}");
+        @unlink($outputPath);
+
+        $this->log($context, 'Image converted to grayscale', ['original_size' => $origSize]);
+
+        return AgentResult::reply(
+            "*Conversion reussie !*\n\n"
+            . "Format : *Noir et blanc (niveaux de gris)*\n"
+            . "Dimensions : {$newW}x{$newH}px | {$newSize}"
+        );
+    }
+
+    /**
+     * Detect and decode QR code using Claude Vision.
+     */
+    private function handleQrCode(AgentContext $context): AgentResult
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return AgentResult::reply(
+                "*Detection de QR Code*\n\n"
+                . "Envoie-moi une image contenant un QR code pour le decoder.\n\n"
+                . "*Exemples :*\n"
+                . "- Image + 'qr code'\n"
+                . "- Image + 'lire qr'\n"
+                . "- Image + 'decoder qr'\n\n"
+                . "_Je lirai le contenu du QR code (URL, texte, contact, etc.)_"
+            );
+        }
+
+        if (!$this->isImageMedia($context->mimetype)) {
+            return AgentResult::reply("Ce fichier n'est pas une image. Envoie une image contenant un QR code.");
+        }
+
+        $mediaUrl = $this->resolveMediaUrl($context);
+        if (!$mediaUrl) {
+            return AgentResult::reply("Impossible de recuperer l'image. Reessaie.");
+        }
+
+        $imagePath = $this->imageProcessor->downloadFromWaha($mediaUrl);
+        if (!$imagePath) {
+            return AgentResult::reply("Erreur lors du telechargement de l'image.");
+        }
+
+        if (!file_exists($imagePath)) {
+            return AgentResult::reply("Erreur : fichier image introuvable apres telechargement.");
+        }
+
+        $sizeWarning = $this->checkImageSize($imagePath);
+        $base64   = base64_encode(file_get_contents($imagePath));
+        $mimeType = mime_content_type($imagePath) ?: 'image/jpeg';
+        $mimeType = $this->normalizeImageMime($mimeType);
+        @unlink($imagePath);
+
+        $model = $this->resolveModel($context);
+        if (!str_starts_with($model, 'claude-')) {
+            $model = 'claude-haiku-4-5-20251001';
+        }
+
+        $systemPrompt = "Tu es un expert en detection et decodage de QR codes et codes-barres.\n"
+            . "Analyse l'image fournie et :\n"
+            . "1. Detecte si un QR code ou code-barre est present\n"
+            . "2. Decode son contenu (URL, texte, contact vCard, WiFi, email, telephone, etc.)\n"
+            . "3. Identifie le type de QR code (URL, WiFi, contact, SMS, email, geo, etc.)\n"
+            . "4. Si plusieurs codes sont presents, decode-les tous\n"
+            . "5. Si aucun code n'est detecte, dis-le clairement et suggere d'ameliorer la qualite de l'image\n"
+            . "Reponds en francais. Utilise *gras* pour le contenu decode. Sois direct et precis.";
+
+        $content = [
+            [
+                'type'   => 'image',
+                'source' => [
+                    'type'       => 'base64',
+                    'media_type' => $mimeType,
+                    'data'       => $base64,
+                ],
+            ],
+            [
+                'type' => 'text',
+                'text' => "Detecte et decode tous les QR codes ou codes-barres visibles dans cette image. "
+                    . "Indique le type de contenu (URL, WiFi, contact, etc.) et reproduis exactement le contenu decode.",
+            ],
+        ];
+
+        $response = $this->claude->chat($content, $model, $systemPrompt);
+
+        if (!$response) {
+            return AgentResult::reply(
+                "Impossible d'analyser l'image avec Claude Vision.\n\n"
+                . "Tu peux essayer :\n"
+                . "- 'extract-text' pour lire le texte de l'image\n"
+                . "- 'analyse' pour une description generale"
+            );
+        }
+
+        $this->log($context, 'QR code detection completed', ['model' => $model]);
+
+        return AgentResult::reply(
+            "*Detection QR Code :*\n\n"
+            . $response
+            . ($sizeWarning ? "\n\n_Note : {$sizeWarning}_" : '')
+        );
+    }
+
+    /**
+     * NEW: Crop image to a specified region [x,y,w,h].
+     */
+    private function handleCrop(AgentContext $context, array $command): AgentResult
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return AgentResult::reply(
+                "*Recadrage d'image (Crop)*\n\n"
+                . "Envoie-moi une image a recadrer.\n\n"
+                . "*Syntaxe :*\n"
+                . "Image + 'crop [x,y,largeur,hauteur]'\n\n"
+                . "*Exemples :*\n"
+                . "- 'crop [0,0,400,300]' (region en haut a gauche, 400x300px)\n"
+                . "- 'rogner [100,50,200,200]' (recadrer depuis (100,50) sur 200x200px)\n"
+                . "- 'crop x=50 y=20 w=300 h=200'\n\n"
+                . "_Conseil : utilise 'info' pour connaitre les dimensions de ton image._"
+            );
+        }
+
+        if (!$this->isImageMedia($context->mimetype)) {
+            return AgentResult::reply("Ce fichier n'est pas une image. Envoie une image (JPG, PNG, WEBP...) pour la recadrer.");
+        }
+
+        $mediaUrl = $this->resolveMediaUrl($context);
+        if (!$mediaUrl) {
+            return AgentResult::reply("Impossible de recuperer l'image. Reessaie.");
+        }
+
+        $imagePath = $this->imageProcessor->downloadFromWaha($mediaUrl);
+        if (!$imagePath) {
+            return AgentResult::reply("Erreur lors du telechargement de l'image.");
+        }
+
+        $origInfo = $this->imageProcessor->getImageInfo($imagePath);
+        $origW    = $origInfo['width']  ?? 0;
+        $origH    = $origInfo['height'] ?? 0;
+
+        $x      = $command['x']      ?? 0;
+        $y      = $command['y']      ?? 0;
+        $width  = $command['width']  ?? 200;
+        $height = $command['height'] ?? 200;
+
+        // Guard: if no coordinates were parsed (default 0,0,200,200) and image is small,
+        // tell user to specify coordinates
+        if ($x === 0 && $y === 0 && $width === 200 && $height === 200 && ($origW <= 200 || $origH <= 200)) {
+            @unlink($imagePath);
+            return AgentResult::reply(
+                "Precisez les coordonnees de recadrage.\n\n"
+                . "Format : 'crop [x,y,largeur,hauteur]'\n"
+                . "Exemple : 'crop [0,0,{$origW},{$origH}}]'\n\n"
+                . "Dimensions actuelles : {$origW}x{$origH}px"
+            );
+        }
+
+        $outputPath = $this->imageProcessor->cropImage($imagePath, $x, $y, $width, $height);
+        @unlink($imagePath);
+
+        if (!$outputPath || !file_exists($outputPath)) {
+            return AgentResult::reply(
+                "Erreur lors du recadrage.\n\n"
+                . "Verifie que les coordonnees sont dans les limites de l'image ({$origW}x{$origH}px)."
+            );
+        }
+
+        $newInfo = $this->imageProcessor->getImageInfo($outputPath);
+        $newW    = $newInfo['width']      ?? $width;
+        $newH    = $newInfo['height']     ?? $height;
+        $newSize = $newInfo['size_human'] ?? '?';
+
+        $this->sendFile($context->from, $outputPath, "cropped_{$x}_{$y}_{$newW}x{$newH}.png",
+            "*Image recadree* : depuis ({$x},{$y}) → {$newW}x{$newH}px | {$newSize}");
+        @unlink($outputPath);
+
+        $this->log($context, 'Image cropped', [
+            'origin'   => "{$x},{$y}",
+            'size'     => "{$newW}x{$newH}",
+            'original' => "{$origW}x{$origH}",
+        ]);
+
+        return AgentResult::reply(
+            "*Recadrage reussi !*\n\n"
+            . "Image originale : {$origW}x{$origH}px\n"
+            . "Region recadree : depuis ({$x},{$y})\n"
+            . "Nouvelles dimensions : *{$newW}x{$newH}px* | {$newSize}"
+        );
+    }
+
+    /**
+     * NEW: Adjust brightness and/or contrast.
+     */
+    private function handleBrightness(AgentContext $context, array $command): AgentResult
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return AgentResult::reply(
+                "*Luminosite & Contraste*\n\n"
+                . "Envoie-moi une image a ajuster.\n\n"
+                . "*Syntaxe :*\n"
+                . "Image + 'luminosite <valeur>' (de -255 a +255)\n"
+                . "Image + 'contraste <valeur>' (de -100 a +100)\n\n"
+                . "*Exemples :*\n"
+                . "- 'luminosite +80' (eclaircir)\n"
+                . "- 'luminosite -60' (assombrir)\n"
+                . "- 'eclaircir' (preset +60)\n"
+                . "- 'assombrir' (preset -60)\n"
+                . "- 'contraste -30' (augmenter le contraste)\n"
+                . "- 'luminosite +50 contraste -20'"
+            );
+        }
+
+        if (!$this->isImageMedia($context->mimetype)) {
+            return AgentResult::reply("Ce fichier n'est pas une image. Envoie une image (JPG, PNG, WEBP...) pour l'ajuster.");
+        }
+
+        $mediaUrl = $this->resolveMediaUrl($context);
+        if (!$mediaUrl) {
+            return AgentResult::reply("Impossible de recuperer l'image. Reessaie.");
+        }
+
+        $brightness = $command['brightness'] ?? 0;
+        $contrast   = $command['contrast']   ?? 0;
+
+        if ($brightness === 0 && $contrast === 0) {
+            return AgentResult::reply(
+                "Precisez une valeur de luminosite ou de contraste.\n\n"
+                . "Exemples :\n"
+                . "- 'luminosite +80' (eclaircir)\n"
+                . "- 'assombrir'\n"
+                . "- 'contraste -30'"
+            );
+        }
+
+        $imagePath = $this->imageProcessor->downloadFromWaha($mediaUrl);
+        if (!$imagePath) {
+            return AgentResult::reply("Erreur lors du telechargement de l'image.");
+        }
+
+        $outputPath = $this->imageProcessor->adjustBrightness($imagePath, $brightness, $contrast);
+        @unlink($imagePath);
+
+        if (!$outputPath || !file_exists($outputPath)) {
+            return AgentResult::reply("Erreur lors de l'ajustement de la luminosite/contraste.");
+        }
+
+        $newInfo = $this->imageProcessor->getImageInfo($outputPath);
+        $newW    = $newInfo['width']      ?? '?';
+        $newH    = $newInfo['height']     ?? '?';
+        $newSize = $newInfo['size_human'] ?? '?';
+
+        $brightnessLabel = $brightness > 0 ? "+{$brightness} (eclaircissement)" : ($brightness < 0 ? "{$brightness} (assombrissement)" : '');
+        $contrastLabel   = $contrast > 0 ? "+{$contrast} (moins de contraste)" : ($contrast < 0 ? "{$contrast} (plus de contraste)" : '');
+
+        $caption  = "*Luminosite/Contraste ajuste*";
+        $caption .= $brightnessLabel ? " | Lum: {$brightness}" : '';
+        $caption .= $contrastLabel   ? " | Cont: {$contrast}"  : '';
+        $caption .= " | {$newW}x{$newH}px";
+
+        $this->sendFile($context->from, $outputPath, 'adjusted.png', $caption);
+        @unlink($outputPath);
+
+        $this->log($context, 'Image brightness/contrast adjusted', [
+            'brightness' => $brightness,
+            'contrast'   => $contrast,
+        ]);
+
+        $lines = [];
+        if ($brightnessLabel) {
+            $lines[] = "Luminosite : *{$brightnessLabel}*";
+        }
+        if ($contrastLabel) {
+            $lines[] = "Contraste : *{$contrastLabel}*";
+        }
+        $lines[] = "Dimensions : {$newW}x{$newH}px | {$newSize}";
+
+        return AgentResult::reply("*Ajustement reussi !*\n\n" . implode("\n", $lines));
+    }
+
+    /**
      * Fallback: analyze with Claude Vision if image sent, else show help.
      */
     private function handleWithClaude(AgentContext $context, string $body): AgentResult
@@ -840,26 +1354,33 @@ class ScreenshotAgent extends BaseAgent
     private function showHelp(): AgentResult
     {
         return AgentResult::reply(
-            "*Screenshot & Annotate — Traitement d'images IA*\n\n"
-            . "*Commandes disponibles :*\n\n"
+            "*Screenshot & Images — Traitement d'images IA*\n\n"
             . "*Analyser une image (IA) :*\n"
             . "Image + 'analyse' ou 'describe'\n\n"
             . "*Extraire du texte (OCR) :*\n"
-            . "Image + 'extract-text'\n"
-            . "Avec langue : 'extract-text lang:eng'\n\n"
+            . "Image + 'extract-text' | Langue : 'lang:eng'\n\n"
+            . "*Decoder un QR code :*\n"
+            . "Image + 'qr code' ou 'lire qr'\n\n"
             . "*Annoter une image :*\n"
             . "Image + 'annotate arrow [x1,y1,x2,y2] red'\n"
-            . "Types : arrow, rectangle, circle, text\n"
-            . "Couleurs : red, green, blue, yellow, orange, cyan\n\n"
+            . "Types : arrow, rectangle, circle, text\n\n"
             . "*Comparer deux images :*\n"
-            . "Image 1 + 'compare' → puis Image 2 + 'compare'\n\n"
+            . "Image 1 + 'compare' → Image 2 + 'compare'\n\n"
+            . "*Recadrer (Crop) :*\n"
+            . "Image + 'crop [x,y,largeur,hauteur]'\n\n"
+            . "*Luminosite / Contraste :*\n"
+            . "Image + 'luminosite +80' | 'eclaircir' | 'contraste -30'\n\n"
             . "*Redimensionner :*\n"
             . "Image + 'resize 800x600'\n\n"
             . "*Pivoter :*\n"
             . "Image + 'rotate 90' (ou 180, 270)\n\n"
+            . "*Miroir / Retourner :*\n"
+            . "Image + 'flip' | 'flip vertical'\n\n"
+            . "*Noir et blanc :*\n"
+            . "Image + 'grayscale' ou 'noir et blanc'\n\n"
             . "*Infos image :*\n"
             . "Image + 'info'\n\n"
-            . "*Declencheurs :* screenshot, capture, annotate, extract-text, ocr, compare, analyse, resize, rotate"
+            . "_Declencheurs : screenshot, ocr, analyse, qr code, crop, luminosite, flip, grayscale, compare, resize, rotate_"
         );
     }
 

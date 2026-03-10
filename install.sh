@@ -508,6 +508,28 @@ collect_configuration() {
     generated_pw=$(generate_password)
     ask_secret "Database password (Enter for random)" "$generated_pw" CONF_DB_PASSWORD
 
+    # Public AI Chat
+    echo ""
+    info "Public AI Chat page — expose a standalone chat widget on a dedicated port"
+    ask "Chat page port (0 to disable)" "8888" CONF_CHAT_PORT
+    CONF_CHAT_API_KEY=""
+    if [[ "$CONF_CHAT_PORT" != "0" ]]; then
+        local generated_chat_key
+        generated_chat_key=$(generate_password)
+        ask_secret "Chat API key (Enter for random)" "$generated_chat_key" CONF_CHAT_API_KEY
+    fi
+
+    # Enterprise Proxy
+    echo ""
+    info "Enterprise proxy (leave empty if not behind a corporate proxy)"
+    ask_optional "HTTP Proxy (e.g. http://proxy:8080)" CONF_HTTP_PROXY
+    CONF_HTTPS_PROXY=""
+    CONF_NO_PROXY=""
+    if [[ -n "$CONF_HTTP_PROXY" ]]; then
+        ask "HTTPS Proxy" "$CONF_HTTP_PROXY" CONF_HTTPS_PROXY
+        ask "No-Proxy exclusions" "localhost,127.0.0.1,db,redis,waha,ollama,app" CONF_NO_PROXY
+    fi
+
     # LLM API Keys
     echo ""
     info "Optional: Configure AI/LLM API keys (can also be set later in Settings)"
@@ -521,6 +543,8 @@ collect_configuration() {
     echo -e "  │ ${CYAN}URL:${NC}       $CONF_APP_URL"
     echo -e "  │ ${CYAN}Port:${NC}      $CONF_APP_PORT"
     echo -e "  │ ${CYAN}DB Pass:${NC}   ${DIM}$(echo "$CONF_DB_PASSWORD" | head -c 4)****${NC}"
+    [[ "$CONF_CHAT_PORT" != "0" ]] && echo -e "  │ ${CYAN}Chat Port:${NC} $CONF_CHAT_PORT"
+    [[ -n "$CONF_HTTP_PROXY" ]]    && echo -e "  │ ${CYAN}Proxy:${NC}     ${DIM}$CONF_HTTP_PROXY${NC}"
     [[ -n "$CONF_ANTHROPIC_KEY" ]] && echo -e "  │ ${CYAN}Anthropic:${NC} ${DIM}configured${NC}"
     [[ -n "$CONF_OPENAI_KEY" ]]    && echo -e "  │ ${CYAN}OpenAI:${NC}    ${DIM}configured${NC}"
     echo -e "  └──────────────────────────────────────────────────"
@@ -598,6 +622,23 @@ ENVEOF
         echo "# --- LLM API Keys ---" >> "$ENV_FILE"
         [[ -n "$CONF_ANTHROPIC_KEY" ]] && echo "ANTHROPIC_API_KEY=${CONF_ANTHROPIC_KEY}" >> "$ENV_FILE"
         [[ -n "$CONF_OPENAI_KEY" ]]    && echo "OPENAI_API_KEY=${CONF_OPENAI_KEY}" >> "$ENV_FILE"
+    fi
+
+    # Append public chat config
+    if [[ "$CONF_CHAT_PORT" != "0" ]]; then
+        echo "" >> "$ENV_FILE"
+        echo "# --- Public AI Chat ---" >> "$ENV_FILE"
+        echo "CHAT_PORT=${CONF_CHAT_PORT}" >> "$ENV_FILE"
+        [[ -n "$CONF_CHAT_API_KEY" ]] && echo "CHAT_API_KEY=${CONF_CHAT_API_KEY}" >> "$ENV_FILE"
+    fi
+
+    # Append proxy config
+    if [[ -n "$CONF_HTTP_PROXY" ]]; then
+        echo "" >> "$ENV_FILE"
+        echo "# --- Enterprise Proxy ---" >> "$ENV_FILE"
+        echo "HTTP_PROXY=${CONF_HTTP_PROXY}" >> "$ENV_FILE"
+        [[ -n "$CONF_HTTPS_PROXY" ]] && echo "HTTPS_PROXY=${CONF_HTTPS_PROXY}" >> "$ENV_FILE"
+        [[ -n "$CONF_NO_PROXY" ]]    && echo "NO_PROXY=${CONF_NO_PROXY}" >> "$ENV_FILE"
     fi
 
     success ".env file generated"
@@ -735,6 +776,9 @@ DONE
     echo -e "  │"
     echo -e "  │  ${CYAN}Dashboard:${NC}    ${BOLD}${CONF_APP_URL}${NC}"
     echo -e "  │  ${CYAN}WhatsApp QR:${NC}  ${BOLD}http://localhost:3000${NC}"
+    if [[ "${CONF_CHAT_PORT:-0}" != "0" ]]; then
+        echo -e "  │  ${CYAN}AI Chat:${NC}      ${BOLD}http://localhost:${CONF_CHAT_PORT}/chat${NC}"
+    fi
     echo -e "  │"
     echo -e "  │  ${CYAN}Email:${NC}        admin@zeniclaw.io"
     echo -e "  │  ${CYAN}Password:${NC}     password"
@@ -812,9 +856,18 @@ main() {
     show_banner
 
     if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
-        # Running from inside the repo — use current directory
+        # Running from inside the repo — git pull latest first
         cd "$SCRIPT_DIR"
         info "Running from project directory: $SCRIPT_DIR"
+        if [[ -d ".git" ]]; then
+            step "0/6 — Updating Source Code"
+            info "Pulling latest code..."
+            if git pull origin main 2>&1; then
+                success "Code updated to latest version"
+            else
+                warn "Git pull failed (may need manual merge). Continuing with current code..."
+            fi
+        fi
     else
         # Running standalone (e.g. curl | bash) — clone the repo first
         preflight_checks

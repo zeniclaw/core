@@ -21,7 +21,7 @@ class TodoAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes, la modification de titre, la recherche, le nettoyage des taches terminees, la visualisation des taches a venir (due_soon), le cochage en masse (check_all) et le changement de categorie (set_category).';
+        return 'Agent de gestion de listes de taches (todo lists). Permet de creer, cocher, supprimer des taches, gerer plusieurs listes nommees, assigner des priorites, des echeances et des categories. Supporte les taches recurrentes, le deplacement entre listes, la modification de titre, la recherche, le nettoyage des taches terminees, la visualisation des taches a venir (due_soon), le cochage en masse (check_all), le changement de categorie (set_category), le planning hebdomadaire (week) et la duplication de taches (duplicate).';
     }
 
     public function keywords(): array
@@ -58,12 +58,14 @@ class TodoAgent extends BaseAgent
             'taches travail', 'taches perso', 'taches sport', 'taches sante', 'taches courses',
             'voir categorie', 'filtrer categorie', 'par categorie', 'filter categorie',
             'priorites du jour', 'resume du jour', 'mes urgences',
+            'planning semaine', 'ma semaine', 'semaine a venir', 'cette semaine todo', 'taches semaine',
+            'dupliquer', 'dupliquer tache', 'duplique', 'copier tache', 'cloner tache', 'clone', 'copie tache',
         ];
     }
 
     public function version(): string
     {
-        return '1.5.0';
+        return '1.6.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -290,6 +292,12 @@ class TodoAgent extends BaseAgent
             case 'today':
                 return $this->handleToday($context);
 
+            case 'week':
+                return $this->handleWeek($context);
+
+            case 'duplicate':
+                return $this->handleDuplicate($context, $todos, $items, $listName);
+
             case 'list':
                 break;
         }
@@ -409,7 +417,10 @@ class TodoAgent extends BaseAgent
 
         $dbQuery = Todo::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
-            ->where('title', 'like', '%' . $query . '%')
+            ->where(function ($q) use ($query) {
+                $q->where('title', 'like', '%' . $query . '%')
+                  ->orWhere('category', 'like', '%' . $query . '%');
+            })
             ->orderBy('is_done')
             ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
             ->orderBy('id');
@@ -476,10 +487,14 @@ class TodoAgent extends BaseAgent
             $todo->delete();
         }
 
-        $count = $done->count();
-        $msg   = $listName
-            ? "🧹 {$count} tâche(s) terminée(s) supprimée(s) de la liste *{$listName}*."
-            : "🧹 {$count} tâche(s) terminée(s) supprimée(s).";
+        $count      = $done->count();
+        $titlesHint = '';
+        if ($count <= 5) {
+            $titlesHint = "\n" . $done->pluck('title')->map(fn ($t) => "  ✅ _{$t}_")->implode("\n");
+        }
+        $msg = $listName
+            ? "🧹 {$count} tâche(s) terminée(s) supprimée(s) de *{$listName}* :{$titlesHint}"
+            : "🧹 {$count} tâche(s) terminée(s) supprimée(s) :{$titlesHint}";
 
         $this->sendText($context->from, $msg);
         $this->log($context, "Todo action: clear_done", ['list_name' => $listName, 'count' => $count]);
@@ -968,6 +983,156 @@ class TodoAgent extends BaseAgent
     }
 
     /**
+     * Weekly planning view: overdue + tasks organized day by day for the next 7 days.
+     */
+    private function handleWeek(AgentContext $context): AgentResult
+    {
+        $tz        = AppSetting::timezone();
+        $now       = now($tz);
+        $today     = $now->copy()->startOfDay();
+        $endOfWeek = $today->copy()->addDays(6)->endOfDay()->utc();
+
+        // Overdue (past, not done)
+        $overdue = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', $today->utc())
+            ->orderBy('due_at')
+            ->get();
+
+        // Tasks due in the next 7 days (today through today+6)
+        $upcoming = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('is_done', false)
+            ->whereNotNull('due_at')
+            ->where('due_at', '>=', $today->utc())
+            ->where('due_at', '<=', $endOfWeek)
+            ->orderBy('due_at')
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->get();
+
+        if ($overdue->isEmpty() && $upcoming->isEmpty()) {
+            $reply = "📅 *Planning de la semaine*\n\nAucune tâche à venir cette semaine ! 🌟\n\n_\"ajoute X pour vendredi\" pour planifier._";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_week_empty']);
+        }
+
+        $dayNames = [
+            'Monday'    => 'Lundi',
+            'Tuesday'   => 'Mardi',
+            'Wednesday' => 'Mercredi',
+            'Thursday'  => 'Jeudi',
+            'Friday'    => 'Vendredi',
+            'Saturday'  => 'Samedi',
+            'Sunday'    => 'Dimanche',
+        ];
+
+        $lines = ["📅 *Planning de la semaine — " . $now->format('d/m') . "*", ''];
+
+        // Overdue section
+        if ($overdue->isNotEmpty()) {
+            $lines[] = "⚠️ *En retard ({$overdue->count()}) :*";
+            foreach ($overdue->values() as $i => $todo) {
+                $listHint = $todo->list_name ? " _({$todo->list_name})_" : '';
+                $lines[]  = ($i + 1) . ". " . $this->formatTodoLine($todo) . $listHint;
+            }
+            $lines[] = '';
+        }
+
+        // Group upcoming by day
+        $byDay = $upcoming->groupBy(function ($todo) use ($tz) {
+            return $todo->due_at->copy()->timezone($tz)->format('Y-m-d');
+        });
+
+        $num = $overdue->count() + 1;
+        for ($d = 0; $d < 7; $d++) {
+            $day    = $today->copy()->addDays($d);
+            $dayKey = $day->format('Y-m-d');
+            if (!$byDay->has($dayKey)) {
+                continue;
+            }
+            $dayLabel = match ($d) {
+                0       => "Aujourd'hui",
+                1       => 'Demain',
+                default => $dayNames[$day->format('l')] ?? $day->format('l'),
+            };
+            $dayStr   = $day->format('d/m');
+            $dayTodos = $byDay->get($dayKey);
+
+            $lines[] = "📌 *{$dayLabel} {$dayStr} ({$dayTodos->count()}) :*";
+            foreach ($dayTodos as $todo) {
+                $listHint = $todo->list_name ? " _({$todo->list_name})_" : '';
+                $lines[]  = "{$num}. " . $this->formatTodoLine($todo) . $listHint;
+                $num++;
+            }
+            $lines[] = '';
+        }
+
+        $total   = $overdue->count() + $upcoming->count();
+        $lines[] = "_{$total} tâche(s) pour les 7 prochains jours._";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: week", [
+            'overdue'  => $overdue->count(),
+            'upcoming' => $upcoming->count(),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_week', 'count' => $total]);
+    }
+
+    /**
+     * Duplicate a task (same title, priority, category, list — fresh copy: not done, no due date).
+     */
+    private function handleDuplicate(AgentContext $context, $todos, array $items, ?string $listName): AgentResult
+    {
+        if (empty($items)) {
+            $reply = "Quel numéro veux-tu dupliquer ? Ex: \"duplique le 2\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_duplicate_missing_num']);
+        }
+
+        $filteredTodos = $this->filterByList($todos, $listName);
+        $num           = (int) $items[0];
+        $index         = $num - 1;
+        $todo          = $filteredTodos->values()[$index] ?? null;
+
+        if (!$todo) {
+            $reply = "⚠️ Tâche #{$num} introuvable. Tape \"ma liste\" pour voir les numéros.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'todo_duplicate_not_found']);
+        }
+
+        Todo::create([
+            'agent_id'        => $context->agent->id,
+            'requester_phone' => $context->from,
+            'requester_name'  => $context->senderName,
+            'list_name'       => $todo->list_name,
+            'title'           => $todo->title,
+            'category'        => $todo->category,
+            'priority'        => $todo->priority,
+            'is_done'         => false,
+        ]);
+
+        $priorityLabel = match ($todo->priority) {
+            'high'  => ' 🔴',
+            'low'   => ' 🔵',
+            default => '',
+        };
+        $listLabel = $todo->list_name ? " dans *{$todo->list_name}*" : '';
+
+        $reply = "📋 Tâche dupliquée : *{$todo->title}*{$priorityLabel}{$listLabel}";
+        $this->sendText($context->from, $reply);
+        $this->log($context, "Todo action: duplicate", [
+            'source_num' => $num,
+            'title'      => $todo->title,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'todo_duplicate']);
+    }
+
+    /**
      * Display usage help.
      */
     private function handleHelp(AgentContext $context): AgentResult
@@ -1013,6 +1178,10 @@ class TodoAgent extends BaseAgent
             . "\"mes stats\" / \"stats de la liste courses\"\n\n"
             . "*Planning du jour :*\n"
             . "\"planning du jour\" / \"mes tâches aujourd'hui\"\n\n"
+            . "*Planning de la semaine :*\n"
+            . "\"planning de la semaine\" / \"ma semaine\"\n\n"
+            . "*Dupliquer une tâche :*\n"
+            . "\"duplique le 2\" / \"copie la tâche 3\"\n\n"
             . "*Filtrer par catégorie :*\n"
             . "\"mes tâches travail\" / \"voir catégorie sport\"\n"
             . "\"mes catégories\" (liste toutes les catégories)\n\n"
@@ -1033,7 +1202,7 @@ Tu es un assistant de gestion de liste de taches (todo list).
 L'utilisateur peut avoir PLUSIEURS listes nommees (ex: "courses", "poney", "travail") en plus de la liste par defaut.
 
 Reponds UNIQUEMENT en JSON valide, sans markdown, sans explication:
-{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|due_soon|check_all|uncheck_all|set_category|filter_category|today|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "new_category": "categorie" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null, "days": 7}
+{"action": "add|check|uncheck|delete|list|stats|create_list|show_lists|delete_list|clear_done|move|edit|search|set_priority|set_due|due_soon|check_all|uncheck_all|set_category|filter_category|today|week|duplicate|help", "items": [...], "list_name": "nom_liste" | null, "target_list": "nom_liste" | null, "new_title": "nouveau titre" | null, "new_category": "categorie" | null, "query": "mot cle" | null, "recurrence": "weekly:thursday:09:00" | null, "category": "string" | null, "priority": "high|normal|low", "due_at": "YYYY-MM-DD HH:MM" | null, "days": 7}
 
 ACTIONS:
 - "add": ajouter des taches. items = liste de titres (strings). list_name = nom de la liste cible (null = liste par defaut).
@@ -1057,6 +1226,8 @@ ACTIONS:
 - "set_category": changer la categorie d'une tache existante. items = [numero]. new_category = nouvelle categorie (string) ou null pour supprimer. list_name = la liste concernee.
 - "filter_category": afficher les taches d'une categorie specifique. items = []. category = nom de la categorie (null = lister les categories disponibles). list_name = null (global) ou nom de liste. Utilise pour "mes taches travail", "voir catégorie sport", "mes categories".
 - "today": afficher le planning du jour (en retard + echeances du jour + urgences sans echeance). items = []. list_name = null. Utilise pour "planning du jour", "mes taches aujourd'hui", "qu'est-ce que j'ai a faire aujourd'hui", "mes urgences".
+- "week": afficher le planning de la semaine (en retard + taches organisees par jour pour les 7 prochains jours). items = []. list_name = null. Utilise pour "planning de la semaine", "ma semaine", "taches de la semaine", "quoi de prevu cette semaine".
+- "duplicate": dupliquer une tache existante (meme titre, priorite, categorie, liste — sans echeance, non cochee). items = [numero]. list_name = la liste concernee (null = default). Utilise pour "duplique le 2", "copie la tache 3", "clone le 1".
 - "help": afficher l'aide des commandes disponibles. items = []. list_name = null.
 
 GESTION DES LISTES:
@@ -1172,6 +1343,10 @@ EXEMPLES:
 - "planning du jour" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 - "mes taches aujourd'hui" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 - "qu'est-ce que j'ai a faire aujourd'hui" → {"action": "today", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "planning de la semaine" → {"action": "week", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "ma semaine" → {"action": "week", "items": [], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "duplique le 2" → {"action": "duplicate", "items": [2], "list_name": null, "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
+- "copie la tache 3 dans courses" → {"action": "duplicate", "items": [3], "list_name": "courses", "target_list": null, "new_title": null, "new_category": null, "query": null, "recurrence": null, "category": null, "priority": "normal", "due_at": null, "days": 7}
 
 FILTER_CATEGORY:
 - "mes taches travail" → filter_category, category: "travail", list_name: null
@@ -1185,6 +1360,19 @@ TODAY:
 - "qu'est-ce que j'ai a faire" → today
 - "mes urgences" → today (shows high-priority + overdue + due today)
 - "resume du jour" → today
+
+WEEK:
+- "planning de la semaine" → week
+- "ma semaine" → week
+- "taches de la semaine" → week (NB: different from due_soon qui liste sans grouper par jour)
+- "quoi de prevu cette semaine" → week
+- "voir la semaine" → week
+
+DUPLICATE:
+- "duplique le 2" → duplicate, items: [2], list_name: null
+- "copie la tache 3" → duplicate, items: [3], list_name: null
+- "clone le 1 dans courses" → duplicate, items: [1], list_name: "courses"
+- "duplique la tache 2 dans travail" → duplicate, items: [2], list_name: "travail"
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -1423,12 +1611,19 @@ PROMPT;
             'Sunday'    => 'dim.',
         ];
 
-        $dayName = $dayNames[$due->format('l')] ?? $due->format('l');
-        $dateStr = $dayName . ' ' . $due->format('d/m');
+        $showTime = $due->format('H:i') !== '23:59' && $due->format('H:i') !== '00:00';
 
-        // Show time if it's not midnight/EOD
-        if ($due->format('H:i') !== '23:59' && $due->format('H:i') !== '00:00') {
-            $dateStr .= ' ' . $due->format('H:i');
+        if ($due->isToday()) {
+            $dateStr = "aujourd'hui";
+            if ($showTime) {
+                $dateStr .= ' ' . $due->format('H:i');
+            }
+        } else {
+            $dayName = $dayNames[$due->format('l')] ?? $due->format('l');
+            $dateStr = $dayName . ' ' . $due->format('d/m');
+            if ($showTime) {
+                $dateStr .= ' ' . $due->format('H:i');
+            }
         }
 
         if (!$todo->is_done && $due->lt($now)) {

@@ -24,10 +24,10 @@ class ContentSummarizerAgentTest extends TestCase
         $this->assertEquals('content_summarizer', $agent->name());
     }
 
-    public function test_agent_version_is_1_3_0(): void
+    public function test_agent_version_is_1_12_0(): void
     {
         $agent = new ContentSummarizerAgent();
-        $this->assertEquals('1.3.0', $agent->version());
+        $this->assertEquals('1.12.0', $agent->version());
     }
 
     public function test_agent_has_description(): void
@@ -749,6 +749,263 @@ HTML;
         $this->assertTrue($method->invoke($agent, 'https://onion.example.com/article'));
     }
 
+    // ── Twitter/X URL detection ───────────────────────────────────────────────
+
+    public function test_is_twitter_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isTwitterUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://twitter.com/user/status/1234567890'));
+        $this->assertTrue($method->invoke($agent, 'https://x.com/elonmusk/status/9876543210'));
+        $this->assertTrue($method->invoke($agent, 'https://www.twitter.com/someuser/status/111'));
+        $this->assertFalse($method->invoke($agent, 'https://youtube.com/watch?v=dQw4w9WgXcQ'));
+        $this->assertFalse($method->invoke($agent, 'https://twitter.com/user')); // no /status/
+        $this->assertFalse($method->invoke($agent, 'https://example.com/page'));
+    }
+
+    public function test_can_handle_twitter_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://twitter.com/user/status/1234567890')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://x.com/user/status/9876543210')));
+    }
+
+    // ── Text paste summarization ──────────────────────────────────────────────
+
+    public function test_is_text_paste_request_requires_keyword_and_length(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isTextPasteRequest');
+        $method->setAccessible(true);
+
+        // Short body — not a paste request even with keyword
+        $this->assertFalse($method->invoke($agent, 'resume cet article'));
+
+        // Long body without keyword — not a paste request
+        $this->assertFalse($method->invoke($agent, str_repeat('lorem ipsum dolor sit amet. ', 20)));
+
+        // Long body with keyword — is a paste request
+        $longText = 'résumé ' . str_repeat('Lorem ipsum dolor sit amet consectetur adipiscing. ', 10);
+        $this->assertTrue($method->invoke($agent, $longText));
+
+        // English keyword also works
+        $longEnglish = 'summarize ' . str_repeat('The quick brown fox jumps over the lazy dog. ', 10);
+        $this->assertTrue($method->invoke($agent, $longEnglish));
+    }
+
+    public function test_handle_text_paste_returns_reply_not_help(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // Long body with keyword but no URL → should NOT show help (text paste mode)
+        $longText = 'résumé ' . str_repeat('Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor. ', 8);
+        $result = $agent->handle($this->makeContext($longText));
+
+        $this->assertEquals('reply', $result->action);
+        // Must NOT be the help message
+        $this->assertStringNotContainsString('Comment utiliser', $result->reply);
+    }
+
+    // ── Error content detection ───────────────────────────────────────────────
+
+    public function test_is_error_content_detects_markers(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isErrorContent');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, '[ACCES REFUSE] URL: https://example.com'));
+        $this->assertTrue($method->invoke($agent, '[RATE LIMIT] URL: https://example.com'));
+        $this->assertTrue($method->invoke($agent, '[ERREUR SERVEUR] URL: https://example.com'));
+        $this->assertFalse($method->invoke($agent, '[PAGE WEB] URL: https://example.com'));
+        $this->assertFalse($method->invoke($agent, 'Normal article content here'));
+    }
+
+    public function test_extract_error_message_from_marker(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('extractErrorMessage');
+        $method->setAccessible(true);
+
+        $content = "[ACCES REFUSE] URL: https://example.com\n(Le site requiert une authentification ou bloque les bots)";
+        $result = $method->invoke($agent, $content);
+        $this->assertStringContainsString('authentification', $result);
+    }
+
+    // ── YouTube embed URL ─────────────────────────────────────────────────────
+
+    public function test_is_youtube_embed_url_detected(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isYouTubeUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://www.youtube.com/embed/dQw4w9WgXcQ'));
+        $this->assertTrue($method->invoke($agent, 'https://youtube.com/embed/dQw4w9WgXcQ'));
+    }
+
+    public function test_extract_youtube_embed_video_id(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('extractYouTubeVideoId');
+        $method->setAccessible(true);
+
+        $this->assertEquals('dQw4w9WgXcQ', $method->invoke($agent, 'https://www.youtube.com/embed/dQw4w9WgXcQ'));
+    }
+
+    // ── Private IP blocking (extended) ────────────────────────────────────────
+
+    public function test_is_secure_url_blocks_zero_ip(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSecureUrl');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($agent, 'http://0.0.0.0/admin'));
+    }
+
+    public function test_is_secure_url_blocks_link_local(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSecureUrl');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($agent, 'http://169.254.169.254/metadata'));
+        $this->assertFalse($method->invoke($agent, 'http://169.254.1.1/secret'));
+    }
+
+    // ── Keywords includes twitter ─────────────────────────────────────────────
+
+    public function test_keywords_include_twitter(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('twitter', $agent->keywords());
+        $this->assertContains('tweet', $agent->keywords());
+    }
+
+    // ── Tone analysis mode ────────────────────────────────────────────────────
+
+    public function test_can_handle_tone_analysis_keywords(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('analyse le ton https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('quel est le ton https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('tone analysis https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('analyse sentiment https://example.com')));
+    }
+
+    public function test_tone_analysis_shows_help_without_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // No URL → should fall through to help
+        $result = $agent->handle($this->makeContext('analyse le ton'));
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Resume de Contenu', $result->reply);
+    }
+
+    public function test_keywords_include_tone_and_sentiment(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('ton', $agent->keywords());
+        $this->assertContains('tone', $agent->keywords());
+        $this->assertContains('sentiment', $agent->keywords());
+    }
+
+    // ── Output language override ──────────────────────────────────────────────
+
+    public function test_detect_output_language_english(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectOutputLanguage');
+        $method->setAccessible(true);
+
+        $this->assertEquals('en', $method->invoke($agent, 'resume en anglais https://example.com'));
+        $this->assertEquals('en', $method->invoke($agent, 'summarize in english https://example.com'));
+    }
+
+    public function test_detect_output_language_french(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectOutputLanguage');
+        $method->setAccessible(true);
+
+        $this->assertEquals('fr', $method->invoke($agent, 'summarize in french https://example.com'));
+        $this->assertEquals('fr', $method->invoke($agent, 'resume en francais https://example.com'));
+    }
+
+    public function test_detect_output_language_spanish(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectOutputLanguage');
+        $method->setAccessible(true);
+
+        $this->assertEquals('es', $method->invoke($agent, 'resume en espagnol https://example.com'));
+        $this->assertEquals('es', $method->invoke($agent, 'summarize in spanish https://example.com'));
+    }
+
+    public function test_detect_output_language_german(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectOutputLanguage');
+        $method->setAccessible(true);
+
+        $this->assertEquals('de', $method->invoke($agent, 'resume en allemand https://example.com'));
+        $this->assertEquals('de', $method->invoke($agent, 'summarize in german https://example.com'));
+    }
+
+    public function test_detect_output_language_returns_null_when_no_override(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectOutputLanguage');
+        $method->setAccessible(true);
+
+        $this->assertNull($method->invoke($agent, 'resume https://example.com'));
+        $this->assertNull($method->invoke($agent, 'summarize this article'));
+        $this->assertNull($method->invoke($agent, 'tldr https://example.com'));
+    }
+
+    public function test_keywords_include_output_language_hints(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('en anglais', $agent->keywords());
+        $this->assertContains('in english', $agent->keywords());
+    }
+
+    // ── Help message includes new features ────────────────────────────────────
+
+    public function test_help_message_shows_tone_analysis(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('analyse le ton', $result->reply);
+        $this->assertStringContainsString('ton et sentiment', $result->reply);
+    }
+
+    public function test_help_message_shows_language_override(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Langue de reponse', $result->reply);
+        $this->assertStringContainsString('in english', $result->reply);
+    }
+
     // ── Compare mode ──────────────────────────────────────────────────────────
 
     public function test_compare_mode_triggers_with_lequel_keyword(): void
@@ -763,6 +1020,784 @@ HTML;
         // Verify 2 URLs are extracted (compare logic tested indirectly)
         $urls = $method->invoke($agent, 'lequel est mieux https://site1.com https://site2.com');
         $this->assertCount(2, $urls);
+    }
+
+    // ── Wikipedia URL detection ───────────────────────────────────────────────
+
+    public function test_is_wikipedia_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isWikipediaUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://fr.wikipedia.org/wiki/PHP_(langage)'));
+        $this->assertTrue($method->invoke($agent, 'https://en.wikipedia.org/wiki/Artificial_intelligence'));
+        $this->assertTrue($method->invoke($agent, 'https://de.wikipedia.org/wiki/Linux'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/wiki/article'));
+        $this->assertFalse($method->invoke($agent, 'https://youtube.com/watch?v=dQw4w9WgXcQ'));
+    }
+
+    public function test_can_handle_wikipedia_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://fr.wikipedia.org/wiki/PHP_(langage)')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://en.wikipedia.org/wiki/Artificial_intelligence')));
+    }
+
+    public function test_keywords_include_wikipedia(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('wikipedia', $agent->keywords());
+        $this->assertContains('wiki', $agent->keywords());
+    }
+
+    // ── GitHub URL detection ──────────────────────────────────────────────────
+
+    public function test_is_github_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isGithubUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://github.com/laravel/laravel'));
+        $this->assertTrue($method->invoke($agent, 'https://github.com/anthropics/claude-code'));
+        $this->assertTrue($method->invoke($agent, 'https://www.github.com/owner/repo'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/laravel/laravel'));
+        $this->assertFalse($method->invoke($agent, 'https://gitlab.com/owner/repo'));
+    }
+
+    public function test_can_handle_github_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://github.com/laravel/laravel')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://github.com/anthropics/claude-code')));
+    }
+
+    public function test_keywords_include_github(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('github', $agent->keywords());
+        $this->assertContains('readme', $agent->keywords());
+        $this->assertContains('repository', $agent->keywords());
+    }
+
+    public function test_help_message_shows_wikipedia_and_github(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Wikipedia', $result->reply);
+        $this->assertStringContainsString('GitHub', $result->reply);
+        $this->assertStringContainsString('wikipedia.org', $result->reply);
+        $this->assertStringContainsString('github.com', $result->reply);
+    }
+
+    // ── Reddit URL detection ──────────────────────────────────────────────────
+
+    public function test_is_reddit_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isRedditUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://reddit.com/r/programming/comments/abc123/some_post'));
+        $this->assertTrue($method->invoke($agent, 'https://www.reddit.com/r/technology/comments/xyz789/another_post'));
+        $this->assertTrue($method->invoke($agent, 'https://reddit.com/r/science/comments/def456'));
+        $this->assertFalse($method->invoke($agent, 'https://reddit.com/r/programming'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/r/foo/comments/bar'));
+        $this->assertFalse($method->invoke($agent, 'https://github.com/laravel/laravel'));
+    }
+
+    public function test_can_handle_reddit_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://reddit.com/r/programming/comments/abc123/post')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://www.reddit.com/r/tech/comments/xyz/titre')));
+    }
+
+    public function test_keywords_include_reddit(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('reddit', $agent->keywords());
+        $this->assertContains('subreddit', $agent->keywords());
+    }
+
+    public function test_help_message_shows_reddit(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Reddit', $result->reply);
+        $this->assertStringContainsString('reddit.com', $result->reply);
+    }
+
+    // ── Word count mode ───────────────────────────────────────────────────────
+
+    public function test_detect_word_count_mode_french(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('wordcount:100', $method->invoke($agent, 'resume en 100 mots https://example.com'));
+        $this->assertEquals('wordcount:50', $method->invoke($agent, 'resume en 50 mots https://example.com'));
+        $this->assertEquals('wordcount:200', $method->invoke($agent, 'resume en 200 mots https://example.com'));
+    }
+
+    public function test_detect_word_count_mode_english(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('wordcount:150', $method->invoke($agent, 'summarize in 150 words https://example.com'));
+        $this->assertEquals('wordcount:75', $method->invoke($agent, 'in 75 words https://example.com'));
+    }
+
+    public function test_word_count_mode_clamps_minimum(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // Values below 20 are clamped to 20
+        $this->assertEquals('wordcount:20', $method->invoke($agent, 'resume en 5 mots https://example.com'));
+    }
+
+    public function test_word_count_mode_clamps_maximum(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // Values above 2000 are clamped to 2000
+        $this->assertEquals('wordcount:2000', $method->invoke($agent, 'resume en 9999 mots https://example.com'));
+    }
+
+    public function test_keywords_only_takes_priority_over_word_count(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // keywords-only pattern should win even if word count is present
+        $this->assertEquals('keywords', $method->invoke($agent, 'mots-cles seulement en 100 mots https://example.com'));
+    }
+
+    public function test_help_message_shows_word_count_option(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('en X mots', $result->reply);
+        $this->assertStringContainsString('en 100 mots', $result->reply);
+        $this->assertStringContainsString('nombre de mots precis', $result->reply);
+    }
+
+    // ── HackerNews URL detection ──────────────────────────────────────────────
+
+    public function test_is_hackernews_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isHackerNewsUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://news.ycombinator.com/item?id=12345678'));
+        $this->assertTrue($method->invoke($agent, 'http://news.ycombinator.com/item?id=1'));
+        $this->assertFalse($method->invoke($agent, 'https://news.ycombinator.com/newest'));
+        $this->assertFalse($method->invoke($agent, 'https://github.com/laravel/laravel'));
+        $this->assertFalse($method->invoke($agent, 'https://reddit.com/r/programming/comments/abc'));
+    }
+
+    public function test_can_handle_hackernews_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://news.ycombinator.com/item?id=12345678')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://news.ycombinator.com/item?id=9876543')));
+    }
+
+    public function test_keywords_include_hackernews(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('hackernews', $agent->keywords());
+        $this->assertContains('ycombinator', $agent->keywords());
+    }
+
+    public function test_help_message_shows_hackernews(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('HackerNews', $result->reply);
+        $this->assertStringContainsString('news.ycombinator.com', $result->reply);
+    }
+
+    // ── LinkedIn URL detection ────────────────────────────────────────────────
+
+    public function test_is_linkedin_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isLinkedInUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://www.linkedin.com/pulse/article-titre'));
+        $this->assertTrue($method->invoke($agent, 'https://linkedin.com/posts/username_activity-123'));
+        $this->assertFalse($method->invoke($agent, 'https://linkedin.com/in/username'));
+        $this->assertFalse($method->invoke($agent, 'https://github.com/laravel/laravel'));
+    }
+
+    public function test_can_handle_linkedin_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://www.linkedin.com/pulse/article-de-test')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://linkedin.com/posts/user-activity-123')));
+    }
+
+    public function test_keywords_include_linkedin(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('linkedin', $agent->keywords());
+        $this->assertContains('linkedin article', $agent->keywords());
+    }
+
+    public function test_help_message_shows_linkedin(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('LinkedIn', $result->reply);
+        $this->assertStringContainsString('linkedin.com', $result->reply);
+    }
+
+    // ── HTTP 451 error handling ───────────────────────────────────────────────
+
+    public function test_is_error_content_detects_blocked_marker(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isErrorContent');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, '[CONTENU BLOQUE] URL: https://example.com'));
+        $this->assertFalse($method->invoke($agent, '[PAGE WEB] URL: https://example.com'));
+    }
+
+    public function test_friendly_error_451(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('friendlyError');
+        $method->setAccessible(true);
+
+        $e = new \RuntimeException('451 Unavailable For Legal Reasons');
+        $result = $method->invoke($agent, $e);
+        $this->assertStringContainsString('451', $result);
+    }
+
+    // ── Tone analysis on text paste ───────────────────────────────────────────
+
+    public function test_tone_analysis_on_text_paste_returns_reply(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // Long body with tone keyword and no URL → should trigger tone analysis on paste
+        $longText = 'analyse le ton du texte suivant : ' . str_repeat('Le gouvernement a annonce des mesures drastiques. ', 15);
+        $result = $agent->handle($this->makeContext($longText));
+
+        $this->assertEquals('reply', $result->action);
+        // Must NOT show help
+        $this->assertStringNotContainsString('Comment utiliser', $result->reply);
+    }
+
+    public function test_help_message_mentions_tone_on_text_paste(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        // Help should mention tone analysis on pasted text
+        $this->assertStringContainsString('analyse le ton', $result->reply);
+        $this->assertStringContainsString('colle ton texte', $result->reply);
+    }
+
+    // ── Arxiv URL detection ───────────────────────────────────────────────────
+
+    public function test_is_arxiv_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isArxivUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://arxiv.org/abs/2301.01234'));
+        $this->assertTrue($method->invoke($agent, 'https://arxiv.org/pdf/2301.01234'));
+        $this->assertTrue($method->invoke($agent, 'https://arxiv.org/abs/1706.03762v5'));
+        $this->assertTrue($method->invoke($agent, 'http://arxiv.org/abs/2403.00001'));
+        $this->assertFalse($method->invoke($agent, 'https://arxiv.org/'));
+        $this->assertFalse($method->invoke($agent, 'https://github.com/arxiv/arxiv'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/abs/1234.5678'));
+    }
+
+    public function test_extract_arxiv_id(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('extractArxivId');
+        $method->setAccessible(true);
+
+        $this->assertEquals('2301.01234', $method->invoke($agent, 'https://arxiv.org/abs/2301.01234'));
+        $this->assertEquals('1706.03762v5', $method->invoke($agent, 'https://arxiv.org/abs/1706.03762v5'));
+        $this->assertEquals('2301.01234', $method->invoke($agent, 'https://arxiv.org/pdf/2301.01234'));
+        $this->assertNull($method->invoke($agent, 'https://example.com/page'));
+    }
+
+    public function test_can_handle_arxiv_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://arxiv.org/abs/2301.01234')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://arxiv.org/abs/1706.03762')));
+    }
+
+    public function test_keywords_include_arxiv(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('arxiv', $agent->keywords());
+        $this->assertContains('arxiv.org', $agent->keywords());
+    }
+
+    public function test_help_message_shows_arxiv(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Arxiv', $result->reply);
+        $this->assertStringContainsString('arxiv.org', $result->reply);
+        $this->assertStringContainsString('Articles scientifiques', $result->reply);
+    }
+
+    // ── Flash mode ────────────────────────────────────────────────────────────
+
+    public function test_detect_flash_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('flash', $method->invoke($agent, 'flash https://example.com'));
+        $this->assertEquals('flash', $method->invoke($agent, 'en une phrase https://example.com'));
+        $this->assertEquals('flash', $method->invoke($agent, 'in one sentence https://example.com'));
+        $this->assertEquals('flash', $method->invoke($agent, 'ultra-court https://example.com'));
+    }
+
+    public function test_flash_mode_takes_priority_over_short(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // flash keyword wins even if "court" also appears
+        $this->assertEquals('flash', $method->invoke($agent, 'flash court https://example.com'));
+    }
+
+    public function test_keywords_include_flash(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('flash', $agent->keywords());
+        $this->assertContains('en une phrase', $agent->keywords());
+    }
+
+    public function test_help_message_shows_flash_option(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('flash', $result->reply);
+        $this->assertStringContainsString('en une phrase', $result->reply);
+    }
+
+    // ── Text paste lowered threshold (200 chars) ──────────────────────────────
+
+    public function test_text_paste_threshold_is_200_chars(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isTextPasteRequest');
+        $method->setAccessible(true);
+
+        // Exactly 200 chars with keyword — should be a paste request
+        $text200 = 'résumé ' . str_repeat('x', 193); // 7 + 193 = 200 chars
+        $this->assertTrue($method->invoke($agent, $text200));
+
+        // 199 chars — should NOT be a paste request
+        $text199 = 'résumé ' . str_repeat('x', 192); // 7 + 192 = 199 chars
+        $this->assertFalse($method->invoke($agent, $text199));
+    }
+
+    // ── Language detection extended ───────────────────────────────────────────
+
+    public function test_detect_spanish_content(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectContentLanguage');
+        $method->setAccessible(true);
+
+        $spanishText = 'El gobierno ha anunciado una nueva política para todas las empresas. Los ciudadanos son los más afectados por este cambio que llega con el nuevo año.';
+        $result = $method->invoke($agent, $spanishText);
+        $this->assertEquals('es', $result);
+    }
+
+    public function test_detect_german_content(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectContentLanguage');
+        $method->setAccessible(true);
+
+        $germanText = 'Die Bundesregierung hat eine neue Politik für alle Unternehmen angekündigt. Das ist eine wichtige Entscheidung für die Wirtschaft.';
+        $result = $method->invoke($agent, $germanText);
+        $this->assertEquals('de', $result);
+    }
+
+    // ── Focus topic detection ─────────────────────────────────────────────────
+
+    public function test_detect_focus_topic_axe_sur(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectFocusTopic');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($agent, 'resume axé sur les chiffres https://example.com');
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('chiffres', $result);
+    }
+
+    public function test_detect_focus_topic_focus_sur(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectFocusTopic');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($agent, 'focus sur les risques https://example.com');
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('risques', $result);
+    }
+
+    public function test_detect_focus_topic_returns_null_without_trigger(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectFocusTopic');
+        $method->setAccessible(true);
+
+        $this->assertNull($method->invoke($agent, 'resume https://example.com'));
+        $this->assertNull($method->invoke($agent, 'tldr https://example.com'));
+    }
+
+    public function test_detect_focus_topic_focalise_sur(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectFocusTopic');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($agent, 'résumé focalisé sur les conclusions https://example.com');
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('conclusions', $result);
+    }
+
+    public function test_can_handle_focus_sur_with_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('focus sur les données https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('axé sur les risques https://example.com')));
+    }
+
+    public function test_keywords_include_focus_sur(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('focus sur', $agent->keywords());
+        $this->assertContains('axe sur', $agent->keywords());
+    }
+
+    public function test_help_message_shows_focus_thematique(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Focus thematique', $result->reply);
+        $this->assertStringContainsString('focus sur', $result->reply);
+    }
+
+    // ── Quotes extraction detection ───────────────────────────────────────────
+
+    public function test_can_handle_extraire_citations_with_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('extraire les citations https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('meilleures citations https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('best quotes https://example.com')));
+    }
+
+    public function test_keywords_include_quotes(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('extraire citations', $agent->keywords());
+        $this->assertContains('best quotes', $agent->keywords());
+        $this->assertContains('meilleures citations', $agent->keywords());
+    }
+
+    public function test_quotes_pattern_matches_expected_phrases(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $quotesConst = $reflection->getConstant('QUOTES_PATTERN');
+
+        $this->assertMatchesRegularExpression($quotesConst, 'extraire les citations de cet article');
+        $this->assertMatchesRegularExpression($quotesConst, 'meilleures citations https://example.com');
+        $this->assertMatchesRegularExpression($quotesConst, 'best quotes https://example.com');
+        $this->assertMatchesRegularExpression($quotesConst, 'key quotes https://example.com');
+        $this->assertMatchesRegularExpression($quotesConst, 'passages clés de cet article');
+    }
+
+    public function test_quotes_extraction_shows_help_without_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // No URL, short body → should fall through to help
+        $result = $agent->handle($this->makeContext('extraire les citations'));
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Resume de Contenu', $result->reply);
+    }
+
+    public function test_help_message_shows_citations_extraction(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('citations', $result->reply);
+        $this->assertStringContainsString('extraire les citations', $result->reply);
+    }
+
+    public function test_help_message_shows_translate_feature(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Traduction', $result->reply);
+        $this->assertStringContainsString('traduis', $result->reply);
+    }
+
+    public function test_help_message_shows_substack(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('Substack', $result->reply);
+    }
+
+    // ── Translation mode ──────────────────────────────────────────────────────
+
+    public function test_keywords_include_translate(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('traduis', $agent->keywords());
+        $this->assertContains('traduction', $agent->keywords());
+        $this->assertContains('translate', $agent->keywords());
+    }
+
+    public function test_can_handle_translate_keyword(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('traduis https://example.com en anglais')));
+        $this->assertTrue($agent->canHandle($this->makeContext('traduction de https://example.com en espagnol')));
+        $this->assertTrue($agent->canHandle($this->makeContext('translate https://example.com to french')));
+    }
+
+    public function test_translate_without_target_lang_returns_prompt(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext('traduis https://example.com'));
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Traduction', $result->reply);
+        $this->assertStringContainsString('langue cible', $result->reply);
+    }
+
+    // ── Substack URL detection ─────────────────────────────────────────────────
+
+    public function test_is_substack_url_detection(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('isSubstackUrl');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($agent, 'https://mynewsletter.substack.com/p/my-article'));
+        $this->assertTrue($method->invoke($agent, 'https://author.substack.com/p/some-post-123'));
+        $this->assertFalse($method->invoke($agent, 'https://example.com/article'));
+        $this->assertFalse($method->invoke($agent, 'https://github.com/laravel/laravel'));
+    }
+
+    public function test_can_handle_substack_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('https://mynewsletter.substack.com/p/my-article')));
+        $this->assertTrue($agent->canHandle($this->makeContext('resume https://author.substack.com/p/some-post')));
+    }
+
+    public function test_keywords_include_substack(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('substack', $agent->keywords());
+        $this->assertContains('newsletter', $agent->keywords());
+    }
+
+    // ── Simple / ELI5 mode ────────────────────────────────────────────────────
+
+    public function test_detect_simple_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('simple', $method->invoke($agent, 'simplifie https://example.com'));
+        $this->assertEquals('simple', $method->invoke($agent, 'eli5 https://example.com'));
+        $this->assertEquals('simple', $method->invoke($agent, 'vulgarise https://example.com'));
+        $this->assertEquals('simple', $method->invoke($agent, 'pour les nuls https://example.com'));
+        $this->assertEquals('simple', $method->invoke($agent, 'en termes simples https://example.com'));
+        $this->assertEquals('simple', $method->invoke($agent, 'pour debutants https://example.com'));
+    }
+
+    public function test_can_handle_simplifie_with_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('simplifie https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('eli5 https://arxiv.org/abs/2301.01234')));
+        $this->assertTrue($agent->canHandle($this->makeContext('vulgarise https://example.com/article')));
+    }
+
+    public function test_simple_mode_does_not_conflict_with_short_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // 'court' keyword takes priority over 'simple'
+        $this->assertEquals('short', $method->invoke($agent, 'resume court https://example.com'));
+        // 'simplifie' alone triggers simple mode
+        $this->assertEquals('simple', $method->invoke($agent, 'simplifie https://example.com'));
+    }
+
+    public function test_keywords_include_simple_and_eli5(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('simplifie', $agent->keywords());
+        $this->assertContains('eli5', $agent->keywords());
+        $this->assertContains('vulgarise', $agent->keywords());
+        $this->assertContains('en termes simples', $agent->keywords());
+    }
+
+    public function test_help_message_shows_simple_option(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('simplifie', $result->reply);
+        $this->assertStringContainsString('eli5', $result->reply);
+        $this->assertStringContainsString('accessible pour debutants', $result->reply);
+    }
+
+    // ── Actions / Recommandations mode ────────────────────────────────────────
+
+    public function test_detect_actions_mode(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        $this->assertEquals('actions', $method->invoke($agent, 'extraire les actions https://example.com'));
+        $this->assertEquals('actions', $method->invoke($agent, 'recommandations https://example.com'));
+        $this->assertEquals('actions', $method->invoke($agent, 'next steps https://example.com'));
+        $this->assertEquals('actions', $method->invoke($agent, 'liste les actions https://example.com'));
+        $this->assertEquals('actions', $method->invoke($agent, 'prochaines etapes https://example.com'));
+        $this->assertEquals('actions', $method->invoke($agent, 'action items https://example.com'));
+    }
+
+    public function test_can_handle_actions_with_url(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertTrue($agent->canHandle($this->makeContext('extraire les actions https://example.com')));
+        $this->assertTrue($agent->canHandle($this->makeContext('recommandations https://example.com/article')));
+        $this->assertTrue($agent->canHandle($this->makeContext('next steps https://example.com')));
+    }
+
+    public function test_keywords_include_actions_and_recommandations(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $this->assertContains('extraire actions', $agent->keywords());
+        $this->assertContains('recommandations', $agent->keywords());
+        $this->assertContains('next steps', $agent->keywords());
+        $this->assertContains('prochaines etapes', $agent->keywords());
+    }
+
+    public function test_help_message_shows_actions_option(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $result = $agent->handle($this->makeContext(''));
+
+        $this->assertStringContainsString('extraire les actions', $result->reply);
+        $this->assertStringContainsString("d'actions et recommandations", $result->reply);
+    }
+
+    public function test_simple_and_actions_modes_do_not_conflict(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        $reflection = new \ReflectionClass($agent);
+        $method = $reflection->getMethod('detectSummaryMode');
+        $method->setAccessible(true);
+
+        // 'simplifie' should not trigger 'actions' mode
+        $this->assertEquals('simple', $method->invoke($agent, 'simplifie https://example.com'));
+        // 'recommandations' should not trigger 'simple' mode
+        $this->assertEquals('actions', $method->invoke($agent, 'recommandations https://example.com'));
+    }
+
+    public function test_text_paste_with_simplifie_keyword_returns_reply(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // Long body with 'simplifie' keyword and no URL → text paste mode
+        $longText = 'simplifie ce texte : ' . str_repeat('Ce contenu technique est tres complexe et utilise beaucoup de jargon scientifique. ', 10);
+        $result = $agent->handle($this->makeContext($longText));
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringNotContainsString('Comment utiliser', $result->reply);
+    }
+
+    public function test_text_paste_with_actions_keyword_returns_reply(): void
+    {
+        $agent = new ContentSummarizerAgent();
+        // Long body with 'recommandations' keyword and no URL → text paste mode
+        $longText = 'extraire les actions de ce document : ' . str_repeat('Nous devons implementer une nouvelle politique de securite et former toutes les equipes. ', 8);
+        $result = $agent->handle($this->makeContext($longText));
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringNotContainsString('Comment utiliser', $result->reply);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

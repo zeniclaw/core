@@ -25,7 +25,7 @@ class FlashcardAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de flashcards avec repetition espacee (SRS/SM-2). Permet de creer des cartes question/reponse, organiser en decks thematiques, generer des cartes en batch depuis un sujet (nombre configurable), reviser avec notation 0-5, noter les cartes (Oubli/Mauvais/Difficile/Correct/Bien/Parfait), modifier ou supprimer des cartes (avec confirmation), deplacer une carte vers un autre deck, rechercher dans les cartes, afficher les details SRS d\'une carte, lister les cartes d\'un deck, reinitialiser la progression SRS d\'un deck, et suivre sa progression d\'apprentissage avec streak de revision.';
+        return 'Agent de flashcards avec repetition espacee (SRS/SM-2). Permet de creer des cartes question/reponse, organiser en decks thematiques, generer des cartes en batch depuis un sujet (nombre configurable), reviser avec notation 0-5, noter les cartes (Oubli/Mauvais/Difficile/Correct/Bien/Parfait), modifier ou supprimer des cartes (avec confirmation), deplacer une carte vers un autre deck, rechercher dans les cartes, afficher les details SRS d\'une carte, lister les cartes d\'un deck, reinitialiser la progression SRS d\'un deck, suivre sa progression d\'apprentissage avec streak de revision, afficher le bilan quotidien (today), et lancer un mode quiz (pratique libre avec score final).';
     }
 
     public function keywords(): array
@@ -50,12 +50,16 @@ class FlashcardAgent extends BaseAgent
             'chercher carte', 'rechercher flashcard', 'search card',
             'deplacer carte', 'move card', 'changer deck',
             'lister cartes', 'cartes du deck',
+            'today', 'aujourd\'hui flashcard', 'bilan revision', 'objectif du jour',
+            'quiz', 'mode quiz', 'entrainement', 'pratique libre', 'test flashcard',
+            'cartes difficiles', 'weak cards', 'etudier difficile', 'cartes faibles',
+            'export deck', 'exporter deck', 'export flashcard', 'exporter flashcards',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.4.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -85,6 +89,26 @@ class FlashcardAgent extends BaseAgent
             }
         }
 
+        // Today: /flashcard today
+        if (preg_match('/\/flashcard\s+today\b/i', $lower) || preg_match('/\b(bilan|today|aujourd\'hui|objectif\s+du\s+jour)\s*(flashcard|revision|cartes?)?\b/iu', $lower)) {
+            return $this->showToday($context);
+        }
+
+        // Quiz mode: /flashcard quiz [DeckName] [count]
+        if (preg_match('/\/flashcard\s+quiz\b/i', $lower) || preg_match('/\b(quiz|mode\s+quiz|entrainement|pratique\s+libre|test\s+flashcard)\b/iu', $lower)) {
+            return $this->startQuiz($context, $body);
+        }
+
+        // Weak cards: /flashcard weak [DeckName]
+        if (preg_match('/\/flashcard\s+weak\b/i', $lower) || preg_match('/\b(cartes?\s+difficiles?|weak\s+cards?|etudier\s+difficile|cartes?\s+faibles?)\b/iu', $lower)) {
+            return $this->studyWeak($context, $body);
+        }
+
+        // Export deck: /flashcard export [DeckName]
+        if (preg_match('/\/flashcard\s+export\b/i', $lower) || preg_match('/\b(exporter?\s+(deck|flashcards?|cartes?))\b/iu', $lower)) {
+            return $this->exportDeck($context, $body);
+        }
+
         // Edit card: /flashcard edit ID question | answer
         if (preg_match('/\/flashcard\s+edit\s+(\d+)/i', $lower, $m)) {
             return $this->editCard($context, (int) $m[1], $body);
@@ -111,7 +135,7 @@ class FlashcardAgent extends BaseAgent
         }
 
         // Move card: /flashcard move ID NomDuDeck
-        if (preg_match('/\/flashcard\s+move\s+(\d+)\s+(.+)/i', $lower, $m)) {
+        if (preg_match('/\/flashcard\s+move\s+(\d+)\s+(.+)/i', $body, $m)) {
             return $this->moveCard($context, (int) $m[1], trim($m[2]));
         }
 
@@ -151,7 +175,7 @@ class FlashcardAgent extends BaseAgent
         }
 
         // List cards in deck: /flashcard list DeckName (more specific, before list decks)
-        if (preg_match('/\/flashcard\s+list\s+(\S.+)/i', $lower, $m)) {
+        if (preg_match('/\/flashcard\s+list\s+(\S.+)/i', $body, $m)) {
             return $this->listCards($context, trim($m[1]));
         }
 
@@ -197,6 +221,18 @@ class FlashcardAgent extends BaseAgent
                 return $this->executeCardDeletion($context, $data['card_id'], $data['question'], $data['deck_name']);
             }
             return AgentResult::reply("Suppression annulee. La carte *#{$data['card_id']}* est conservee.");
+        }
+
+        if ($type === 'quiz_session') {
+            // Accept /flashcard review ID quality or just a bare digit
+            if (preg_match('/\/flashcard\s+review\s+\d+\s+(\d)/i', $body, $m)) {
+                return $this->handleQuizReview($context, (int) $m[1], $data);
+            }
+            if (preg_match('/^([0-5])$/', trim($body), $m)) {
+                return $this->handleQuizReview($context, (int) $m[1], $data);
+            }
+            // Any unrelated message — redisplay current card
+            return $this->showQuizCard($context, $data);
         }
 
         return null;
@@ -542,9 +578,11 @@ class FlashcardAgent extends BaseAgent
         $subject = trim($m[2]);
 
         // Extract optional count at end of subject (3-10 cards)
+        // Only match an explicit standalone number preceded by whitespace (e.g., "Python basics 5")
+        // but NOT version-like numbers (e.g., "PHP 8.4", "ES2023") — require it's the whole last token
         $count = 5;
-        if (preg_match('/\s+(\d+)$/', $subject, $cm)) {
-            $count = max(3, min(10, (int) $cm[1]));
+        if (preg_match('/\s+([1-9]|1\d|20)$/', $subject, $cm)) {
+            $count = max(1, min(20, (int) $cm[1]));
             $subject = trim(substr($subject, 0, -strlen($cm[0])));
         }
 
@@ -877,12 +915,30 @@ class FlashcardAgent extends BaseAgent
         $streak = $this->computeStudyStreak($context->from, $context->agent->id);
         $streakLabel = $streak > 0 ? "*{$streak}* jour(s) consecutifs" : 'Aucune serie en cours';
 
+        $reviewedToday = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereDate('last_reviewed_at', now()->toDateString())
+            ->count();
+
+        $reviewedThisWeek = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('last_reviewed_at', '>=', now()->startOfWeek(\Carbon\Carbon::MONDAY))
+            ->count();
+
+        $weakCount = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('ease_factor', '<', 2.0)
+            ->count();
+
         $response = "*Tes stats Flashcards :*\n\n"
             . "Total cartes : *{$stats['total']}*\n"
             . "A reviser maintenant : *{$stats['due']}*\n"
+            . "Revisees aujourd'hui : *{$reviewedToday}*\n"
+            . "Revisees cette semaine : *{$reviewedThisWeek}*\n"
             . "En apprentissage : *{$stats['learning']}*\n"
             . "Maitrisees : *{$stats['mastered']}* ({$masteredPct}%) {$masteredBar}\n"
             . "Nouvelles : *{$stats['new']}*\n"
+            . ($weakCount > 0 ? "Cartes difficiles : *{$weakCount}* — /flashcard weak\n" : '')
             . "Serie de revision : {$streakLabel}\n";
 
         if (!empty($stats['decks'])) {
@@ -1107,7 +1163,8 @@ class FlashcardAgent extends BaseAgent
             ->where('agent_id', $context->agent->id)
             ->where(function ($q) use ($term) {
                 $q->where('question', 'like', "%{$term}%")
-                  ->orWhere('answer', 'like', "%{$term}%");
+                  ->orWhere('answer', 'like', "%{$term}%")
+                  ->orWhere('deck_name', 'like', "%{$term}%");
             })
             ->orderBy('deck_name')
             ->orderBy('id')
@@ -1156,15 +1213,19 @@ class FlashcardAgent extends BaseAgent
             "Tu es l'agent Flashcard (SRS/SuperMemo) de ZeniClaw. Analyse l'intention de l'utilisateur.\n\n"
             . "Actions disponibles:\n"
             . "- create: creer une carte (besoin: deck, question, answer)\n"
-            . "- study: lancer une session de revision (optionnel: deck)\n"
-            . "- stats: voir statistiques\n"
+            . "- study: lancer une session de revision SRS (optionnel: deck)\n"
+            . "- quiz: mode pratique libre avec score (optionnel: deck, count)\n"
+            . "- today: bilan quotidien et objectif du jour\n"
+            . "- stats: voir statistiques completes\n"
             . "- list: lister les decks\n"
-            . "- batch: generer plusieurs cartes (besoin: deck, subject)\n"
+            . "- batch: generer plusieurs cartes depuis un sujet (besoin: deck, subject)\n"
             . "- search: rechercher des cartes (besoin: term)\n"
             . "- show: voir les details d'une carte (besoin: card_id)\n"
+            . "- weak: etudier les cartes difficiles (optionnel: deck)\n"
+            . "- export: exporter un deck en texte (optionnel: deck)\n"
             . "- help: aide generale\n\n"
             . "Reponds UNIQUEMENT en JSON valide (sans markdown):\n"
-            . "{\"action\": \"create|study|stats|list|batch|search|show|help\", \"deck\": \"NomDuDeck\", \"question\": \"...\", \"answer\": \"...\", \"subject\": \"...\", \"term\": \"...\", \"card_id\": 123}"
+            . "{\"action\": \"create|study|quiz|today|stats|list|batch|search|show|weak|export|help\", \"deck\": \"NomDuDeck\", \"question\": \"...\", \"answer\": \"...\", \"subject\": \"...\", \"term\": \"...\", \"card_id\": 123, \"count\": 5}"
         );
 
         $parsed = $this->parseJson($response);
@@ -1178,6 +1239,8 @@ class FlashcardAgent extends BaseAgent
                 ? $this->saveCard($context, $parsed['deck'] ?? 'General', $parsed['question'], $parsed['answer'])
                 : AgentResult::reply("Precise la question et la reponse.\nFormat : /flashcard create [Deck] Question | Reponse"),
             'study'  => $this->study($context, '/flashcard study ' . ($parsed['deck'] ?? '')),
+            'quiz'   => $this->startQuiz($context, '/flashcard quiz ' . ($parsed['deck'] ?? '') . (isset($parsed['count']) ? ' ' . $parsed['count'] : '')),
+            'today'  => $this->showToday($context),
             'stats'  => $this->showStats($context),
             'list'   => $this->listDecks($context),
             'batch'  => isset($parsed['subject'])
@@ -1189,6 +1252,8 @@ class FlashcardAgent extends BaseAgent
             'show'   => isset($parsed['card_id'])
                 ? $this->showCard($context, (int) $parsed['card_id'])
                 : AgentResult::reply("Precise l'ID de la carte.\nFormat : /flashcard show ID"),
+            'weak'   => $this->studyWeak($context, '/flashcard weak ' . ($parsed['deck'] ?? '')),
+            'export' => $this->exportDeck($context, '/flashcard export ' . ($parsed['deck'] ?? '')),
             default  => $this->showHelp(),
         };
     }
@@ -1204,23 +1269,454 @@ class FlashcardAgent extends BaseAgent
             . "/flashcard batch [Deck] Sujet [3-10] — Genere des cartes\n"
             . "/flashcard deck create NomDuDeck\n\n"
             . "*Etudier :*\n"
-            . "/flashcard study — Toutes les cartes dues\n"
+            . "/flashcard study — Toutes les cartes dues (SRS)\n"
             . "/flashcard study NomDuDeck — Deck specifique\n"
+            . "/flashcard weak [NomDuDeck] — Cartes difficiles seulement\n"
+            . "/flashcard quiz NomDuDeck — Mode quiz libre (score final + SRS)\n"
+            . "/flashcard quiz NomDuDeck 10 — Quiz avec N cartes (1-20)\n"
             . "/flashcard review ID 0-5 — Noter une carte\n\n"
+            . "*Tableau de bord :*\n"
+            . "/flashcard today — Bilan du jour + objectif\n"
+            . "/flashcard stats — Statistiques completes + streak\n\n"
             . "*Gerer :*\n"
             . "/flashcard list — Lister les decks\n"
             . "/flashcard list NomDuDeck — Cartes d'un deck\n"
-            . "/flashcard stats — Statistiques + streak\n"
             . "/flashcard show ID — Details SRS d'une carte\n"
             . "/flashcard search terme — Rechercher des cartes\n"
             . "/flashcard edit ID Q | R — Modifier une carte\n"
             . "/flashcard move ID Deck — Deplacer une carte\n"
             . "/flashcard delete ID — Supprimer une carte\n"
             . "/flashcard deck delete Deck — Supprimer un deck\n"
-            . "/flashcard reset Deck — Reinitialiser la progression\n\n"
+            . "/flashcard reset Deck — Reinitialiser la progression\n"
+            . "/flashcard export Deck — Exporter un deck en texte\n\n"
             . "*Notation SM-2 :*\n"
             . "0 Oubli  1 Mauvais  2 Difficile  3 Correct  4 Bien  5 Parfait"
         );
+    }
+
+    // ── Today Dashboard ───────────────────────────────────────────────────────
+
+    private function showToday(AgentContext $context): AgentResult
+    {
+        $reviewedToday = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereDate('last_reviewed_at', now()->toDateString())
+            ->count();
+
+        $dueNow = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('next_review_at', '<=', now())
+            ->count();
+
+        $streak = $this->computeStudyStreak($context->from, $context->agent->id);
+        $total  = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->count();
+
+        if ($total === 0) {
+            return AgentResult::reply(
+                "*Bilan du jour*\n\n"
+                . "Aucune flashcard pour le moment.\n\n"
+                . "Commence avec :\n"
+                . "• /flashcard batch [Deck] Sujet a apprendre\n"
+                . "• /flashcard create [Deck] Question | Reponse"
+            );
+        }
+
+        $todayGoal   = $reviewedToday + $dueNow;
+        $progress    = $todayGoal > 0 ? round(($reviewedToday / $todayGoal) * 100) : 100;
+        $progressBar = $this->generateProgressBar($progress);
+
+        $streakLabel = $streak > 0
+            ? "*{$streak}* jour(s) de serie"
+            : 'Aucune serie en cours';
+
+        $motivation = match (true) {
+            $dueNow === 0 && $reviewedToday > 0 => "Objectif du jour atteint !",
+            $dueNow === 0                        => "Rien a reviser aujourd'hui, reviens demain !",
+            $reviewedToday === 0                 => "Lance ta session du jour !",
+            $reviewedToday >= $dueNow            => "Presque fini, continue !",
+            default                              => "En cours, keep going !",
+        };
+
+        $response = "*Bilan du jour*\n\n"
+            . "Revisees : *{$reviewedToday}* / {$todayGoal} {$progressBar}\n"
+            . "A faire encore : *{$dueNow}*\n"
+            . "Serie : {$streakLabel}\n"
+            . "Total cartes : *{$total}*\n\n"
+            . "_{$motivation}_";
+
+        if ($dueNow > 0) {
+            // Per-deck breakdown
+            $decksDue = Flashcard::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->where('next_review_at', '<=', now())
+                ->selectRaw('deck_name, COUNT(*) as cnt')
+                ->groupBy('deck_name')
+                ->orderByDesc('cnt')
+                ->get();
+
+            if ($decksDue->count() > 1) {
+                $response .= "\n\n*Par deck :*\n";
+                foreach ($decksDue as $row) {
+                    $response .= "• *{$row->deck_name}* : {$row->cnt} carte(s)\n";
+                }
+            }
+
+            $response .= "\n/flashcard study — Lancer la revision";
+        } else {
+            // Show next upcoming card
+            $next = Flashcard::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->where('next_review_at', '>', now())
+                ->orderBy('next_review_at')
+                ->first();
+
+            if ($next) {
+                $response .= "\n\nProchaine carte : *{$next->next_review_at->diffForHumans()}*\n"
+                    . "Deck : {$next->deck_name}";
+            }
+        }
+
+        return AgentResult::reply($response);
+    }
+
+    // ── Quiz Mode ─────────────────────────────────────────────────────────────
+
+    private function startQuiz(AgentContext $context, string $body): AgentResult
+    {
+        $deckName = null;
+        $count    = 10;
+
+        // Parse: /flashcard quiz [DeckName] [count]
+        if (preg_match('/\/flashcard\s+quiz\s+(.+)/i', $body, $m)) {
+            $parts = trim($m[1]);
+            // Extract trailing count
+            if (preg_match('/\s+(\d+)$/', $parts, $cm)) {
+                $count = max(3, min(20, (int) $cm[1]));
+                $parts = trim(substr($parts, 0, -strlen($cm[0])));
+            }
+            if ($parts !== '') {
+                $deckName = $parts;
+            }
+        }
+
+        $query = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id);
+
+        if ($deckName) {
+            $deckExists = FlashcardDeck::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->where('name', $deckName)
+                ->exists();
+
+            if (!$deckExists) {
+                return AgentResult::reply(
+                    "Deck *{$deckName}* introuvable.\n"
+                    . "_Verifie le nom avec /flashcard list._"
+                );
+            }
+            $query->where('deck_name', $deckName);
+        }
+
+        $cardIds = $query->inRandomOrder()->limit($count)->pluck('id')->toArray();
+
+        if (empty($cardIds)) {
+            return AgentResult::reply(
+                "Aucune carte trouvee pour le quiz"
+                . ($deckName ? " dans le deck *{$deckName}*" : '') . ".\n\n"
+                . "Ajoute des cartes avec /flashcard create ou /flashcard batch."
+            );
+        }
+
+        $data = [
+            'deck'    => $deckName,
+            'card_ids' => $cardIds,
+            'current' => 0,
+            'scores'  => [],
+            'total'   => count($cardIds),
+        ];
+
+        $this->setPendingContext($context, 'quiz_session', $data, 60, false);
+
+        $deckLabel = $deckName ?? 'tous les decks';
+        $response  = "*Mode Quiz* — {$deckLabel}\n"
+            . count($cardIds) . " cartes selectionnees\n\n"
+            . "_Reponds /flashcard review ID [0-5] ou juste un chiffre apres chaque carte._\n\n";
+
+        return AgentResult::reply($response . $this->buildQuizCardText($cardIds[0], $context, 1, count($cardIds)));
+    }
+
+    private function showQuizCard(AgentContext $context, array $data): AgentResult
+    {
+        $current = $data['current'];
+        $total   = $data['total'];
+        $cardIds = $data['card_ids'];
+
+        if ($current >= $total) {
+            return $this->buildQuizSummary($context, $data);
+        }
+
+        return AgentResult::reply(
+            "_Carte en cours :_\n\n"
+            . $this->buildQuizCardText($cardIds[$current], $context, $current + 1, $total)
+        );
+    }
+
+    private function handleQuizReview(AgentContext $context, int $quality, array $data): AgentResult
+    {
+        $quality = max(0, min(5, $quality));
+        $current  = $data['current'];
+        $cardIds  = $data['card_ids'];
+        $scores   = $data['scores'];
+        $total    = $data['total'];
+
+        if ($current >= $total) {
+            $this->clearPendingContext($context);
+            return $this->buildQuizSummary($context, $data);
+        }
+
+        // Apply SRS review for the current card
+        $currentCardId = $cardIds[$current];
+        $card = Flashcard::where('id', $currentCardId)
+            ->where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->first();
+        if ($card) {
+            $this->flashcardService->reviewCard($card, $quality);
+        }
+
+        $scores[] = $quality;
+        $current++;
+
+        if ($current >= $total) {
+            // Quiz finished
+            $this->clearPendingContext($context);
+            $finalData              = $data;
+            $finalData['scores']    = $scores;
+            $finalData['current']   = $current;
+            return $this->buildQuizSummary($context, $finalData);
+        }
+
+        // Update pending context with new scores + current
+        $newData              = $data;
+        $newData['scores']    = $scores;
+        $newData['current']   = $current;
+        $this->setPendingContext($context, 'quiz_session', $newData, 60, false);
+
+        $qualityLabel = match ($quality) {
+            5       => 'Parfait',
+            4       => 'Bien',
+            3       => 'Correct',
+            2       => 'Difficile',
+            1       => 'Mauvais',
+            default => 'Oubli',
+        };
+
+        return AgentResult::reply(
+            "_{$qualityLabel} ({$quality}/5)_\n\n"
+            . $this->buildQuizCardText($cardIds[$current], $context, $current + 1, $total)
+        );
+    }
+
+    private function buildQuizCardText(int $cardId, AgentContext $context, int $position, int $total): string
+    {
+        $card = Flashcard::where('id', $cardId)
+            ->where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->first();
+
+        if (!$card) {
+            return "Carte introuvable. Envoie un chiffre 0-5 pour continuer.";
+        }
+
+        return "*Carte {$position}/{$total}* — Deck : {$card->deck_name}\n\n"
+            . "Q: _{$card->question}_\n\n"
+            . "Reponse : ||{$card->answer}||\n\n"
+            . "Note ta reponse : /flashcard review {$card->id} [0-5]\n"
+            . "_(ou envoie juste le chiffre : 0 Oubli / 3 Correct / 5 Parfait)_";
+    }
+
+    private function buildQuizSummary(AgentContext $context, array $data): AgentResult
+    {
+        $scores = $data['scores'];
+        $total  = count($scores);
+
+        if ($total === 0) {
+            return AgentResult::reply("Quiz termine sans aucune reponse enregistree.");
+        }
+
+        $sum     = array_sum($scores);
+        $avg     = round($sum / $total, 1);
+        $correct = count(array_filter($scores, fn ($s) => $s >= 3));
+        $pct     = round(($correct / $total) * 100);
+        $bar     = $this->generateProgressBar($pct);
+
+        $grade = match (true) {
+            $pct >= 90 => 'Excellent !',
+            $pct >= 70 => 'Bien joue !',
+            $pct >= 50 => 'Pas mal !',
+            $pct >= 30 => 'A retravailler.',
+            default    => 'Il faut reviser !',
+        };
+
+        $distribution = [];
+        foreach ([5 => 'Parfait', 4 => 'Bien', 3 => 'Correct', 2 => 'Difficile', 1 => 'Mauvais', 0 => 'Oubli'] as $q => $label) {
+            $cnt = count(array_filter($scores, fn ($s) => $s === $q));
+            if ($cnt > 0) {
+                $distribution[] = "{$label}: {$cnt}";
+            }
+        }
+
+        $deckLabel = $data['deck'] ?? 'tous les decks';
+
+        return AgentResult::reply(
+            "*Quiz termine !* — {$deckLabel}\n\n"
+            . "Score : *{$correct}/{$total}* ({$pct}%) {$bar}\n"
+            . "Moyenne : *{$avg}/5*\n"
+            . "_{$grade}_\n\n"
+            . implode(' | ', $distribution) . "\n\n"
+            . "/flashcard study — Reviser avec SRS\n"
+            . "/flashcard quiz {$deckLabel} — Rejouer"
+        );
+    }
+
+    // ── Weak Cards Study ──────────────────────────────────────────────────────
+
+    private function studyWeak(AgentContext $context, string $body): AgentResult
+    {
+        $deckName = null;
+        if (preg_match('/(?:\/flashcard\s+weak|cartes?\s+difficiles?|etudier\s+difficile|cartes?\s+faibles?)\s+(.+)/iu', $body, $m)) {
+            $deckName = trim($m[1]);
+        }
+
+        $query = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where(function ($q) {
+                $q->where('ease_factor', '<', 2.0)
+                  ->orWhere(function ($q2) {
+                      $q2->where('repetitions', 0)
+                         ->where('next_review_at', '<=', now());
+                  });
+            });
+
+        if ($deckName) {
+            $deckExists = FlashcardDeck::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->where('name', $deckName)
+                ->exists();
+
+            if (!$deckExists) {
+                return AgentResult::reply(
+                    "Deck *{$deckName}* introuvable.\n"
+                    . "_Verifie le nom avec /flashcard list._"
+                );
+            }
+            $query->where('deck_name', $deckName);
+        }
+
+        $cards = $query->orderBy('ease_factor')->orderBy('next_review_at')->get();
+
+        if ($cards->isEmpty()) {
+            $deckLabel = $deckName ? " dans le deck *{$deckName}*" : '';
+            return AgentResult::reply(
+                "Aucune carte difficile{$deckLabel} !\n\n"
+                . "Toutes tes cartes ont un bon facteur de facilite. Continue comme ca !\n\n"
+                . "/flashcard study — Session SRS normale\n"
+                . "/flashcard stats — Voir tes statistiques"
+            );
+        }
+
+        $count = $cards->count();
+        $card = $cards->first();
+        $deckLabel = $deckName ?? 'tous les decks';
+
+        return AgentResult::reply(
+            "*Cartes difficiles* — {$deckLabel}\n"
+            . "{$count} carte(s) a renforcer (facilite < 2.0 ou nouvelles)\n\n"
+            . "Q: _{$card->question}_\n\n"
+            . "Note ta reponse (0-5) :\n"
+            . "/flashcard review {$card->id} [note]\n\n"
+            . "0 Oubli  1 Mauvais  2 Difficile\n"
+            . "3 Correct  4 Bien  5 Parfait\n\n"
+            . "Reponse : ||{$card->answer}||"
+        );
+    }
+
+    // ── Export Deck ───────────────────────────────────────────────────────────
+
+    private function exportDeck(AgentContext $context, string $body): AgentResult
+    {
+        $deckName = null;
+        if (preg_match('/(?:\/flashcard\s+export|exporter?\s+(?:deck|flashcards?|cartes?))\s+(.+)/iu', $body, $m)) {
+            $deckName = trim($m[1]);
+        }
+
+        if (!$deckName) {
+            $decks = FlashcardDeck::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->pluck('name')
+                ->toArray();
+
+            if (empty($decks)) {
+                return AgentResult::reply(
+                    "Aucun deck a exporter.\n\n"
+                    . "Cree des cartes avec /flashcard create ou /flashcard batch."
+                );
+            }
+
+            $deckList = implode(', ', array_map(fn ($d) => "*{$d}*", $decks));
+            return AgentResult::reply(
+                "Quel deck exporter ?\n\n"
+                . "Decks disponibles : {$deckList}\n\n"
+                . "*/flashcard export NomDuDeck*"
+            );
+        }
+
+        $deck = FlashcardDeck::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('name', $deckName)
+            ->first();
+
+        if (!$deck) {
+            return AgentResult::reply(
+                "Deck *{$deckName}* introuvable.\n"
+                . "_Verifie le nom avec /flashcard list._"
+            );
+        }
+
+        $cards = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('deck_name', $deckName)
+            ->orderBy('id')
+            ->limit(50)
+            ->get();
+
+        if ($cards->isEmpty()) {
+            return AgentResult::reply(
+                "Le deck *{$deckName}* est vide, rien a exporter."
+            );
+        }
+
+        $total = Flashcard::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('deck_name', $deckName)
+            ->count();
+
+        $lines = ["*Export — Deck : {$deckName}* ({$total} carte(s))\n"];
+        foreach ($cards as $i => $card) {
+            $lines[] = ($i + 1) . ". _{$card->question}_\n   → {$card->answer}";
+        }
+
+        if ($total > 50) {
+            $lines[] = "\n_... et " . ($total - 50) . " carte(s) supplementaire(s) (50 max affichees)_";
+        }
+
+        $lines[] = "\n_/flashcard list {$deckName} — Voir les IDs des cartes_";
+
+        $this->log($context, 'Deck exported', ['deck' => $deckName, 'count' => $cards->count()]);
+
+        return AgentResult::reply(implode("\n", $lines));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1290,7 +1786,7 @@ class FlashcardAgent extends BaseAgent
     private function generateProgressBar(float $percentage): string
     {
         $filled = (int) round($percentage / 10);
-        $empty = 10 - $filled;
-        return str_repeat('|', $filled) . str_repeat('.', $empty);
+        $empty  = 10 - $filled;
+        return str_repeat('▓', $filled) . str_repeat('░', $empty);
     }
 }

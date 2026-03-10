@@ -692,5 +692,72 @@
         </form>
     </div>
 
+    {{-- Public AI Chat Customization --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-1">💬 Page Chat IA Publique</h2>
+        <p class="text-sm text-gray-500 mb-2">
+            Personnalisez la page de chat IA accessible sur le port dedie
+            @if(config('services.public_chat.api_key'))
+                — <a href="{{ url('/chat') }}" target="_blank" class="text-indigo-600 underline">Ouvrir la page</a>
+            @endif
+        </p>
+
+        @if(!config('services.public_chat.api_key'))
+        <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700">
+            La variable <code class="bg-yellow-100 px-1 rounded">CHAT_API_KEY</code> n'est pas configuree dans le <code>.env</code>.
+            La page de chat ne fonctionnera pas sans cle API.
+        </div>
+        @endif
+
+        <form method="POST" action="{{ route('settings.public-chat') }}" class="space-y-4">
+            @csrf
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Titre</label>
+                    <input type="text" name="public_chat_title" value="{{ $publicChat['title'] ?? '' }}"
+                           placeholder="ZeniClaw AI"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Sous-titre</label>
+                    <input type="text" name="public_chat_subtitle" value="{{ $publicChat['subtitle'] ?? '' }}"
+                           placeholder="Assistant IA"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Message d'accueil</label>
+                <input type="text" name="public_chat_welcome" value="{{ $publicChat['welcome'] ?? '' }}"
+                       placeholder="Bonjour ! Comment puis-je vous aider ?"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Couleur principale</label>
+                    <div class="flex gap-2 items-center">
+                        <input type="color" name="public_chat_color" value="{{ $publicChat['color'] ?? '#4f46e5' }}"
+                               class="w-10 h-10 rounded border border-gray-300 cursor-pointer">
+                        <span class="text-xs text-gray-400">{{ $publicChat['color'] ?? '#4f46e5' }}</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">URL du logo (optionnel)</label>
+                    <input type="url" name="public_chat_logo" value="{{ $publicChat['logo'] ?? '' }}"
+                           placeholder="https://example.com/logo.png"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Placeholder du champ de saisie</label>
+                <input type="text" name="public_chat_placeholder" value="{{ $publicChat['placeholder'] ?? '' }}"
+                       placeholder="Tapez votre message..."
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+            <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                💾 Sauvegarder la personnalisation
+            </button>
+        </form>
+    </div>
+
 </div>
 @endsection

@@ -107,9 +107,17 @@ class SpotifyService
     {
         // Spotify "Top 50" editorial playlists by country
         $playlistIds = [
-            'FR' => '37i9dQZEVXbIPWwFssbupI',  // Top 50 France
-            'US' => '37i9dQZEVXbLRQDuF5jeBp',  // Top 50 USA
-            'GLOBAL' => '37i9dQZEVXbMDoHDwVN2tF', // Top 50 Global
+            'FR'     => '37i9dQZEVXbIPWwFssbupI',  // Top 50 France
+            'US'     => '37i9dQZEVXbLRQDuF5jeBp',  // Top 50 USA
+            'GLOBAL' => '37i9dQZEVXbMDoHDwVN2tF',  // Top 50 Global
+            'GB'     => '37i9dQZEVXbLnolsZ8PSNw',  // Top 50 UK
+            'DE'     => '37i9dQZEVXbJiZcmkrIHGU',  // Top 50 Germany
+            'ES'     => '37i9dQZEVXbNFJfN1Vw8d9',  // Top 50 Spain
+            'IT'     => '37i9dQZEVXbIQnj7RRhdSX',  // Top 50 Italy
+            'JP'     => '37i9dQZEVXbKXQ4mDTEBXq',  // Top 50 Japan
+            'BR'     => '37i9dQZEVXbMXbN3EUUhlg',  // Top 50 Brazil
+            'CA'     => '37i9dQZEVXbKj23U1GF4IR',  // Top 50 Canada
+            'AU'     => '37i9dQZEVXbJPcfkRz0wJ0',  // Top 50 Australia
         ];
 
         $playlistId = $playlistIds[strtoupper($country)] ?? $playlistIds['GLOBAL'];
@@ -120,6 +128,27 @@ class SpotifyService
         ]);
 
         return $data;
+    }
+
+    /**
+     * Search for albums specifically.
+     */
+    public function searchAlbum(string $query, int $limit = 5): ?array
+    {
+        return $this->apiGet('/search', [
+            'q' => $query,
+            'type' => 'album',
+            'limit' => $limit,
+            'market' => 'FR',
+        ]);
+    }
+
+    /**
+     * Get related artists for a given artist ID.
+     */
+    public function getRelatedArtists(string $artistId): ?array
+    {
+        return $this->apiGet("/artists/{$artistId}/related-artists");
     }
 
     /**

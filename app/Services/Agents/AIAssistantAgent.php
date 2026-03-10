@@ -37,6 +37,17 @@ class AIAssistantAgent extends BaseAgent
         return '1.0.0';
     }
 
+    public function canHandle(AgentContext $context): bool
+    {
+        $body = mb_strtolower(trim($context->body ?? ''));
+        foreach ($this->keywords() as $keyword) {
+            if (str_contains($body, mb_strtolower($keyword))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function handle(AgentContext $context): AgentResult
     {
         $body = trim($context->body ?? '');

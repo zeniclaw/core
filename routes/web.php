@@ -16,6 +16,7 @@ use App\Http\Controllers\LogController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\OllamaController;
+use App\Http\Controllers\PublicChatController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SelfImprovementController;
 use App\Http\Controllers\SubAgentController;
@@ -40,6 +41,10 @@ Route::get('/robots.txt', function () {
     return response($content, 200, ['Content-Type' => 'text/plain']);
 });
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
+
+// Public AI Chat (served on dedicated port, no auth for page, API key for messages)
+Route::get('/chat', [PublicChatController::class, 'index'])->name('public-chat');
+Route::post('/api/public-chat', [PublicChatController::class, 'send'])->name('api.public-chat');
 
 // ── Authenticated ─────────────────────────────────────────────────────────────
 Route::middleware(['auth'])->group(function () {
@@ -143,6 +148,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/settings/gitlab', [SettingsController::class, 'saveGitlabSettings'])->name('settings.gitlab');
     Route::post('/settings/auto-update', [SettingsController::class, 'toggleAutoUpdate'])->name('settings.auto-update');
     Route::post('/settings/timezone', [SettingsController::class, 'saveTimezone'])->name('settings.timezone');
+    Route::post('/settings/public-chat', [SettingsController::class, 'savePublicChat'])->name('settings.public-chat');
 
     // Ollama model management
     Route::get('/api/ollama/models', [OllamaController::class, 'models'])->name('api.ollama.models');

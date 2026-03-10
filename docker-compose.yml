@@ -6,10 +6,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db,redis,waha,ollama,app}
     container_name: zeniclaw_app
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:80"
+      - "${CHAT_PORT:-8888}:8888"
     environment:
       APP_ENV: production
       APP_KEY: ${APP_KEY}
@@ -25,6 +30,10 @@ services:
       CACHE_DRIVER: redis
       SESSION_DRIVER: redis
       QUEUE_CONNECTION: redis
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db,redis,waha,ollama,app}
     volumes:
       - app_storage:/var/www/html/storage
       - /var/run/docker.sock:/var/run/docker.sock

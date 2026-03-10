@@ -111,7 +111,7 @@ class DevAgent extends BaseAgent
         }
 
         // Check for smart commands before treating as dev request
-        $command = $this->detectSmartCommand($context->body);
+        $command = $this->detectSmartCommand($context->body, $context);
         if ($command) {
             return $this->handleSmartCommand($command, $context);
         }
@@ -549,10 +549,19 @@ PROMPT;
 
     // ── Smart Commands Detection (LLM-based) ─────────────────────────
 
-    private function detectSmartCommand(string $body): ?array
+    private function detectSmartCommand(string $body, AgentContext $context): ?array
     {
+        // Inject active project context so Claude defaults to the right project
+        $activeProjectHint = '';
+        if ($context->session->active_project_id) {
+            $ap = Project::find($context->session->active_project_id);
+            if ($ap) {
+                $activeProjectHint = "\nPROJET ACTIF: {$ap->name}";
+            }
+        }
+
         $response = $this->claude->chat(
-            "Message: \"{$body}\"",
+            "Message: \"{$body}\"{$activeProjectHint}",
             'claude-haiku-4-5-20251001',
             <<<'PROMPT'
 Tu analyses un message envoye a un agent de developpement. Determine si c'est une SMART COMMAND (consultation/info GitLab) ou une DEV TASK (tache de code a executer).
@@ -1112,17 +1121,23 @@ PROMPT
 
         $name = trim($name);
 
+        // Helper: persist active project on session so next request defaults to it
+        $persistActive = function (Project $p) use ($context): Project {
+            $context->session->update(['active_project_id' => $p->id]);
+            return $p;
+        };
+
         // 1. Exact match in local DB
         $exact = Project::whereIn('status', ['approved', 'in_progress', 'completed'])
             ->where('name', 'ilike', $name)
             ->first();
-        if ($exact) return $exact;
+        if ($exact) return $persistActive($exact);
 
         // 2. Partial match in local DB
         $partial = Project::whereIn('status', ['approved', 'in_progress', 'completed'])
             ->where('name', 'ilike', "%{$name}%")
             ->first();
-        if ($partial) return $partial;
+        if ($partial) return $persistActive($partial);
 
         // 3. Fuzzy match in local DB (Levenshtein)
         $allProjects = Project::whereIn('status', ['approved', 'in_progress', 'completed'])->get();
@@ -1137,7 +1152,7 @@ PROMPT
             }
         }
 
-        if ($bestMatch) return $bestMatch;
+        if ($bestMatch) return $persistActive($bestMatch);
 
         // 4. Search in GitLab API
         $gitlab = $this->getGitlab();
@@ -1150,13 +1165,13 @@ PROMPT
             foreach ($gitlabResults as $gp) {
                 if (mb_strtolower($gp['name']) === mb_strtolower($name) ||
                     mb_strtolower($gp['path']) === mb_strtolower($name)) {
-                    return $this->createProjectFromGitlab($gp, $context);
+                    return $persistActive($this->createProjectFromGitlab($gp, $context));
                 }
             }
 
             // Single result → use it
             if (count($gitlabResults) === 1) {
-                return $this->createProjectFromGitlab($gitlabResults[0], $context);
+                return $persistActive($this->createProjectFromGitlab($gitlabResults[0], $context));
             }
 
             // Multiple results → ask user to clarify (context stored by caller if needed)
@@ -1490,6 +1505,20 @@ PROMPT
 
         if ($projects->isEmpty()) return null;
 
+        // Highest priority: explicit "projet X" / "le projet X" / "ds le projet X" mentions
+        // Catches corrections like "c'est ds le projet prospections" or "sur le projet X"
+        if (preg_match('/(?:le\s+projet|ds\s+le\s+projet|dans\s+le\s+projet|sur\s+le\s+projet|bosser\s+sur|passe\s+sur|projet\s+)(["\']?)(\S+)\1/iu', $body, $m)) {
+            $explicit = rtrim($m[2], '.,;:!?)');
+            foreach ($projects as $project) {
+                if (mb_stripos($project->name, $explicit) !== false || mb_stripos($explicit, $project->name) !== false) {
+                    return $project;
+                }
+                if (strlen($explicit) >= 4 && levenshtein(mb_strtolower($explicit), mb_strtolower($project->name)) <= 2) {
+                    return $project;
+                }
+            }
+        }
+
         // Exact name match
         foreach ($projects as $project) {
             if (mb_stripos($body, $project->name) !== false) {
@@ -1506,12 +1535,13 @@ PROMPT
             }
         }
 
-        // Fuzzy match (Levenshtein) on words in the message
+        // Fuzzy match (Levenshtein) — only for long enough words/names to avoid false positives
         $words = preg_split('/\s+/', mb_strtolower($body));
         foreach ($projects as $project) {
             $projectNameLower = mb_strtolower($project->name);
+            if (strlen($projectNameLower) < 5) continue; // skip short project names
             foreach ($words as $word) {
-                if (strlen($word) >= 3 && levenshtein($word, $projectNameLower) <= 2) {
+                if (strlen($word) >= 5 && levenshtein($word, $projectNameLower) <= 2) {
                     return $project;
                 }
             }

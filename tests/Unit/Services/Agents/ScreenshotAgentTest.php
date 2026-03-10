@@ -25,10 +25,10 @@ class ScreenshotAgentTest extends TestCase
         $this->assertEquals('screenshot', $agent->name());
     }
 
-    public function test_screenshot_agent_version_is_1_2_0(): void
+    public function test_screenshot_agent_version_is_1_4_0(): void
     {
         $agent = new ScreenshotAgent();
-        $this->assertEquals('1.2.0', $agent->version());
+        $this->assertEquals('1.4.0', $agent->version());
     }
 
     public function test_can_handle_screenshot_keywords(): void
@@ -73,7 +73,7 @@ class ScreenshotAgentTest extends TestCase
         $result = $agent->handle($context);
 
         $this->assertEquals('reply', $result->action);
-        $this->assertStringContainsString('Screenshot & Annotate', $result->reply);
+        $this->assertStringContainsString('Screenshot', $result->reply);
         $this->assertStringContainsString('extract-text', $result->reply);
         $this->assertStringContainsString('annotate', $result->reply);
     }
@@ -514,6 +514,385 @@ class ScreenshotAgentTest extends TestCase
         $this->assertTrue($agent->canHandle($this->makeContext('rotate 180')));
         $this->assertTrue($agent->canHandle($this->makeContext('rotation image')));
         $this->assertTrue($agent->canHandle($this->makeContext('pivoter')));
+    }
+
+    // ── Flip ─────────────────────────────────────────────────────────────────
+
+    public function test_flip_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('flip horizontal');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_flip_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('flip', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_flip_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('flip')));
+        $this->assertTrue($agent->canHandle($this->makeContext('miroir')));
+        $this->assertTrue($agent->canHandle($this->makeContext('flip vertical')));
+    }
+
+    // ── Grayscale ─────────────────────────────────────────────────────────────
+
+    public function test_grayscale_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('grayscale');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_grayscale_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('grayscale', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_grayscale_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('grayscale')));
+        $this->assertTrue($agent->canHandle($this->makeContext('monochrome')));
+        $this->assertTrue($agent->canHandle($this->makeContext('noir et blanc')));
+    }
+
+    // ── QR Code ───────────────────────────────────────────────────────────────
+
+    public function test_qr_code_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('qr code');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_qr_code_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('qr code', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_qr_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('qr code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('lire qr')));
+        $this->assertTrue($agent->canHandle($this->makeContext('decoder qr')));
+        $this->assertTrue($agent->canHandle($this->makeContext('qrcode')));
+    }
+
+    // ── ImageProcessor new methods ────────────────────────────────────────────
+
+    public function test_image_processor_flip_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->flipImage('/nonexistent/file.png');
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_grayscale_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->grayscaleImage('/nonexistent/file.png');
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_flip_horizontal_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(100, 60);
+        $red = imagecolorallocate($img, 255, 0, 0);
+        imagefilledrectangle($img, 0, 0, 49, 59, $red); // left half red
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->flipImage($tmpFile, 'horizontal');
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        // Dimensions stay the same after flip
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]);
+        $this->assertEquals(60, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_flip_vertical_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(80, 80);
+        $blue = imagecolorallocate($img, 0, 0, 255);
+        imagefill($img, 0, 0, $blue);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->flipImage($tmpFile, 'vertical');
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        $info = getimagesize($outputPath);
+        $this->assertEquals(80, $info[0]);
+        $this->assertEquals(80, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_grayscale_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(50, 50);
+        $red = imagecolorallocate($img, 255, 0, 0);
+        imagefill($img, 0, 0, $red);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->grayscaleImage($tmpFile);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        // Dimensions stay the same
+        $info = getimagesize($outputPath);
+        $this->assertEquals(50, $info[0]);
+        $this->assertEquals(50, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    // ── Crop ──────────────────────────────────────────────────────────────────
+
+    public function test_crop_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('crop [10,10,200,200]');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_crop_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('crop [10,10,200,200]', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_can_handle_crop_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('crop [0,0,400,300]')));
+        $this->assertTrue($agent->canHandle($this->makeContext('rogner')));
+        $this->assertTrue($agent->canHandle($this->makeContext('recadrer image')));
+    }
+
+    // ── Brightness ────────────────────────────────────────────────────────────
+
+    public function test_brightness_requires_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('luminosite +80');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('image', mb_strtolower($result->reply));
+    }
+
+    public function test_brightness_rejects_non_image_media(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('eclaircir', true, 'audio/ogg');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('pas une image', $result->reply);
+    }
+
+    public function test_brightness_no_value_shows_help(): void
+    {
+        $agent = new ScreenshotAgent();
+        $context = $this->makeContext('luminosite', true, 'image/png');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        // Should ask for a value since brightness=0 and contrast=0
+        $this->assertStringContainsString('luminosite', mb_strtolower($result->reply));
+    }
+
+    public function test_can_handle_brightness_keywords(): void
+    {
+        $agent = new ScreenshotAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('luminosite +80')));
+        $this->assertTrue($agent->canHandle($this->makeContext('eclaircir')));
+        $this->assertTrue($agent->canHandle($this->makeContext('assombrir')));
+        $this->assertTrue($agent->canHandle($this->makeContext('contraste -30')));
+        $this->assertTrue($agent->canHandle($this->makeContext('brightness 100')));
+    }
+
+    // ── ImageProcessor new methods (crop & brightness) ────────────────────────
+
+    public function test_image_processor_crop_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->cropImage('/nonexistent/file.png', 0, 0, 100, 100);
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_crop_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(200, 200);
+        $white = imagecolorallocate($img, 255, 255, 255);
+        imagefill($img, 0, 0, $white);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->cropImage($tmpFile, 10, 10, 100, 80);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]);
+        $this->assertEquals(80, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_crop_clamps_to_bounds(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(100, 100);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        // Request crop outside image bounds — should clamp
+        $outputPath = $processor->cropImage($tmpFile, 0, 0, 9999, 9999);
+
+        $this->assertNotNull($outputPath);
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]);
+        $this->assertEquals(100, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_adjust_brightness_missing_file(): void
+    {
+        $processor = new ImageProcessor();
+        $result = $processor->adjustBrightness('/nonexistent/file.png', 50, 0);
+
+        $this->assertNull($result);
+    }
+
+    public function test_image_processor_adjust_brightness_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(100, 100);
+        $gray = imagecolorallocate($img, 100, 100, 100);
+        imagefill($img, 0, 0, $gray);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->adjustBrightness($tmpFile, 80, 0);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        $info = getimagesize($outputPath);
+        $this->assertEquals(100, $info[0]);
+        $this->assertEquals(100, $info[1]);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
+    }
+
+    public function test_image_processor_adjust_contrast_real_image(): void
+    {
+        $processor = new ImageProcessor();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_img_') . '.png';
+        $img = imagecreatetruecolor(100, 100);
+        $color = imagecolorallocate($img, 150, 100, 50);
+        imagefill($img, 0, 0, $color);
+        imagepng($img, $tmpFile);
+        imagedestroy($img);
+
+        $outputPath = $processor->adjustBrightness($tmpFile, 0, -30);
+
+        $this->assertNotNull($outputPath);
+        $this->assertFileExists($outputPath);
+
+        @unlink($tmpFile);
+        @unlink($outputPath);
     }
 
     // ── Controller & Router integration ──────────────────────────────────────

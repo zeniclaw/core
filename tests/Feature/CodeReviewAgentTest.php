@@ -425,10 +425,10 @@ ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
         $this->assertStringContainsString('quick review', $result->reply);
     }
 
-    public function test_agent_version_is_1_3_0(): void
+    public function test_agent_version_is_1_6_0(): void
     {
         $agent = new CodeReviewAgent();
-        $this->assertEquals('1.3.0', $agent->version());
+        $this->assertEquals('1.6.0', $agent->version());
     }
 
     // ── New modes v1.2.0 ──────────────────────────────────────────────────────
@@ -660,6 +660,344 @@ ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);';
         $result  = $agent->handlePendingContext($context, $pendingContext);
 
         $this->assertNull($result);
+    }
+
+    // ── New modes v1.4.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_test_generation_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('generer tests')));
+        $this->assertTrue($agent->canHandle($this->makeContext('generate tests')));
+        $this->assertTrue($agent->canHandle($this->makeContext('write tests')));
+        $this->assertTrue($agent->canHandle($this->makeContext('tests unitaires')));
+        $this->assertTrue($agent->canHandle($this->makeContext('tester ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('test this code')));
+    }
+
+    public function test_can_handle_doc_generation_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('doc code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('documenter ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('generate docs')));
+        $this->assertTrue($agent->canHandle($this->makeContext('docblock')));
+        $this->assertTrue($agent->canHandle($this->makeContext('phpdoc')));
+        $this->assertTrue($agent->canHandle($this->makeContext('jsdoc')));
+    }
+
+    public function test_can_handle_help_trigger(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('aide code review')));
+        $this->assertTrue($agent->canHandle($this->makeContext('help code review')));
+        $this->assertTrue($agent->canHandle($this->makeContext('code review help')));
+    }
+
+    public function test_help_trigger_returns_help_message(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('aide code review');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('Code Review', $result->reply);
+        $this->assertStringContainsString('generer tests', $result->reply);
+        $this->assertStringContainsString('doc code', $result->reply);
+    }
+
+    public function test_test_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nfunction add(\$a, \$b) { return \$a + \$b; }\n```\ngenerer tests");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('TESTS', $result->reply);
+    }
+
+    public function test_doc_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nfunction add(\$a, \$b) { return \$a + \$b; }\n```\ndoc code");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('DOCUMENTATION', $result->reply);
+    }
+
+    public function test_help_message_includes_test_and_doc_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('generer tests', $result->reply);
+        $this->assertStringContainsString('doc code', $result->reply);
+    }
+
+    public function test_no_code_hint_mentions_new_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('generer tests', $result->reply);
+        $this->assertStringContainsString('doc code', $result->reply);
+    }
+
+    public function test_handle_pending_context_test_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\nfunction add(\$a, \$b) { return \$a + \$b; }\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        $context = $this->makeContext('generer tests');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('TESTS', $result->reply);
+    }
+
+    // ── New modes v1.5.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_migrate_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('migrate code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('migrer ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('upgrade code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('moderniser ce code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('migrer vers php 8')));
+        $this->assertTrue($agent->canHandle($this->makeContext('migrate to php 8')));
+    }
+
+    public function test_can_handle_standards_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('psr-12')));
+        $this->assertTrue($agent->canHandle($this->makeContext('pep 8')));
+        $this->assertTrue($agent->canHandle($this->makeContext('code standards')));
+        $this->assertTrue($agent->canHandle($this->makeContext('coding standards')));
+        $this->assertTrue($agent->canHandle($this->makeContext('code style')));
+        $this->assertTrue($agent->canHandle($this->makeContext('eslint')));
+    }
+
+    public function test_migrate_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nfunction hello() { echo 'hello'; }\n```\nmigrate code");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('MIGRATION', $result->reply);
+    }
+
+    public function test_standards_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nfunction hello() { echo 'hello'; }\n```\ncode standards");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('NORMES', $result->reply);
+    }
+
+    public function test_help_message_includes_migrate_and_standards_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('migrate code', $result->reply);
+        $this->assertStringContainsString('code standards', $result->reply);
+    }
+
+    public function test_no_code_hint_mentions_migrate_and_standards_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('migrate code', $result->reply);
+        $this->assertStringContainsString('code standards', $result->reply);
+    }
+
+    public function test_handle_pending_context_migrate_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\nfunction get_user(\$id) { return User::find(\$id); }\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        $context = $this->makeContext('migrate code');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('MIGRATION', $result->reply);
+    }
+
+    public function test_handle_pending_context_standards_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```python\ndef add(a, b):\n    return a + b\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        $context = $this->makeContext('pep 8');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('NORMES', $result->reply);
+    }
+
+    // ── New modes v1.6.0 ──────────────────────────────────────────────────────
+
+    public function test_can_handle_translate_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('traduire en python')));
+        $this->assertTrue($agent->canHandle($this->makeContext('translate to javascript')));
+        $this->assertTrue($agent->canHandle($this->makeContext('convert to typescript')));
+        $this->assertTrue($agent->canHandle($this->makeContext('convertir en go')));
+        $this->assertTrue($agent->canHandle($this->makeContext('rewrite in rust')));
+        $this->assertTrue($agent->canHandle($this->makeContext('code en python')));
+    }
+
+    public function test_can_handle_optimize_keywords(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $this->assertTrue($agent->canHandle($this->makeContext('optimiser performance')));
+        $this->assertTrue($agent->canHandle($this->makeContext('optimize performance')));
+        $this->assertTrue($agent->canHandle($this->makeContext('bottleneck')));
+        $this->assertTrue($agent->canHandle($this->makeContext('slow code')));
+        $this->assertTrue($agent->canHandle($this->makeContext('profiling')));
+        $this->assertTrue($agent->canHandle($this->makeContext('speed up')));
+    }
+
+    public function test_translate_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nfunction add(\$a, \$b) { return \$a + \$b; }\n```\ntraduire en python");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('TRADUCTION', $result->reply);
+    }
+
+    public function test_optimize_mode_detected_in_report(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext("```php\nforeach (\$ids as \$id) { \$user = User::find(\$id); }\n```\noptimiser performance");
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('OPTIMISATION', $result->reply);
+    }
+
+    public function test_help_message_includes_translate_and_optimize_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('traduire en', $result->reply);
+        $this->assertStringContainsString('optimiser performance', $result->reply);
+    }
+
+    public function test_no_code_hint_mentions_translate_and_optimize_modes(): void
+    {
+        $agent   = new CodeReviewAgent();
+        $context = $this->makeContext('code review please');
+
+        $result = $agent->handle($context);
+
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('traduire en', $result->reply);
+        $this->assertStringContainsString('optimiser performance', $result->reply);
+    }
+
+    public function test_handle_pending_context_translate_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\nfunction add(\$a, \$b) { return \$a + \$b; }\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        $context = $this->makeContext('traduire en python');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('TRADUCTION', $result->reply);
+    }
+
+    public function test_handle_pending_context_optimize_mode(): void
+    {
+        $agent = new CodeReviewAgent();
+
+        $pendingContext = [
+            'type' => 'code_reviewed',
+            'data' => [
+                'raw_code' => "```php\nforeach (\$ids as \$id) { \$user = User::find(\$id); }\n```\ncode review",
+                'mode'     => 'full',
+            ],
+        ];
+
+        $context = $this->makeContext('optimiser performance');
+        $result  = $agent->handlePendingContext($context, $pendingContext);
+
+        $this->assertNotNull($result);
+        $this->assertEquals('reply', $result->action);
+        $this->assertStringContainsString('OPTIMISATION', $result->reply);
     }
 
     // ── Controller & Router integration ──────────────────────────────────────

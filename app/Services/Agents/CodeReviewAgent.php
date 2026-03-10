@@ -28,7 +28,7 @@ class CodeReviewAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de revue de code automatique. Analyse du code source (PHP, JS, Python, SQL, TypeScript, Go, Java, Rust) pour detecter bugs, failles de securite, problemes de performance, violations des bonnes pratiques, et proposer des refactorings. Modes: quick (scan rapide), diff (comparaison), explain (explication), security (audit securite), refactor (refactoring), complexity (complexite cyclomatique), full (analyse complete).';
+        return 'Agent de revue de code automatique. Analyse du code source (PHP, JS, Python, SQL, TypeScript, Go, Java, Rust) pour detecter bugs, failles de securite, problemes de performance, violations des bonnes pratiques, et proposer des refactorings. Modes: quick (scan rapide), diff (comparaison), explain (explication), security (audit securite), refactor (refactoring), complexity (complexite cyclomatique), test (generation tests), doc (documentation), migrate (migration version), standards (normes/lint), translate (conversion langage), optimize (optimisation performance), full (analyse complete).';
     }
 
     public function keywords(): array
@@ -60,20 +60,60 @@ class CodeReviewAgent extends BaseAgent
             'restructurer', 'reorganiser le code', 'propose refactoring',
             'complexite cyclomatique', 'cyclomatic complexity', 'simplifier', 'simplify code',
             'trop complexe', 'code complexe', 'analyse complexite',
+            // v1.4.0
+            'generer tests', 'generate tests', 'write tests', 'ecrire tests', 'test unitaire',
+            'unit test', 'unit tests', 'tests unitaires', 'tester ce code', 'test this code',
+            'documenter code', 'doc code', 'generate docs', 'docblock', 'jsdoc', 'phpdoc',
+            'commenter code', 'comment code', 'documenter ce code', 'ajouter documentation',
+            'aide code review', 'help code review', 'code review help',
+            // v1.5.0
+            'migrer code', 'migrate code', 'migration code', 'upgrade code', 'moderniser code',
+            'modernize code', 'migrer vers php 8', 'migrate to php 8', 'migrer php',
+            'python 2 vers 3', 'python 2 to 3', 'upgrade javascript', 'upgrade python',
+            'migration php', 'migrer vers', 'migrate to', 'modernisation code',
+            'normes code', 'code standards', 'coding standards', 'psr-12', 'psr 12',
+            'pep 8', 'pep8', 'eslint rules', 'code style', 'style de code',
+            'conventions code', 'naming conventions', 'lint code', 'linter code',
+            'conformite code', 'code conformite', 'bonnes pratiques langage',
+            // v1.6.0 - translate
+            'traduire en', 'traduire vers', 'translate to', 'translate into', 'convert to',
+            'convert this code to', 'convertir en', 'convertir vers', 'transposer en',
+            'transposer vers', 'reedire en', 'reecrire en', 'rewrite in', 'rewrite as',
+            'code en python', 'code en javascript', 'code en typescript', 'code en php',
+            'code en java', 'code en go', 'code en rust',
+            // v1.6.0 - optimize
+            'optimiser performance', 'optimize performance', 'ameliorer performance',
+            'improve performance', 'performance bottleneck', 'bottleneck', 'goulot',
+            'slow code', 'code lent', 'profil code', 'profiler code', 'profiling',
+            'reduire latence', 'reduce latency', 'gagner en vitesse', 'speed up',
+            'consommation memoire', 'memory usage', 'cpu usage', 'consommation cpu',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.6.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
 
-        // Explicit code review / audit / explain / refactor / complexity request
-        if (preg_match('/(?:\b|@)(code\s*review|review\s*(my|this|the)?\s*code|verifi(er|e)\s*(ce|mon|le)\s*code|check\s*(this|my)?\s*code|codereviewer|quick\s*review|revue\s*rapide|scan\s*rapide|compare\s*code|comparer\s*code|diff\s*code|explain\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|expliquer\s*(ce|le|mon)\s*code|que\s*fait\s*ce\s*code|security\s*audit|audit\s*(de\s*)?s[eé]curit[eé]|audit\s*code|code\s*audit|scan\s*(de\s*)?s[eé]curit[eé]|refactor\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|refactorer\s*(ce|le|mon)\s*code|nettoyer\s*(ce\s*|le\s*|mon\s*)?code|clean\s+up\s+code|restructurer|propose\s*refactoring|complexit[eé]\s*cyclomatique|cyclomatic\s*complexity|analyse\s*complexit[eé]|simplifi(er|y)\s*(ce\s*|this\s*)?code)\b/iu', $context->body)) {
+        // Help trigger
+        if (preg_match('/\b(aide\s*code\s*review|help\s*code\s*review|code\s*review\s*help)\b/iu', $context->body)) {
+            return true;
+        }
+
+        // Explicit code review / audit / explain / refactor / complexity / test / doc / migrate / standards request
+        if (preg_match('/(?:\b|@)(code\s*review|review\s*(my|this|the)?\s*code|verifi(er|e)\s*(ce|mon|le)\s*code|check\s*(this|my)?\s*code|codereviewer|quick\s*review|revue\s*rapide|scan\s*rapide|compare\s*code|comparer\s*code|diff\s*code|explain\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|expliquer\s*(ce|le|mon)\s*code|que\s*fait\s*ce\s*code|security\s*audit|audit\s*(de\s*)?s[eé]curit[eé]|audit\s*code|code\s*audit|scan\s*(de\s*)?s[eé]curit[eé]|refactor\s*(this\s*|the\s*|my\s*|ce\s*|mon\s*|le\s*)?code|refactorer\s*(ce|le|mon)\s*code|nettoyer\s*(ce\s*|le\s*|mon\s*)?code|clean\s+up\s+code|restructurer|propose\s*refactoring|complexit[eé]\s*cyclomatique|cyclomatic\s*complexity|analyse\s*complexit[eé]|simplifi(er|y)\s*(ce\s*|this\s*)?code|g[eé]n[eé]rer\s*tests?|generate\s*tests?|write\s*tests?|[eé]crire\s*tests?|tests?\s*unitaires?|unit\s*tests?|tester\s*(ce\s*)?code|test\s*this\s*code|documenter\s*(ce\s*)?code|doc\s*code|generate\s*docs?|docblock|jsdoc|phpdoc|commenter\s*code|comment\s*code|ajouter\s*documentation|migr(er|ate)\s*(ce\s*|this\s*|vers?\s*|to\s*)?code|migration\s*code|upgrade\s*code|modernis[ae]r?\s*(ce\s*|le\s*|this\s*)?code|migr(er|ate)\s*(vers?\s*|to\s*)(php|python|javascript|js|typescript|ts|es\d*)|psr-?12|pep\s*8|eslint|code\s*standards?|coding\s*standards?|style\s*de\s*code|code\s*style|normes?\s*(de\s*)?code|conventions?\s*code|lint(er)?\s*code|conformit[eé]\s*code)\b/iu', $context->body)) {
+            return true;
+        }
+
+        // v1.6.0 — translate / optimize fast-paths
+        if (preg_match('/\b(traduire?\s*(en|vers)|translat(e\s*(to|into)|ion)|convert\s*(to|this\s*code\s*to)|convertir\s*(en|vers)|transposer\s*(en|vers)|r[eé][eé]crire\s*(en|as|in)|rewrite\s*(in|as)|code\s*en\s*(python|javascript|typescript|php|java|go|rust|ruby|c\+?\+?))\b/iu', $context->body)) {
+            return true;
+        }
+        if (preg_match('/\b(optimi[sz](er|e)?\s*performance|am[eé]lior(er|e)?\s*performance|improve\s*performance|performance\s*bottleneck|bottleneck|goulot|slow\s*code|code\s*lent|profil(er|ing)?\s*code|profiling|speed\s*up|r[eé]duire?\s*latence|reduce\s*latency|memory\s*usage|cpu\s*usage|consommation\s*(m[eé]moire|cpu))\b/iu', $context->body)) {
             return true;
         }
 
@@ -87,6 +127,11 @@ class CodeReviewAgent extends BaseAgent
         $body = trim($context->body ?? '');
 
         if (empty($body)) {
+            return $this->showHelp();
+        }
+
+        // Explicit help request
+        if (preg_match('/\b(aide\s*code\s*review|help\s*code\s*review|code\s*review\s*help)\b/iu', $body)) {
             return $this->showHelp();
         }
 
@@ -153,7 +198,7 @@ class CodeReviewAgent extends BaseAgent
                 "Je n'ai pas trouve de code a analyser dans ton message.\n\n"
                 . "Envoie ton code dans un bloc :\n"
                 . "‎```php\n// ton code ici\n‎```\n\n"
-                . "Langages supportes : PHP, JavaScript, TypeScript, Python, SQL, Go, Java, Rust\n\n"
+                . "Langages supportes : PHP, JavaScript, TypeScript, Python, SQL, Go, Java, Rust, Ruby, C/C++\n\n"
                 . "Modes disponibles :\n"
                 . "• _quick review_ — scan rapide (bugs critiques uniquement)\n"
                 . "• _compare code_ — comparer deux versions (2 blocs)\n"
@@ -161,7 +206,14 @@ class CodeReviewAgent extends BaseAgent
                 . "• _security audit_ — audit de securite OWASP\n"
                 . "• _refactor code_ — propositions de refactoring avec exemples\n"
                 . "• _analyse complexite_ — complexite cyclomatique et imbrication\n"
-                . "• _code review_ — analyse complete (defaut)"
+                . "• _generer tests_ — generer des tests unitaires\n"
+                . "• _doc code_ — generer la documentation/docblocks\n"
+                . "• _migrate code_ — migrer vers PHP 8.4 / Python 3 / ES2022\n"
+                . "• _code standards_ — verifier PSR-12, PEP 8, ESLint\n"
+                . "• _traduire en [langage]_ — convertir vers un autre langage\n"
+                . "• _optimiser performance_ — optimisation N+1, algo, cache\n"
+                . "• _code review_ — analyse complete (defaut)\n\n"
+                . "Tape _aide code review_ pour plus d'infos."
             );
         }
 
@@ -182,9 +234,9 @@ class CodeReviewAgent extends BaseAgent
             );
         }
 
-        // Static pattern analysis (skip for explain and refactor modes)
+        // Static pattern analysis (skip for structural/generative modes)
         $staticIssues = [];
-        if (!in_array($mode, ['explain', 'refactor'])) {
+        if (!in_array($mode, ['explain', 'refactor', 'test', 'doc', 'migrate', 'standards', 'translate', 'optimize'])) {
             foreach ($codeBlocks as $block) {
                 $issues = $this->analyzer->analyzePatterns($block['code'], $block['language']);
                 if (!empty($issues)) {
@@ -259,6 +311,24 @@ class CodeReviewAgent extends BaseAgent
         if (preg_match('/\b(complexit[eé]\s*cyclomatique|cyclomatic\s*complexity|analyse\s*complexit[eé]|simplifi(er|y)\s*(ce\s*|this\s*)?code|code\s*complexe|trop\s*complexe)\b/iu', $body)) {
             return 'complexity';
         }
+        if (preg_match('/\b(g[eé]n[eé]rer\s*tests?|generate\s*tests?|write\s*tests?|[eé]crire\s*tests?|tests?\s*unitaires?|unit\s*tests?|tester\s*(ce\s*)?code|test\s*this\s*code)\b/iu', $body)) {
+            return 'test';
+        }
+        if (preg_match('/\b(documenter\s*(ce\s*)?code|doc\s*code|generate\s*docs?|docblock|jsdoc|phpdoc|commenter\s*code|comment\s*code|ajouter\s*documentation)\b/iu', $body)) {
+            return 'doc';
+        }
+        if (preg_match('/\b(migr(er|ate)\s*(ce\s*|this\s*|vers?\s*|to\s*)?code|migration\s*code|upgrade\s*code|modernis[ae]r?\s*(ce\s*|le\s*|this\s*)?code|migr(er|ate)\s*(vers?\s*|to\s*)(php|python|javascript|js|typescript|ts|es\d*)|modernisation\s*code)\b/iu', $body)) {
+            return 'migrate';
+        }
+        if (preg_match('/\b(psr-?12|pep\s*8|eslint|code\s*standards?|coding\s*standards?|style\s*de\s*code|code\s*style|normes?\s*(de\s*)?code|conventions?\s*code|lint(er)?\s*code|conformit[eé]\s*code|bonnes?\s*pratiques?\s*langage)\b/iu', $body)) {
+            return 'standards';
+        }
+        if (preg_match('/\b(traduire?\s*(en|vers)|translat(e\s*(to|into)|ion)|convert\s*(to|this\s*code\s*to)|convertir\s*(en|vers)|transposer\s*(en|vers)|r[eé][eé]crire\s*(en|as|in)|rewrite\s*(in|as)|code\s*en\s*(python|javascript|typescript|php|java|go|rust|ruby|c\+?\+?))\b/iu', $body)) {
+            return 'translate';
+        }
+        if (preg_match('/\b(optimi[sz](er|e)?\s*performance|am[eé]lior(er|e)?\s*performance|improve\s*performance|performance\s*bottleneck|bottleneck|goulot|slow\s*code|code\s*lent|profil(er|ing)?\s*code|profiling|speed\s*up|r[eé]duire?\s*latence|reduce\s*latency|memory\s*usage|cpu\s*usage|consommation\s*(m[eé]moire|cpu))\b/iu', $body)) {
+            return 'optimize';
+        }
         return 'full';
     }
 
@@ -303,6 +373,12 @@ class CodeReviewAgent extends BaseAgent
             'security'   => $this->getSecuritySystemPrompt(),
             'refactor'   => $this->getRefactorSystemPrompt(),
             'complexity' => $this->getComplexitySystemPrompt(),
+            'test'       => $this->getTestSystemPrompt(),
+            'doc'        => $this->getDocSystemPrompt(),
+            'migrate'    => $this->getMigrateSystemPrompt(),
+            'standards'  => $this->getStandardsSystemPrompt(),
+            'translate'  => $this->getTranslateSystemPrompt(),
+            'optimize'   => $this->getOptimizeSystemPrompt(),
             default      => $this->getFullSystemPrompt(),
         };
 
@@ -616,6 +692,12 @@ PROMPT;
             'security'   => '🔒 *AUDIT DE SECURITE*',
             'refactor'   => '♻ *REFACTORING*',
             'complexity' => '📊 *ANALYSE DE COMPLEXITE*',
+            'test'       => '🧪 *GENERATION DE TESTS*',
+            'doc'        => '📝 *DOCUMENTATION*',
+            'migrate'    => '🚀 *MIGRATION DE CODE*',
+            'standards'  => '📐 *NORMES & STANDARDS*',
+            'translate'  => '🌐 *TRADUCTION DE CODE*',
+            'optimize'   => '⚡ *OPTIMISATION PERFORMANCE*',
             default      => '🔍 *CODE REVIEW*',
         };
 
@@ -626,9 +708,9 @@ PROMPT;
             . implode(', ', array_unique($langs)) . " | "
             . "{$totalLines} lignes\n\n";
 
-        // Static analysis critical warnings (not shown in explain/refactor modes)
+        // Static analysis critical warnings (not shown in structural/generative modes)
         $staticSection = '';
-        if (!empty($staticIssues) && !in_array($mode, ['explain', 'refactor'])) {
+        if (!empty($staticIssues) && !in_array($mode, ['explain', 'refactor', 'test', 'doc', 'migrate', 'standards', 'translate', 'optimize'])) {
             $criticalCount = 0;
             foreach ($staticIssues as $group) {
                 foreach ($group['issues'] as $issue) {
@@ -654,6 +736,368 @@ PROMPT;
         return implode("\n", $numbered);
     }
 
+    private function getTestSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en test logiciel (TDD, BDD, testing patterns). Mode GENERATION DE TESTS : genere des tests unitaires complets et bien structures pour le code fourni.
+
+Ta mission :
+1. Analyser le code et identifier toutes les fonctions/methodes testables
+2. Generer des tests unitaires couvrant : cas nominaux, cas limites, cas d'erreur
+3. Utiliser le framework de test adapte au langage (PHPUnit pour PHP, Jest pour JS/TS, pytest pour Python, JUnit pour Java, etc.)
+4. Viser une couverture de code maximale (happy path + edge cases + error paths)
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Framework utilise :* [nom du framework detecte ou recommande]
+*Couverture estimee :* [pourcentage estimé de couverture avec ces tests]
+
+Pour chaque classe/fonction testee :
+[NOM DE LA FONCTION] — [N] tests
+
+Test 1 : [nom descriptif en snake_case]
+Objectif : [ce que le test verifie en 1 ligne]
+Code du test :
+[code du test indenté, sans blocs ``` mais avec une indentation claire]
+
+Test 2 : [nom descriptif]
+...
+
+RESUME :
+Total tests generes : [N]
+Cas non couverts : [liste des scenarios difficiles a tester — dependances externes, etc.]
+Recommandations : [1-2 suggestions pour ameliorer la testabilite du code si necessaire]
+
+EXEMPLES DE FORMAT ATTENDU :
+
+test_calculate_total_returns_sum_of_items
+Objectif : verifie que le total est la somme correcte des items
+Code du test :
+  public function test_calculate_total_returns_sum_of_items(): void
+  {
+      $cart = new Cart([new Item(10.0), new Item(5.0)]);
+      $this->assertEquals(15.0, $cart->calculateTotal());
+  }
+
+test_calculate_total_returns_zero_for_empty_cart
+Objectif : verifie le cas limite panier vide
+Code du test :
+  public function test_calculate_total_returns_zero_for_empty_cart(): void
+  {
+      $cart = new Cart([]);
+      $this->assertEquals(0.0, $cart->calculateTotal());
+  }
+
+REGLES :
+- Genere des tests REELS et directement utilisables, pas des squelettes vides
+- Nomme les tests de facon descriptive (test_what_when_then ou should_do_something_when_condition)
+- Couvre obligatoirement : valeurs nulles, tableaux vides, valeurs limites, exceptions attendues
+- Pour les dependances externes : montre comment les mocker
+- N'utilise PAS de blocs ``` dans ta reponse
+- Reponds en francais pour les commentaires, en anglais pour les noms de methodes de test
+PROMPT;
+    }
+
+    private function getDocSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en documentation technique (PHPDoc, JSDoc, Python docstrings, JavaDoc, Rustdoc). Mode DOCUMENTATION : genere une documentation complete et precise pour le code fourni.
+
+Ta mission :
+1. Analyser chaque fonction/methode/classe et generer la documentation adaptee au langage
+2. Documenter : but, parametres (types + description), valeur de retour, exceptions levees, exemples d'utilisation
+3. Identifier et documenter les comportements non evidents (effets de bord, preconditions, postconditions)
+4. Adapter le style au langage (PHPDoc pour PHP, JSDoc pour JS/TS, docstrings pour Python, etc.)
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Style de documentation :* [PHPDoc / JSDoc / Python Docstring / JavaDoc / Rustdoc]
+
+Pour chaque fonction/methode/classe :
+[NOM] (ligne X) :
+[bloc de documentation complet, indenté, sans blocs ``` mais avec une indentation claire]
+
+Exemples de format attendu :
+
+Pour PHP :
+  /**
+   * Calcule le total du panier en appliquant les remises.
+   *
+   * @param  Item[]  $items    Liste des articles du panier
+   * @param  float   $discount Pourcentage de remise (0.0 a 1.0)
+   * @return float             Total TTC apres remise
+   * @throws InvalidArgumentException Si $discount est hors de [0, 1]
+   *
+   * @example
+   *   $total = calculateTotal([$item1, $item2], 0.1); // 10% de remise
+   */
+
+Pour Python :
+  def calculate_total(items, discount=0.0):
+      """
+      Calcule le total du panier avec remise optionnelle.
+
+      Args:
+          items (list[Item]): Liste des articles
+          discount (float): Remise entre 0.0 et 1.0. Defaults to 0.0.
+
+      Returns:
+          float: Total TTC apres application de la remise.
+
+      Raises:
+          ValueError: Si discount < 0 ou discount > 1.
+
+      Example:
+          >>> calculate_total([Item(10), Item(5)], discount=0.1)
+          13.5
+      """
+
+RESUME :
+Elements documentes : [N fonctions/methodes/classes]
+Elements sans documentation requise : [liste des elements triviaux ignores]
+Points d'attention : [comportements complexes ou non evidents identifies]
+
+REGLES :
+- Genere de la VRAIE documentation exploitable directement dans le code
+- Les types doivent etre precis (int, string, array, nullable, generics si applicable)
+- Inclus toujours un exemple @example/@Example si la fonction a un comportement non trivial
+- Documente TOUTES les exceptions qui peuvent etre levees
+- N'invente pas de comportements — base-toi uniquement sur le code fourni
+- N'utilise PAS de blocs ``` dans ta reponse
+- Reponds en francais pour les descriptions, respecte les conventions du langage pour les tags
+PROMPT;
+    }
+
+    private function getMigrateSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en migration et modernisation de code (PHP 7→8.4, Python 2→3, ES5→ES2022, Java 8→21, Go modules). Mode MIGRATION : propose un plan de migration concret avec le code avant/apres pour chaque changement necessaire.
+
+LANGAGES ET MIGRATIONS CIBLES :
+- PHP 7.x → 8.4 : types union, named arguments, match expression, nullsafe operator (?->), readonly properties, enums, fibers, first-class callables, array_is_list(), str_contains/starts_with/ends_with
+- Python 2 → 3 : print function, unicode strings, integer division, range vs xrange, f-strings, type hints, walrus operator
+- JavaScript ES5 → ES2022 : const/let, arrow functions, template literals, destructuring, spread/rest, async/await, optional chaining (?.), nullish coalescing (??), Promise.allSettled, Array.at()
+- TypeScript : ajout de types, interfaces, enums, generics, strict mode
+- Java 8 → 21 : records, sealed classes, pattern matching, text blocks, Stream API moderne
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Migration detectee :* [langue source detectee] → [version cible recommandee]
+
+*Resume des changements necessaires :* [N changements identifies]
+
+Pour chaque changement (groupe par priorite) :
+[PRIORITE] CHANGEMENT (ligne X) : Description du probleme actuel
+Avant : [code legacy — 1-3 lignes]
+Apres : [code migre — 1-3 lignes]
+Benefice : [gain en 1 ligne — securite, performance, lisibilite, deprecation, etc.]
+Note : [impact ou risque eventuel de la migration]
+
+Exemples :
+🔴 DEPRECATION PHP 8 (ligne 12) : each() supprime en PHP 8
+Avant : while (list($k, $v) = each($array)) { ... }
+Apres : foreach ($array as $k => $v) { ... }
+Benefice : each() supprime depuis PHP 8.0 — code non fonctionnel sinon
+
+🟠 PHP 8 MATCH (ligne 25) : switch verbose remplacable par match expression
+Avant : switch ($status) { case 'a': return 1; case 'b': return 2; default: return 0; }
+Apres : return match($status) { 'a' => 1, 'b' => 2, default => 0 };
+Benefice : match est exhaustif, pas de fall-through, retourne une valeur directement
+
+🟡 PHP 8 NULLSAFE (ligne 40) : chaine de null checks verbeux
+Avant : $city = $user && $user->profile ? $user->profile->city : null;
+Apres : $city = $user?->profile?->city;
+Benefice : operateur nullsafe — plus lisible et moins de code boilerplate
+
+PRIORITES : 🔴 Cassant/Obligatoire | 🟠 Fortement recommande | 🟡 Recommande | 🔵 Optionnel/Cosmétique
+
+PLAN DE MIGRATION :
+Etape 1 (Obligatoire) : [corrections bloquantes]
+Etape 2 (Recommande) : [ameliorations importantes]
+Etape 3 (Optionnel) : [modernisations syntaxiques]
+Effort estime : Faible (<1h) / Moyen (1-4h) / Eleve (>4h)
+
+REGLES :
+- Detecte automatiquement la version actuelle si possible (ex: absence de types = PHP 7, print sans parentheses = Python 2)
+- Priorise les changements CASSANTS (breaking changes) en premier
+- Le code avant/apres doit etre directement copiable-collable
+- Indique clairement si un changement est obligatoire (breaking) ou optionnel (improvement)
+- Ne signale PAS les bugs de securite — concentre-toi sur la migration syntaxique et semantique
+- Reference toujours les numeros de ligne
+- Reponds en francais
+- N'utilise PAS de blocs ``` dans ta reponse
+PROMPT;
+    }
+
+    private function getStandardsSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en normes et standards de codage (PSR-12 pour PHP, PEP 8 pour Python, ESLint/Prettier pour JavaScript/TypeScript, Google Java Style Guide, Rustfmt pour Rust, gofmt pour Go). Mode NORMES & STANDARDS : verifie la conformite du code aux standards du langage detecte.
+
+STANDARDS PAR LANGAGE :
+- PHP → PSR-12 : indentation 4 espaces, accolades sur nouvelle ligne pour classes/fonctions, espaces autour des operateurs, imports groupes, max 120 chars/ligne, nommage camelCase methodes/PascalCase classes/SCREAMING_SNAKE constantes
+- Python → PEP 8 : indentation 4 espaces, max 79 chars/ligne (ou 99), espaces autour des operateurs, 2 lignes blanches entre fonctions, nommage snake_case fonctions/variables, PascalCase classes, SCREAMING_SNAKE constantes, docstrings avec triple guillemets
+- JavaScript/TypeScript → ESLint (Airbnb/Standard) : const par defaut, arrow functions, template literals, === strict, nommage camelCase variables/fonctions, PascalCase composants React/classes, SCREAMING_SNAKE constantes, pas de trailing commas avant
+- Java → Google Style : indentation 2 espaces, accolades K&R style, camelCase methodes/variables, PascalCase classes, SCREAMING_SNAKE constantes, Javadoc sur methodes publiques
+- Rust → Rustfmt : snake_case variables/fonctions, PascalCase structs/enums/traits, SCREAMING_SNAKE constantes, 4 espaces d'indentation, pas de trailing whitespace
+- Go → gofmt : camelCase variables/fonctions, PascalCase exports, snake_case packages, erreurs geries a chaque appel
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Standard detecte :* [PSR-12 / PEP 8 / ESLint / Google Java Style / Rustfmt / gofmt]
+*Conformite globale :* [A - Excellent / B - Bon / C - Acceptable / D - A corriger / F - Non conforme]
+
+*Violations detectees :*
+Pour chaque violation :
+[SEVERITE] REGLE (ligne X) : Description de la violation
+Standard : [reference a la regle — ex: PSR-12 section 4.3, PEP 8 E501]
+Avant : [code non conforme — 1-2 lignes]
+Apres : [code conforme — 1-2 lignes]
+
+Exemples :
+🟠 NOMMAGE (ligne 8) : methode en snake_case — PSR-12 impose camelCase pour les methodes
+Standard : PSR-12 §4.3 — methodes doivent etre en camelCase
+Avant : function get_user_name() { ... }
+Apres : function getUserName() { ... }
+
+🟡 INDENTATION (ligne 15) : 2 espaces utilises au lieu de 4
+Standard : PSR-12 §2.4 — indentation de 4 espaces (pas de tabs)
+Avant :   if ($x) {
+Apres :     if ($x) {
+
+🔵 LONGUEUR LIGNE (ligne 22) : 145 caracteres — depasse la limite recommandee de 120
+Standard : PSR-12 §2.3 — max 120 caracteres (ou 80 pour compatibilite)
+Avant : [ligne trop longue...]
+Apres : [ligne coupee proprement avec continuation]
+
+SEVERITES : 🔴 Critique (casse l'outil de linting) | 🟠 Majeur (convention forte) | 🟡 Mineur (style) | 🔵 Info
+
+RESUME DE CONFORMITE :
+Violations critiques : [N]
+Violations majeures : [N]
+Violations mineures : [N]
+Top 3 ameliorations prioritaires : [liste]
+Recommendation : [commande ou outil pour auto-corriger — ex: php-cs-fixer fix, black ., eslint --fix]
+
+REGLES :
+- Detecte automatiquement le langage et le standard applicable
+- Reference toujours la regle specifique du standard (section, numero de regle)
+- Donne la commande d'auto-correction si disponible (php-cs-fixer, black, prettier, rustfmt, gofmt)
+- Si le code est parfaitement conforme, dis-le clairement avec le score A
+- N'invente pas des problemes — base-toi uniquement sur les standards reconnus
+- Reference toujours les numeros de ligne
+- Reponds en francais
+- N'utilise PAS de blocs ``` dans ta reponse
+PROMPT;
+    }
+
+    private function getTranslateSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en portage et traduction de code entre langages de programmation. Mode TRADUCTION DE CODE : convertis le code fourni vers le langage cible demande en preservant la semantique, la logique, et les bonnes pratiques du langage cible.
+
+LANGAGES SUPPORTES : PHP, JavaScript, TypeScript, Python, Go, Java, Rust, Ruby, C, C++, Swift, Kotlin, C#
+
+Ta mission :
+1. Identifier le langage source et le langage cible depuis la demande
+2. Traduire le code en respectant les idiomes natifs du langage cible (pas une traduction mot-a-mot)
+3. Adapter les structures de donnees, gestion d'erreurs, et patterns aux conventions du langage cible
+4. Signaler les differences semantiques importantes ou les limitations de la traduction
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Traduction :* [Langage source] → [Langage cible]
+
+*Code traduit :*
+[code traduit complet, indenté et formate selon les conventions du langage cible, sans blocs ``` mais avec indentation claire]
+
+*Notes de traduction :*
+Pour chaque adaptation non triviale :
+- [Element] : explication de la difference semantique ou du choix de traduction
+  Ex: Exception vs error return value (Go), GC vs ownership (Rust), dynamic vs static typing
+
+*Limitations :*
+[Elements qui ne peuvent pas etre traduits directement ou qui necessitent une adaptation manuelle — ex: bibliotheques specifiques, primitives systeme, etc.]
+
+*Dependances requises :*
+[Imports, modules, packages, ou dependances necessaires pour faire tourner le code traduit]
+
+Exemples de notes attendues :
+- PHP try/catch → Go error return values : Go n'a pas d'exceptions, chaque fonction retourne (value, error)
+- Python list comprehension → JS Array.map/filter : equivalents fonctionnels en JavaScript
+- PHP array_map → Rust Iterator::map : utilise les iterateurs paresseux, necessite .collect()
+
+REGLES :
+- Produis du code IDIOMATIQUE dans le langage cible — pas une traduction litterale
+- Respecte les conventions de nommage du langage cible (camelCase, snake_case, PascalCase...)
+- Adapte la gestion d'erreurs au paradigme du langage cible (exceptions, Result<T,E>, (value, err), Maybe/Option)
+- Si le langage cible n'est pas clairement specifie, demande des precisions
+- Si une traduction parfaite est impossible, explique pourquoi et propose la meilleure approximation
+- N'utilise PAS de blocs ``` dans ta reponse
+- Reponds en francais pour les commentaires et explications, en anglais pour le code si c'est la convention
+PROMPT;
+    }
+
+    private function getOptimizeSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+Tu es un expert en optimisation de performance (algorithmes, structures de donnees, profiling, cache, concurrence). Mode OPTIMISATION PERFORMANCE : analyse et optimise le code pour le rendre plus rapide, plus efficace en memoire, et mieux scalable.
+
+CATEGORIES D'OPTIMISATION (inspecte systematiquement) :
+1. ALGORITHMES & COMPLEXITE — remplace les algorithmes O(n²)+ par des solutions plus efficaces, cherche les doublons de calcul
+2. STRUCTURES DE DONNEES — choix inadapte (liste vs hashmap, array vs set, etc.), acces redondants
+3. REQUETES & I/O — N+1 queries, requetes non indexes, appels synchrones bloquants, absence de cache, batch vs individual calls
+4. MEMOIRE — fuites memoire, allocations inutiles dans les boucles, copies superflues de gros objets, bufferisation
+5. CONCURRENCE — opportunites de parallelisation, locks trop larges, race conditions, batch processing
+6. CACHE — donnees recalculees inutilement, absence de memoization, cache invalidation
+
+FORMAT DE REPONSE OBLIGATOIRE :
+*Bilan performance :* [1 ligne — Excellent/Bon/Acceptable/Problematique/Critique avec justification principale]
+
+Pour chaque probleme detecte :
+[IMPACT] TYPE (ligne X) : Description precise du goulot d'etranglement
+Complexite actuelle : O(...) ou "N appels DB" ou "X Mo alloues"
+Complexite optimisee : O(...) ou gain estime
+Avant : [code actuel — 1-3 lignes]
+Apres : [code optimise — 1-3 lignes]
+Gain estime : [quantification si possible — ex: "80% moins de requetes DB", "O(n²) → O(n log n)", "allocation eliminee"]
+
+Exemples :
+🔴 REQUETES N+1 (ligne 15-20) : foreach sur users avec User::find() a chaque iteration
+Complexite actuelle : N requetes SQL pour N utilisateurs
+Complexite optimisee : 1 requete SQL avec eager loading
+Avant : foreach ($ids as $id) { $user = User::find($id); }
+Apres : $users = User::whereIn('id', $ids)->get();
+Gain estime : 99% moins de requetes (1 vs N)
+
+🟠 COMPLEXITE O(n²) (ligne 30-38) : double boucle pour chercher des doublons
+Complexite actuelle : O(n²) — 10 000 iterations pour 100 elements
+Complexite optimisee : O(n) avec un hashset
+Avant : foreach ($a as $x) { foreach ($b as $y) { if ($x === $y) ... } }
+Apres : $bSet = array_flip($b); foreach ($a as $x) { if (isset($bSet[$x])) ... }
+Gain estime : O(n²) → O(n), ~100x plus rapide pour n=100
+
+🟡 ALLOCATION EN BOUCLE (ligne 52) : new instance creee a chaque iteration
+Complexite actuelle : N allocations objet par appel
+Complexite optimisee : 1 allocation, reutilisation
+Avant : foreach ($items as $item) { $formatter = new Formatter(); $formatter->format($item); }
+Apres : $formatter = new Formatter(); foreach ($items as $item) { $formatter->format($item); }
+Gain estime : N-1 allocations en moins, GC reduit
+
+IMPACTS : 🔴 Critique (>50% degradation) | 🟠 Important (10-50%) | 🟡 Mineur (<10%) | 🔵 Micro-optimisation
+
+SCORE PERFORMANCE FINAL :
+Score actuel : A/B/C/D/F
+Score optimise estime : A/B/C/D/F
+Top 3 optimisations prioritaires : [liste ordonnee par impact]
+Complexite algorithmique dominante : O(...) → O(...) apres optimisation
+
+REGLES :
+- Quantifie le gain estime chaque fois que possible (%, ratio, complexite Big-O)
+- Priorise par impact reel sur les utilisateurs (latence perceptible > micro-optimisations)
+- Montre toujours du code avant/apres concret et exploitable
+- Signale les trade-offs (ex: memoire vs CPU, lisibilite vs performance)
+- Reference toujours les numeros de ligne
+- Reponds en francais
+- N'utilise PAS de blocs ``` dans ta reponse
+PROMPT;
+    }
+
     // ── Help ──────────────────────────────────────────────────────────────────
 
     private function showHelp(): AgentResult
@@ -661,7 +1105,7 @@ PROMPT;
         return AgentResult::reply(
             "*🔍 Code Review — Analyse de code intelligente*\n\n"
             . "*Utilisation :*\n"
-            . "Envoie ton code dans un bloc, puis precise le type de review :\n\n"
+            . "Envoie ton code dans un bloc de code, puis precise le mode :\n\n"
             . "*Modes disponibles :*\n"
             . "🔍 _code review_ — analyse complete (bugs, securite, perf, qualite)\n"
             . "⚡ _quick review_ — scan rapide des problemes critiques uniquement\n"
@@ -669,18 +1113,30 @@ PROMPT;
             . "📖 _explain code_ — comprendre ce que fait le code\n"
             . "🔒 _security audit_ — audit de securite OWASP Top 10 approfondi\n"
             . "♻ _refactor code_ — propositions de refactoring avec exemples avant/apres\n"
-            . "📊 _analyse complexite_ — complexite cyclomatique, imbrication, longueur\n\n"
+            . "📊 _analyse complexite_ — complexite cyclomatique, imbrication, longueur\n"
+            . "🧪 _generer tests_ — generer des tests unitaires (PHPUnit, Jest, pytest...)\n"
+            . "📝 _doc code_ — generer la documentation (PHPDoc, JSDoc, docstrings...)\n"
+            . "🚀 _migrate code_ — migrer vers PHP 8.4, Python 3, ES2022...\n"
+            . "📐 _code standards_ — verifier conformite PSR-12, PEP 8, ESLint...\n"
+            . "🌐 _traduire en [langage]_ — convertir le code vers un autre langage\n"
+            . "⚡ _optimiser performance_ — optimisation performance, N+1, algo, cache\n\n"
             . "*Langages supportes :*\n"
-            . "PHP, JavaScript, TypeScript, Python, SQL, Go, Java, Rust\n\n"
+            . "PHP, JavaScript, TypeScript, Python, SQL, Go, Java, Rust, Ruby, C/C++\n\n"
             . "*Ce que j'analyse :*\n"
             . "🔴 Bugs & erreurs logiques\n"
             . "🔒 Vulnerabilites de securite (OWASP Top 10)\n"
-            . "⚡ Problemes de performance (N+1, etc.)\n"
+            . "⚡ Problemes de performance (N+1, goroutine leaks...)\n"
             . "✨ Qualite de code & bonnes pratiques\n"
-            . "💡 Suggestions de refactoring\n"
-            . "📊 Score de complexite algorithmique\n\n"
-            . "*Astuce :* Apres une review, envoie juste _refactor code_ ou _security audit_ pour relancer le meme code avec un autre mode !\n\n"
-            . "*Declencheurs :* code review, quick review, compare code, explain code, security audit, refactor code, analyse complexite, @codereviewer"
+            . "💡 Suggestions de refactoring avec exemples\n"
+            . "📊 Complexite cyclomatique et metriques\n"
+            . "🧪 Generation de tests unitaires\n"
+            . "📝 Documentation automatique\n"
+            . "🚀 Migration de code (PHP 7→8.4, Python 2→3, ES5→ES2022)\n"
+            . "📐 Verification des normes (PSR-12, PEP 8, ESLint, Rustfmt...)\n"
+            . "🌐 Traduction de code (PHP→Python, JS→TS, Go→Rust...)\n"
+            . "⚡ Optimisation performance (N+1, Big-O, cache, memoire)\n\n"
+            . "*Astuce :* Apres une review, envoie juste _generer tests_ ou _security audit_ pour relancer avec un autre mode sans recoller le code !\n\n"
+            . "*Declencheurs :* code review, quick review, compare code, explain code, security audit, refactor code, analyse complexite, generer tests, doc code, migrate code, code standards, traduire en [langage], optimiser performance, @codereviewer"
         );
     }
 }

@@ -21,7 +21,17 @@ class SettingsController extends Controller
         $autoUpdateEnabled = AppSetting::get('auto_update_enabled') !== 'false';
         $appTimezone = AppSetting::timezone();
         $tokens = $user->tokens()->latest()->get();
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens'));
+
+        $publicChat = [
+            'title'       => AppSetting::get('public_chat_title') ?? '',
+            'subtitle'    => AppSetting::get('public_chat_subtitle') ?? '',
+            'welcome'     => AppSetting::get('public_chat_welcome') ?? '',
+            'color'       => AppSetting::get('public_chat_color') ?? '#4f46e5',
+            'logo'        => AppSetting::get('public_chat_logo') ?? '',
+            'placeholder' => AppSetting::get('public_chat_placeholder') ?? '',
+        ];
+
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -79,6 +89,20 @@ class SettingsController extends Controller
         AppSetting::set('app_timezone', $request->app_timezone);
 
         return redirect()->route('settings.index')->with('success', 'Fuseau horaire mis à jour : ' . $request->app_timezone);
+    }
+
+    public function savePublicChat(Request $request)
+    {
+        $fields = ['public_chat_title', 'public_chat_subtitle', 'public_chat_welcome', 'public_chat_color', 'public_chat_logo', 'public_chat_placeholder'];
+
+        foreach ($fields as $field) {
+            $value = $request->input($field);
+            if ($value !== null && $value !== '') {
+                AppSetting::set($field, $value);
+            }
+        }
+
+        return redirect()->route('settings.index')->with('success', 'Personnalisation du chat sauvegardee.');
     }
 
     public function toggleAutoUpdate()

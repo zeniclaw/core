@@ -42,7 +42,17 @@ class MeetingAnalyzer
             $time = isset($msg['timestamp']) ? substr($msg['timestamp'], 11, 5) : '??:??';
             $sender = $msg['sender'] ?? 'Inconnu';
             $content = $msg['content'] ?? '';
-            $lines[] = "[{$time}] {$sender}: {$content}";
+            $type = $msg['type'] ?? 'message';
+
+            $prefix = match ($type) {
+                'decision'     => '[DECISION CONFIRMEE] ',
+                'note'         => '[NOTE IMPORTANTE] ',
+                'agenda'       => '[AGENDA] ',
+                'participants' => '[PARTICIPANTS DECLARES] ',
+                default        => '',
+            };
+
+            $lines[] = "[{$time}] {$sender}: {$prefix}{$content}";
         }
         return implode("\n", $lines);
     }

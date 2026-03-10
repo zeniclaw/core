@@ -35,6 +35,21 @@ SESSION_DRIVER=${SESSION_DRIVER:-redis}
 QUEUE_CONNECTION=${QUEUE_CONNECTION:-redis}
 EOF
 
+# Append CHAT_API_KEY if set
+if [ -n "${CHAT_API_KEY:-}" ]; then
+    echo "" >> /var/www/html/.env
+    echo "CHAT_API_KEY=${CHAT_API_KEY}" >> /var/www/html/.env
+fi
+
+# Append proxy config if set (for outgoing HTTP calls from PHP)
+if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
+    echo "" >> /var/www/html/.env
+    echo "# Proxy" >> /var/www/html/.env
+    [ -n "${HTTP_PROXY:-}" ]  && echo "HTTP_PROXY=${HTTP_PROXY}" >> /var/www/html/.env
+    [ -n "${HTTPS_PROXY:-}" ] && echo "HTTPS_PROXY=${HTTPS_PROXY}" >> /var/www/html/.env
+    [ -n "${NO_PROXY:-}" ]    && echo "NO_PROXY=${NO_PROXY}" >> /var/www/html/.env
+fi
+
 # Mark mounted repo as safe for git (root + www-data)
 git config --global --add safe.directory /opt/zeniclaw-repo
 mkdir -p /var/www/.config/git

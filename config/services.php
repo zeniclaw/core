@@ -40,4 +40,8 @@ return [
         'client_secret' => env('SPOTIFY_CLIENT_SECRET'),
     ],
 
+    'public_chat' => [
+        'api_key' => env('CHAT_API_KEY'),
+    ],
+
 ];

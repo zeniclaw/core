@@ -20,7 +20,7 @@ class ReminderAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion des rappels et alarmes. Permet de creer, lister, chercher, modifier, completer, supprimer et reporter des rappels ponctuels ou recurrents. Gere aussi l\'agenda du jour, les prochains rappels et les statistiques.';
+        return 'Agent de gestion des rappels et alarmes. Permet de creer, lister, chercher, modifier (message et/ou heure), dupliquer, completer, supprimer et reporter des rappels ponctuels ou recurrents. Gere aussi le prochain rappel, l\'agenda du jour, la vue semaine (7 jours), les rappels en retard (vue dediee), les statistiques et l\'archivage.';
     }
 
     public function keywords(): array
@@ -35,7 +35,7 @@ class ReminderAgent extends BaseAgent
             'en semaine a', 'chaque semaine',
             'mes rappels', 'mon agenda', 'my reminders', 'list reminders',
             'rappels aujourd\'hui', 'rappels du jour', 'rappels de demain',
-            'prochains rappels', 'prochain rappel',
+            'prochains rappels', 'prochain rappel', 'prochain', 'next reminder',
             'supprimer rappel', 'supprime rappel', 'delete reminder', 'annuler rappel',
             'reporter rappel', 'reporte rappel', 'postpone', 'snooze', 'repousser',
             'recurrent', 'recurrence', 'periodique',
@@ -44,15 +44,25 @@ class ReminderAgent extends BaseAgent
             'aide rappel', 'help reminder', 'aide rappels',
             'cherche rappel', 'chercher rappel', 'trouve rappel', 'search reminder',
             'modifie rappel', 'modifier rappel', 'edit reminder', 'change rappel',
+            'change heure rappel', 'change la date rappel', 'modifier heure rappel',
             'lundi prochain', 'semaine prochaine', 'mois prochain',
             'stats rappels', 'statistiques rappels', 'historique rappels', 'rappels completes',
             'bilan rappels',
+            'semaine', 'cette semaine', 'rappels semaine', 'rappels de la semaine', 'vue semaine',
+            'rappels 7 jours', 'planning semaine', 'week reminder', 'week view',
+            'rappels en retard', 'rappels passes', 'retard',
+            'nettoyer rappels', 'vider historique', 'supprimer historique', 'clear reminders', 'archive',
+            'duplique rappel', 'dupliquer rappel', 'copie rappel', 'copier rappel', 'clone rappel', 'duplicate reminder',
+            'mes retards', 'voir retards', 'rappels retard', 'liste retards',
+            'tous les retards', 'bulk', 'tout marquer fait', 'effacer tous les retards',
+            'planning mois', 'rappels mois', 'ce mois', 'mois prochain', '30 jours',
+            'planning mensuel', 'vue mensuelle', 'month view',
         ];
     }
 
     public function version(): string
     {
-        return '1.3.0';
+        return '1.7.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -86,6 +96,7 @@ class ReminderAgent extends BaseAgent
             $reply = "J'ai pas bien compris. Essaie:\n"
                 . "\"Rappelle-moi d'appeler Jean demain a 10h\"\n"
                 . "\"Mes rappels\" ou \"Rappels d'aujourd'hui\"\n"
+                . "\"Prochain rappel\"\n"
                 . "\"Supprime le rappel 2\"\n"
                 . "\"Marque le rappel 1 comme fait\"\n"
                 . "\"Stats rappels\"\n"
@@ -100,13 +111,20 @@ class ReminderAgent extends BaseAgent
             'create'   => $this->handleCreate($context, $parsed),
             'list'     => $this->handleList($context, $reminders),
             'today'    => $this->handleToday($context),
+            'week'     => $this->handleWeek($context),
+            'next'     => $this->handleNext($context),
+            'overdue'  => $this->handleOverdue($context),
+            'copy'     => $this->handleCopy($context, $reminders, $parsed),
             'delete'   => $this->handleDelete($context, $reminders, $parsed),
             'postpone' => $this->handlePostpone($context, $reminders, $parsed),
             'complete' => $this->handleComplete($context, $reminders, $parsed),
             'search'   => $this->handleSearch($context, $parsed),
             'edit'     => $this->handleEdit($context, $reminders, $parsed),
             'stats'    => $this->handleStats($context),
+            'clear'    => $this->handleClear($context),
             'help'     => $this->handleHelp($context),
+            'bulk'     => $this->handleBulk($context, $parsed),
+            'month'    => $this->handleMonth($context),
             default    => $this->handleUnknownAction($context, $action),
         };
     }
@@ -131,26 +149,47 @@ ACTIONS POSSIBLES:
 3. RAPPELS DU JOUR (aujourd'hui + demain):
 {"action": "today"}
 
-4. SUPPRIMER des rappels:
+4. PROCHAIN RAPPEL (le tout prochain, vue rapide):
+{"action": "next"}
+
+5. SUPPRIMER des rappels:
 {"action": "delete", "items": [1, 2]}
 
-5. REPORTER un rappel:
+6. REPORTER un rappel:
 {"action": "postpone", "item": 1, "new_time": "expression temporelle"}
 
-6. MARQUER comme COMPLETE (fait) un rappel:
+7. MARQUER comme COMPLETE (fait) un rappel:
 {"action": "complete", "items": [1]}
 
-7. CHERCHER des rappels par mot-cle:
+8. CHERCHER des rappels par mot-cle:
 {"action": "search", "query": "mot-cle"}
 
-8. MODIFIER le message d'un rappel:
-{"action": "edit", "item": 1, "new_message": "nouveau texte du rappel"}
+9. MODIFIER un rappel (message et/ou heure):
+{"action": "edit", "item": 1, "new_message": "nouveau texte" | null, "new_time": "expression temporelle" | null}
 
-9. STATISTIQUES des rappels:
+10. STATISTIQUES des rappels:
 {"action": "stats"}
 
-10. AIDE:
+11. VUE SEMAINE (les 7 prochains jours):
+{"action": "week"}
+
+12. VIDER l'historique des rappels termines/annules:
+{"action": "clear"}
+
+13. AIDE:
 {"action": "help"}
+
+14. RAPPELS EN RETARD (vue dediee de tous les rappels passes non traites):
+{"action": "overdue"}
+
+15. DUPLIQUER un rappel (creer une copie a un nouvel horaire):
+{"action": "copy", "item": 1, "new_time": "expression temporelle ou null"}
+
+16. ACTION EN MASSE sur les retards (marquer, supprimer ou reporter TOUS les retards d'un coup):
+{"action": "bulk", "operation": "complete|delete|postpone", "target": "overdue", "new_time": "expression temporelle ou null"}
+
+17. VUE MENSUELLE (les 30 prochains jours, groupes par semaine):
+{"action": "month"}
 
 REGLES POUR "create":
 - 'message' = reformule le rappel de maniere claire et courte (ex: 'Appeler Jean')
@@ -166,7 +205,10 @@ REGLES POUR "create":
 
 REGLES POUR "today":
 - Quand l'utilisateur demande ses rappels d'aujourd'hui, du jour, de demain, ou les prochains rappels
-- Affiche aujourd'hui ET demain pour donner une vue courte
+
+REGLES POUR "next":
+- Quand l'utilisateur demande son PROCHAIN rappel, le rappel suivant, "c'est quoi mon prochain rappel"
+- Vue ultra-rapide : affiche un seul rappel
 
 REGLES POUR "list":
 - Quand l'utilisateur demande a voir TOUS ses rappels, son agenda complet
@@ -183,6 +225,7 @@ REGLES POUR "postpone":
   - "+Xmin", "+Xh", "+Xj", "+Xsem" (relatif: minutes, heures, jours, semaines)
   - "lundi prochain", "mardi prochain", etc. (prochain jour de la semaine, meme heure)
   - "semaine prochaine" (+7 jours, meme heure)
+  - "HH:MM" (meme jour a cette heure, ou demain si l'heure est passee)
 
 REGLES POUR "complete":
 - items = liste des numeros de rappels a marquer comme faits (integers, base 1)
@@ -194,14 +237,44 @@ REGLES POUR "search":
 
 REGLES POUR "edit":
 - item = numero du rappel a modifier (integer, base 1)
-- new_message = nouveau texte du rappel (reformule clairement et brievement)
-- Utilise pour: "modifie le rappel 1", "change le rappel 2 en...", "renomme le rappel"
+- new_message = nouveau texte du rappel (si l'utilisateur change le texte), sinon null
+- new_time = nouvelle date/heure (si l'utilisateur change quand), sinon null. Memes formats que "postpone"
+- Au moins un des deux (new_message ou new_time) doit etre fourni
+- Utilise pour: "modifie le rappel 1", "change le rappel 2 en...", "renomme le rappel", "change l'heure du rappel", "deplace le rappel a"
 
 REGLES POUR "stats":
 - Quand l'utilisateur demande des stats, statistiques, historique, bilan, rappels completes, rappels annules
 
+REGLES POUR "week":
+- Quand l'utilisateur demande ses rappels de la semaine, les 7 prochains jours, "cette semaine", "planning semaine", "vue hebdomadaire"
+
+REGLES POUR "clear":
+- Quand l'utilisateur veut nettoyer/vider son historique de rappels termines ou annules
+- Utilise pour: "nettoie mes rappels", "vide l'historique", "supprime l'historique", "archive", "clear"
+
 REGLES POUR "help":
 - Quand l'utilisateur demande de l'aide, les commandes disponibles, "aide", "help", "que peux-tu faire"
+
+REGLES POUR "overdue":
+- Quand l'utilisateur veut voir SPECIFIQUEMENT ses rappels en retard / passes / non traites
+- Utilise pour: "mes retards", "rappels en retard", "rappels passes", "voir mes retards", "liste retards"
+- DIFFERENT de "today" qui montre aujourd'hui + demain + retards en meme temps
+
+REGLES POUR "copy":
+- item = numero du rappel a dupliquer (integer, base 1)
+- new_time = nouvel horaire pour la copie (memes formats que "postpone"). null = demain meme heure
+- Utilise pour: "duplique le rappel 1", "copie le rappel 2 pour vendredi", "clone le rappel 3 a 15h"
+- La copie n'herite PAS de la recurrence, c'est un rappel unique
+
+REGLES POUR "bulk":
+- operation = "complete" (marquer faits), "delete" (supprimer), "postpone" (reporter)
+- target = "overdue" (tous les rappels en retard) — seule valeur supportee pour l'instant
+- new_time = expression temporelle (obligatoire si operation="postpone"). Memes formats que "postpone"
+- Utilise pour: "marque tous les retards comme faits", "efface tous mes retards", "reporter tous les retards de +1j", "vider tous les retards"
+
+REGLES POUR "month":
+- Quand l'utilisateur demande son planning du mois, les rappels des 30 prochains jours, la vue mensuelle
+- Utilise pour: "planning du mois", "rappels de ce mois", "mes 30 prochains jours", "vue mensuelle"
 
 EXEMPLES (basees sur la date actuelle en reference):
 - "Rappelle-moi d'appeler Jean demain a 10h" -> {"action": "create", "message": "Appeler Jean", "scheduled_at": "YYYY-MM-DD 10:00", "recurrence": null}
@@ -211,6 +284,8 @@ EXEMPLES (basees sur la date actuelle en reference):
 - "Rappels du jour" -> {"action": "today"}
 - "Prochains rappels" -> {"action": "today"}
 - "Rappels de demain" -> {"action": "today"}
+- "Quel est mon prochain rappel ?" -> {"action": "next"}
+- "C'est quoi le prochain ?" -> {"action": "next"}
 - "Supprime le rappel 2" -> {"action": "delete", "items": [2]}
 - "Supprime les rappels 1 et 3" -> {"action": "delete", "items": [1, 3]}
 - "Reporte le rappel 1 a demain 10h" -> {"action": "postpone", "item": 1, "new_time": "demain 10:00"}
@@ -222,13 +297,36 @@ EXEMPLES (basees sur la date actuelle en reference):
 - "C'est fait pour le rappel 2" -> {"action": "complete", "items": [2]}
 - "Cherche rappels jean" -> {"action": "search", "query": "jean"}
 - "Trouve mes rappels avec vitamines" -> {"action": "search", "query": "vitamines"}
-- "Modifie le rappel 1 : Appeler Marie" -> {"action": "edit", "item": 1, "new_message": "Appeler Marie"}
-- "Change le rappel 2 en 'Envoyer le rapport'" -> {"action": "edit", "item": 2, "new_message": "Envoyer le rapport"}
+- "Modifie le rappel 1 : Appeler Marie" -> {"action": "edit", "item": 1, "new_message": "Appeler Marie", "new_time": null}
+- "Change le rappel 2 en 'Envoyer le rapport'" -> {"action": "edit", "item": 2, "new_message": "Envoyer le rapport", "new_time": null}
+- "Change l'heure du rappel 1 a 15h" -> {"action": "edit", "item": 1, "new_message": null, "new_time": "15:00"}
+- "Deplace le rappel 3 a demain 9h" -> {"action": "edit", "item": 3, "new_message": null, "new_time": "demain 09:00"}
+- "Modifie le rappel 2 texte Appeler Marc et heure a 16h" -> {"action": "edit", "item": 2, "new_message": "Appeler Marc", "new_time": "16:00"}
 - "Stats rappels" -> {"action": "stats"}
 - "Historique rappels" -> {"action": "stats"}
 - "Rappels completes cette semaine" -> {"action": "stats"}
+- "Rappels de la semaine" -> {"action": "week"}
+- "Planning semaine" -> {"action": "week"}
+- "Cette semaine" -> {"action": "week"}
+- "Mes 7 prochains jours" -> {"action": "week"}
+- "Nettoie mes rappels" -> {"action": "clear"}
+- "Vide l'historique de mes rappels" -> {"action": "clear"}
 - "Aide" -> {"action": "help"}
 - "Que peux-tu faire ?" -> {"action": "help"}
+- "Rappels en retard" -> {"action": "overdue"}
+- "Mes retards" -> {"action": "overdue"}
+- "Voir mes rappels passes" -> {"action": "overdue"}
+- "Duplique le rappel 1" -> {"action": "copy", "item": 1, "new_time": null}
+- "Copie le rappel 2 pour demain 15h" -> {"action": "copy", "item": 2, "new_time": "demain 15:00"}
+- "Clone le rappel 1 a vendredi" -> {"action": "copy", "item": 1, "new_time": "vendredi prochain"}
+- "Marque tous les retards comme faits" -> {"action": "bulk", "operation": "complete", "target": "overdue", "new_time": null}
+- "Supprime tous mes retards" -> {"action": "bulk", "operation": "delete", "target": "overdue", "new_time": null}
+- "Reporte tous les retards de 1 jour" -> {"action": "bulk", "operation": "postpone", "target": "overdue", "new_time": "+1j"}
+- "Planning du mois" -> {"action": "month"}
+- "Rappels du mois" -> {"action": "month"}
+- "Mes 30 prochains jours" -> {"action": "month"}
+
+NOTE: Les rappels marques [RETARD] dans la liste sont des rappels dont l'heure est deja passee.
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -241,6 +339,12 @@ PROMPT;
                 . "\"Rappelle-moi d'appeler Jean demain a 10h\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'reminder_parse_failed']);
+        }
+
+        if (mb_strlen($parsed['message']) > 200) {
+            $reply = "Le texte du rappel est trop long (max 200 caracteres). Raccourcis-le un peu.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_message_too_long']);
         }
 
         try {
@@ -334,13 +438,22 @@ PROMPT;
     }
 
     /**
-     * NEW: Show only today's and tomorrow's reminders for a quick daily view.
+     * Show overdue, today's, and tomorrow's reminders for a quick daily view.
      */
     private function handleToday(AgentContext $context): AgentResult
     {
         $tz         = AppSetting::timezone();
-        $todayStart = now($tz)->startOfDay()->utc();
-        $todayEnd   = now($tz)->endOfDay()->utc();
+        $now        = now($tz);
+        $todayStart = $now->copy()->startOfDay()->utc();
+        $todayEnd   = $now->copy()->endOfDay()->utc();
+
+        // Overdue: past-due but still pending (before today started)
+        $overdueReminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->where('scheduled_at', '<', $todayStart)
+            ->orderBy('scheduled_at')
+            ->get();
 
         $todayReminders = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
@@ -349,8 +462,8 @@ PROMPT;
             ->orderBy('scheduled_at')
             ->get();
 
-        $tomorrowStart = now($tz)->addDay()->startOfDay()->utc();
-        $tomorrowEnd   = now($tz)->addDay()->endOfDay()->utc();
+        $tomorrowStart = $now->copy()->addDay()->startOfDay()->utc();
+        $tomorrowEnd   = $now->copy()->addDay()->endOfDay()->utc();
 
         $tomorrowReminders = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
@@ -359,21 +472,54 @@ PROMPT;
             ->orderBy('scheduled_at')
             ->get();
 
-        if ($todayReminders->isEmpty() && $tomorrowReminders->isEmpty()) {
+        if ($overdueReminders->isEmpty() && $todayReminders->isEmpty() && $tomorrowReminders->isEmpty()) {
             $reply = "Aucun rappel prevu aujourd'hui ni demain.\n\n"
                 . "Tape \"mes rappels\" pour voir tous tes rappels.";
             $this->sendText($context->from, $reply);
-            return AgentResult::reply($reply, ['action' => 'reminder_today', 'today_count' => 0, 'tomorrow_count' => 0]);
+            return AgentResult::reply($reply, [
+                'action'         => 'reminder_today',
+                'overdue_count'  => 0,
+                'today_count'    => 0,
+                'tomorrow_count' => 0,
+            ]);
+        }
+
+        // Build global numbering so action commands (delete, postpone…) use correct numbers
+        $allPending = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->limit(self::MAX_REMINDERS)
+            ->get()
+            ->values();
+
+        $idToNum = [];
+        foreach ($allPending as $i => $r) {
+            $idToNum[$r->id] = $i + 1;
         }
 
         $lines = [];
+
+        // Overdue section
+        if ($overdueReminders->isNotEmpty()) {
+            $lines[] = "*En retard ({$overdueReminders->count()}) :* ⚠️";
+            foreach ($overdueReminders as $reminder) {
+                $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+                $dateStr   = $parisTime->format('d/m H:i');
+                $recIcon   = $reminder->recurrence_rule ? ' [rec]' : '';
+                $num       = $idToNum[$reminder->id] ?? '?';
+                $lines[]   = "  #{$num} {$dateStr} — {$reminder->message}{$recIcon}";
+            }
+            $lines[] = '';
+        }
 
         if ($todayReminders->isNotEmpty()) {
             $lines[] = "*Aujourd'hui ({$todayReminders->count()}) :*";
             foreach ($todayReminders as $reminder) {
                 $time    = $reminder->scheduled_at->copy()->setTimezone($tz)->format('H:i');
                 $recIcon = $reminder->recurrence_rule ? ' [rec]' : '';
-                $lines[] = "  {$time} — {$reminder->message}{$recIcon}";
+                $num     = $idToNum[$reminder->id] ?? '?';
+                $lines[] = "  #{$num} {$time} — {$reminder->message}{$recIcon}";
             }
         } else {
             $lines[] = "Aucun rappel aujourd'hui.";
@@ -385,7 +531,8 @@ PROMPT;
             foreach ($tomorrowReminders as $reminder) {
                 $time    = $reminder->scheduled_at->copy()->setTimezone($tz)->format('H:i');
                 $recIcon = $reminder->recurrence_rule ? ' [rec]' : '';
-                $lines[] = "  {$time} — {$reminder->message}{$recIcon}";
+                $num     = $idToNum[$reminder->id] ?? '?';
+                $lines[] = "  #{$num} {$time} — {$reminder->message}{$recIcon}";
             }
         }
 
@@ -393,35 +540,101 @@ PROMPT;
         $this->sendText($context->from, $reply);
 
         $this->log($context, 'Reminder today viewed', [
+            'overdue_count'  => $overdueReminders->count(),
             'today_count'    => $todayReminders->count(),
             'tomorrow_count' => $tomorrowReminders->count(),
         ]);
 
         return AgentResult::reply($reply, [
             'action'         => 'reminder_today',
+            'overdue_count'  => $overdueReminders->count(),
             'today_count'    => $todayReminders->count(),
             'tomorrow_count' => $tomorrowReminders->count(),
         ]);
     }
 
     /**
-     * NEW: Show completion statistics and recent history.
+     * NEW: Show only the single next upcoming reminder.
+     */
+    private function handleNext(AgentContext $context): AgentResult
+    {
+        $tz  = AppSetting::timezone();
+        $now = now($tz)->utc();
+
+        $reminder = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->where('scheduled_at', '>=', $now)
+            ->orderBy('scheduled_at')
+            ->first();
+
+        if (!$reminder) {
+            $reply = "Aucun prochain rappel prevu.\n\n"
+                . "Cree un rappel avec:\n"
+                . "\"Rappelle-moi de [chose] [quand]\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_next', 'found' => false]);
+        }
+
+        $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+        $dayLabel  = $this->getDayLabel($parisTime, now($tz)->startOfDay());
+        $recText   = $reminder->recurrence_rule
+            ? "\nRecurrence : " . $this->formatRecurrenceHuman($reminder->recurrence_rule)
+            : '';
+
+        $reply = "*Prochain rappel :*\n"
+            . "{$reminder->message}\n"
+            . "{$dayLabel} a {$parisTime->format('H:i')}"
+            . $recText;
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Next reminder viewed', ['reminder_id' => $reminder->id]);
+
+        return AgentResult::reply($reply, [
+            'action'      => 'reminder_next',
+            'found'       => true,
+            'reminder_id' => $reminder->id,
+        ]);
+    }
+
+    /**
+     * Show completion statistics and recent history.
      */
     private function handleStats(AgentContext $context): AgentResult
     {
         $tz = AppSetting::timezone();
+
+        $nowUtc    = now()->utc();
+        $weekStart = now($tz)->startOfWeek(Carbon::MONDAY)->utc();
 
         $pendingCount = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
             ->where('status', 'pending')
             ->count();
 
-        $weekStart = now($tz)->startOfWeek(Carbon::MONDAY)->utc();
+        $overdueCount = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->where('scheduled_at', '<', $nowUtc)
+            ->count();
+
+        $recurringCount = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->whereNotNull('recurrence_rule')
+            ->count();
 
         $completedThisWeek = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
             ->where('status', 'sent')
             ->where('sent_at', '>=', $weekStart)
+            ->count();
+
+        $cancelledThisWeek = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'done')
+            ->whereNull('sent_at')
+            ->where('updated_at', '>=', $weekStart)
             ->count();
 
         $completedTotal = Reminder::where('requester_phone', $context->from)
@@ -431,8 +644,23 @@ PROMPT;
 
         $cancelledTotal = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
-            ->where('status', 'cancelled')
+            ->where('status', 'done')
+            ->whereNull('sent_at')
             ->count();
+
+        // Completion rate
+        $total = $completedTotal + $cancelledTotal;
+        $completionRate = $total > 0
+            ? round(($completedTotal / $total) * 100)
+            : null;
+
+        // Next upcoming reminder
+        $nextReminder = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->where('scheduled_at', '>=', $nowUtc)
+            ->orderBy('scheduled_at')
+            ->first();
 
         // Last 5 completed reminders
         $recentCompleted = Reminder::where('requester_phone', $context->from)
@@ -444,9 +672,32 @@ PROMPT;
 
         $lines   = ["*Statistiques de tes rappels :*\n"];
         $lines[] = "En attente              : {$pendingCount}";
+
+        if ($overdueCount > 0) {
+            $lines[] = "En retard (a traiter)   : {$overdueCount} ⚠️";
+        }
+
+        if ($recurringCount > 0) {
+            $lines[] = "Recurrents actifs       : {$recurringCount}";
+        }
+
         $lines[] = "Completes cette semaine : {$completedThisWeek}";
+        if ($cancelledThisWeek > 0) {
+            $lines[] = "Annules cette semaine   : {$cancelledThisWeek}";
+        }
         $lines[] = "Completes au total      : {$completedTotal}";
         $lines[] = "Annules au total        : {$cancelledTotal}";
+
+        if ($completionRate !== null) {
+            $lines[] = "Taux de completion      : {$completionRate}%";
+        }
+
+        if ($nextReminder) {
+            $parisNext = $nextReminder->scheduled_at->copy()->setTimezone($tz);
+            $dayLabel  = $this->getDayLabel($parisNext, now($tz)->startOfDay());
+            $lines[]   = "\n*Prochain rappel :*";
+            $lines[]   = "  {$nextReminder->message} — {$dayLabel} a {$parisNext->format('H:i')}";
+        }
 
         if ($recentCompleted->isNotEmpty()) {
             $lines[] = "\n*5 derniers completes :*";
@@ -463,6 +714,8 @@ PROMPT;
 
         $this->log($context, 'Reminder stats viewed', [
             'pending'             => $pendingCount,
+            'overdue'             => $overdueCount,
+            'recurring'           => $recurringCount,
             'completed_this_week' => $completedThisWeek,
             'completed_total'     => $completedTotal,
         ]);
@@ -470,6 +723,8 @@ PROMPT;
         return AgentResult::reply($reply, [
             'action'              => 'reminder_stats',
             'pending'             => $pendingCount,
+            'overdue'             => $overdueCount,
+            'recurring'           => $recurringCount,
             'completed_this_week' => $completedThisWeek,
             'completed_total'     => $completedTotal,
         ]);
@@ -494,7 +749,7 @@ PROMPT;
             $reminder = $values[$index] ?? null;
             if ($reminder) {
                 $deleted[] = $reminder->message;
-                $reminder->update(['status' => 'cancelled']);
+                $reminder->update(['status' => 'done']);
             } else {
                 $notFound[] = $num;
             }
@@ -546,6 +801,7 @@ PROMPT;
                 . "- \"+1h\", \"+30min\", \"+2j\", \"+1sem\"\n"
                 . "- \"lundi prochain\", \"vendredi prochain\"\n"
                 . "- \"semaine prochaine\"\n"
+                . "- \"15:30\" (meme jour ou demain si passe)\n"
                 . "- \"2026-03-10 14:00\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'reminder_postpone_parse_failed']);
@@ -633,7 +889,7 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'reminder_search_no_query']);
         }
 
-        $reminders = Reminder::where('requester_phone', $context->from)
+        $pendingReminders = Reminder::where('requester_phone', $context->from)
             ->where('agent_id', $context->agent->id)
             ->where('status', 'pending')
             ->where('message', 'like', '%' . $query . '%')
@@ -641,41 +897,70 @@ PROMPT;
             ->limit(self::MAX_REMINDERS)
             ->get();
 
-        if ($reminders->isEmpty()) {
-            $reply = "Aucun rappel actif avec le mot-cle \"{$query}\".\n"
-                . "Tape \"mes rappels\" pour voir tous tes rappels actifs.\n"
-                . "Tape \"stats rappels\" pour voir l'historique.";
+        // Also search in recent completed/cancelled (last 30 days)
+        $recentDone = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereIn('status', ['sent', 'done'])
+            ->where('message', 'like', '%' . $query . '%')
+            ->where('updated_at', '>=', now()->subDays(30))
+            ->orderByDesc('updated_at')
+            ->limit(5)
+            ->get();
+
+        $totalCount = $pendingReminders->count() + $recentDone->count();
+
+        if ($totalCount === 0) {
+            $reply = "Aucun rappel (actif ou recent) avec le mot-cle \"{$query}\".";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'reminder_search', 'count' => 0]);
         }
 
         $tz    = AppSetting::timezone();
-        $lines = ["*Rappels contenant \"{$query}\" ({$reminders->count()}) :*"];
+        $today = now($tz)->startOfDay();
+        $lines = ["*Rappels contenant \"{$query}\" ({$totalCount}) :*"];
 
-        foreach ($reminders as $i => $reminder) {
-            $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
-            $recText   = $reminder->recurrence_rule
-                ? ' (' . $this->formatRecurrenceHuman($reminder->recurrence_rule) . ')'
-                : '';
-            $lines[] = ($i + 1) . ". {$parisTime->format('d/m H:i')} — {$reminder->message}{$recText}";
+        if ($pendingReminders->isNotEmpty()) {
+            $lines[] = "\n*Actifs ({$pendingReminders->count()}) :*";
+            foreach ($pendingReminders as $i => $reminder) {
+                $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+                $dayLabel  = $this->getDayLabel($parisTime, $today);
+                $recText   = $reminder->recurrence_rule
+                    ? ' (' . $this->formatRecurrenceHuman($reminder->recurrence_rule) . ')'
+                    : '';
+                $lines[] = ($i + 1) . ". {$dayLabel} {$parisTime->format('H:i')} — {$reminder->message}{$recText}";
+            }
+        }
+
+        if ($recentDone->isNotEmpty()) {
+            $lines[] = "\n*Recents termines/annules :*";
+            foreach ($recentDone as $reminder) {
+                $statusLabel = $reminder->status === 'sent' ? '[fait]' : '[annule]';
+                $dateRef     = ($reminder->sent_at ?? $reminder->updated_at)->copy()->setTimezone($tz)->format('d/m');
+                $lines[]     = "  {$statusLabel} {$dateRef} — {$reminder->message}";
+            }
         }
 
         $reply = implode("\n", $lines);
         $this->sendText($context->from, $reply);
 
-        $this->log($context, 'Reminder search', ['query' => $query, 'count' => $reminders->count()]);
+        $this->log($context, 'Reminder search', ['query' => $query, 'pending' => $pendingReminders->count(), 'done' => $recentDone->count()]);
 
-        return AgentResult::reply($reply, ['action' => 'reminder_search', 'count' => $reminders->count()]);
+        return AgentResult::reply($reply, ['action' => 'reminder_search', 'count' => $totalCount]);
     }
 
+    /**
+     * Edit the message and/or the scheduled time of a reminder.
+     */
     private function handleEdit(AgentContext $context, $reminders, array $parsed): AgentResult
     {
         $item       = $parsed['item'] ?? null;
         $newMessage = trim($parsed['new_message'] ?? '');
+        $newTime    = trim($parsed['new_time'] ?? '');
 
-        if (!$item || empty($newMessage)) {
-            $reply = "Precise le numero du rappel et le nouveau texte.\n"
-                . "Ex: \"Modifie le rappel 1 : Appeler Marie\"";
+        if (!$item || (empty($newMessage) && empty($newTime))) {
+            $reply = "Precise le numero du rappel et ce que tu veux changer.\n"
+                . "Ex: \"Modifie le rappel 1 : Appeler Marie\"\n"
+                . "Ex: \"Change l'heure du rappel 2 a 15h\"";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply, ['action' => 'reminder_edit_missing']);
         }
@@ -689,24 +974,304 @@ PROMPT;
             return AgentResult::reply($reply, ['action' => 'reminder_edit_not_found']);
         }
 
-        $oldMessage = $reminder->message;
-        $reminder->update(['message' => $newMessage]);
+        $updates = [];
+        $changes = [];
+        $tz      = AppSetting::timezone();
 
-        $tz        = AppSetting::timezone();
-        $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+        // Update message if provided
+        if (!empty($newMessage)) {
+            if (mb_strlen($newMessage) > 200) {
+                $reply = "Le nouveau texte est trop long (max 200 caracteres).";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'reminder_edit_message_too_long']);
+            }
+            $updates['message'] = $newMessage;
+            $changes[]          = "Texte : *{$newMessage}*";
+        }
+
+        // Update scheduled_at if provided
+        if (!empty($newTime)) {
+            $newScheduledAt = $this->parseNewTime($newTime, $reminder->scheduled_at);
+            if (!$newScheduledAt) {
+                $reply = "Heure non reconnue. Essaie:\n"
+                    . "\"15:30\", \"demain 10h\", \"+2h\", \"lundi prochain\", \"2026-04-01 09:00\"";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'reminder_edit_bad_time']);
+            }
+            if ($newScheduledAt->isPast()) {
+                $reply = "La nouvelle date est dans le passe ("
+                    . $newScheduledAt->copy()->setTimezone($tz)->format('d/m/Y a H:i')
+                    . ").\nChoisis une date future.";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'reminder_edit_past_date']);
+            }
+            $updates['scheduled_at'] = $newScheduledAt->utc();
+            $parisNew                = $newScheduledAt->copy()->setTimezone($tz);
+            $changes[]               = "Date : le {$parisNew->format('d/m/Y')} a {$parisNew->format('H:i')}";
+        }
+
+        $oldMessage = $reminder->message;
+        $reminder->update($updates);
+
+        // Reload scheduled_at for display (may have changed)
+        $parisTime = $reminder->fresh()->scheduled_at->copy()->setTimezone($tz);
         $reply     = "Rappel modifie !\n"
-            . "Avant : {$oldMessage}\n"
-            . "Apres : *{$newMessage}*\n"
+            . implode("\n", $changes) . "\n"
             . "Prevu le {$parisTime->format('d/m/Y')} a {$parisTime->format('H:i')}";
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Reminder edited', [
             'reminder_id' => $reminder->id,
             'old_message' => $oldMessage,
-            'new_message' => $newMessage,
+            'updated'     => array_keys($updates),
         ]);
 
         return AgentResult::reply($reply, ['action' => 'reminder_edit', 'reminder_id' => $reminder->id]);
+    }
+
+    /**
+     * Show reminders for the next 7 days, grouped by day.
+     */
+    private function handleWeek(AgentContext $context): AgentResult
+    {
+        $tz        = AppSetting::timezone();
+        $weekStart = now($tz)->startOfDay()->utc();
+        $weekEnd   = now($tz)->addDays(6)->endOfDay()->utc();
+
+        $reminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->whereBetween('scheduled_at', [$weekStart, $weekEnd])
+            ->orderBy('scheduled_at')
+            ->limit(self::MAX_REMINDERS)
+            ->get();
+
+        if ($reminders->isEmpty()) {
+            $reply = "Aucun rappel prevu dans les 7 prochains jours.\n\n"
+                . "Tape \"mes rappels\" pour voir tous tes rappels actifs.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_week', 'count' => 0]);
+        }
+
+        $today   = now($tz)->startOfDay();
+        $grouped = [];
+
+        foreach ($reminders as $reminder) {
+            $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+            $dayKey    = $parisTime->format('Y-m-d');
+
+            if (!isset($grouped[$dayKey])) {
+                $grouped[$dayKey] = [
+                    'label' => $this->getDayLabel($parisTime, $today),
+                    'items' => [],
+                ];
+            }
+
+            $recIcon = $reminder->recurrence_rule ? ' [rec]' : '';
+            $grouped[$dayKey]['items'][] = "  {$parisTime->format('H:i')} — {$reminder->message}{$recIcon}";
+        }
+
+        $total = $reminders->count();
+        $lines = ["*Planning — 7 prochains jours ({$total} rappels) :*"];
+
+        foreach ($grouped as $day) {
+            $lines[] = "\n*{$day['label']} :*";
+            foreach ($day['items'] as $item) {
+                $lines[] = $item;
+            }
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Reminder week viewed', ['count' => $total]);
+
+        return AgentResult::reply($reply, ['action' => 'reminder_week', 'count' => $total]);
+    }
+
+    /**
+     * Clear (archive) all completed and cancelled reminders older than 30 days.
+     */
+    private function handleClear(AgentContext $context): AgentResult
+    {
+        $cutoff = now()->subDays(30)->utc();
+
+        $deleted = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereIn('status', ['sent', 'done'])
+            ->where('updated_at', '<', $cutoff)
+            ->delete();
+
+        if ($deleted === 0) {
+            $reply = "Aucun rappel termine/annule de plus de 30 jours a nettoyer.\n\n"
+                . "Tape \"stats rappels\" pour voir tes statistiques.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_clear', 'deleted' => 0]);
+        }
+
+        $reply = "Historique nettoye !\n"
+            . "{$deleted} rappel(s) archive(s) (termines/annules depuis plus de 30 jours).\n\n"
+            . "Tape \"stats rappels\" pour voir tes statistiques actuelles.";
+
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Reminder history cleared', ['deleted' => $deleted]);
+
+        return AgentResult::reply($reply, ['action' => 'reminder_clear', 'deleted' => $deleted]);
+    }
+
+    /**
+     * Show all overdue (past-due pending) reminders with their global list numbers.
+     */
+    private function handleOverdue(AgentContext $context): AgentResult
+    {
+        $tz  = AppSetting::timezone();
+        $now = now()->utc();
+
+        $overdue = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->where('scheduled_at', '<', $now)
+            ->orderBy('scheduled_at')
+            ->get();
+
+        if ($overdue->isEmpty()) {
+            $reply = "Aucun rappel en retard. Tu es a jour !\n\n"
+                . "Tape \"mes rappels\" pour voir ta liste complete.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_overdue', 'count' => 0]);
+        }
+
+        // Build global numbering so user can reference by number for delete/postpone
+        $allPending = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->limit(self::MAX_REMINDERS)
+            ->get()
+            ->values();
+
+        $idToNum = [];
+        foreach ($allPending as $i => $r) {
+            $idToNum[$r->id] = $i + 1;
+        }
+
+        $total = $overdue->count();
+        $lines = ["*Rappels en retard ({$total}) — a traiter :* ⚠️\n"];
+
+        foreach ($overdue as $reminder) {
+            $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+            $num       = $idToNum[$reminder->id] ?? '?';
+            $recIcon   = $reminder->recurrence_rule ? ' [rec]' : '';
+            $ago       = $this->humanDiff($reminder->scheduled_at, $now);
+            $lines[]   = "#{$num} {$parisTime->format('d/m H:i')} — {$reminder->message}{$recIcon} (il y a {$ago})";
+        }
+
+        $lines[] = "\nPour agir :";
+        $lines[] = "\"Reporte le rappel X a [heure]\" — reporter";
+        $lines[] = "\"Marque le rappel X comme fait\" — marquer fait";
+        $lines[] = "\"Supprime le rappel X\" — supprimer";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Overdue reminders viewed', ['count' => $total]);
+
+        return AgentResult::reply($reply, ['action' => 'reminder_overdue', 'count' => $total]);
+    }
+
+    /**
+     * Duplicate an existing reminder to a new date/time (no recurrence inherited).
+     */
+    private function handleCopy(AgentContext $context, $reminders, array $parsed): AgentResult
+    {
+        $item    = $parsed['item'] ?? null;
+        $newTime = trim($parsed['new_time'] ?? '');
+
+        if (!$item) {
+            $reply = "Quel rappel veux-tu dupliquer ?\nEx: \"Duplique le rappel 1 pour demain 15h\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_copy_missing']);
+        }
+
+        $index    = (int) $item - 1;
+        $reminder = $reminders->values()[$index] ?? null;
+
+        if (!$reminder) {
+            $reply = "Rappel #{$item} introuvable. Tape \"mes rappels\" pour voir la liste.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_copy_not_found']);
+        }
+
+        $tz = AppSetting::timezone();
+
+        if (!empty($newTime)) {
+            $newScheduledAt = $this->parseNewTime($newTime, $reminder->scheduled_at);
+            if (!$newScheduledAt) {
+                $reply = "Heure non reconnue. Essaie:\n"
+                    . "\"demain 15h\", \"+2j\", \"lundi prochain\", \"2026-04-01 09:00\"";
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'reminder_copy_bad_time']);
+            }
+        } else {
+            // Default: same time, tomorrow
+            $currentLocal   = $reminder->scheduled_at->copy()->setTimezone($tz);
+            $newScheduledAt = now($tz)->addDay()->setTime($currentLocal->hour, $currentLocal->minute, 0);
+        }
+
+        if ($newScheduledAt->isPast()) {
+            $reply = "La date cible est dans le passe ("
+                . $newScheduledAt->copy()->setTimezone($tz)->format('d/m/Y a H:i')
+                . ").\nChoisis une date future.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_copy_past_date']);
+        }
+
+        $newReminder = Reminder::create([
+            'agent_id'        => $context->agent->id,
+            'requester_phone' => $context->from,
+            'requester_name'  => $context->senderName,
+            'message'         => $reminder->message,
+            'channel'         => 'whatsapp',
+            'scheduled_at'    => $newScheduledAt->copy()->utc(),
+            'recurrence_rule' => null,
+            'status'          => 'pending',
+        ]);
+
+        $parisTime = $newScheduledAt->copy()->setTimezone($tz);
+        $reply     = "Rappel duplique !\n"
+            . "*{$reminder->message}*\n"
+            . "Le {$parisTime->format('d/m/Y')} a {$parisTime->format('H:i')}";
+
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Reminder copied', [
+            'source_id' => $reminder->id,
+            'new_id'    => $newReminder->id,
+        ]);
+
+        return AgentResult::reply($reply, [
+            'action'    => 'reminder_copy',
+            'source_id' => $reminder->id,
+            'new_id'    => $newReminder->id,
+        ]);
+    }
+
+    /**
+     * Human-readable duration between two UTC Carbon instances (past -> now).
+     */
+    private function humanDiff(Carbon $past, Carbon $now): string
+    {
+        $diffMinutes = (int) abs($past->diffInMinutes($now));
+        if ($diffMinutes < 60) {
+            return "{$diffMinutes} min";
+        }
+        $diffHours = (int) abs($past->diffInHours($now));
+        if ($diffHours < 24) {
+            return "{$diffHours}h";
+        }
+        $diffDays = (int) abs($past->diffInDays($now));
+        return "{$diffDays}j";
     }
 
     private function handleHelp(AgentContext $context): AgentResult
@@ -717,14 +1282,24 @@ PROMPT;
             . "\"Rappelle-moi en semaine a 8h de prendre mes vitamines\"\n\n"
             . "*Voir les rappels :*\n"
             . "\"Mes rappels\" ou \"Mon agenda\" (liste complete)\n"
-            . "\"Rappels d'aujourd'hui\" ou \"Rappels du jour\"\n\n"
+            . "\"Rappels d'aujourd'hui\" ou \"Rappels du jour\" (avec retards)\n"
+            . "\"Rappels en retard\" ou \"Mes retards\" (vue dediee retards)\n"
+            . "\"Planning semaine\" ou \"Cette semaine\" (7 prochains jours)\n"
+            . "\"Planning du mois\" ou \"Mes 30 prochains jours\" (vue mensuelle)\n"
+            . "\"Prochain rappel\" (vue rapide, 1 seul)\n\n"
             . "*Statistiques & historique :*\n"
-            . "\"Stats rappels\" ou \"Historique rappels\"\n\n"
+            . "\"Stats rappels\" ou \"Historique rappels\"\n"
+            . "\"Nettoie mes rappels\" (archive l'historique > 30 jours)\n\n"
             . "*Chercher des rappels :*\n"
             . "\"Cherche rappels jean\"\n"
             . "\"Trouve mes rappels avec vitamines\"\n\n"
             . "*Modifier un rappel :*\n"
-            . "\"Modifie le rappel 1 : Appeler Marie\"\n\n"
+            . "\"Modifie le rappel 1 : Appeler Marie\" (texte)\n"
+            . "\"Change l'heure du rappel 2 a 15h\" (heure)\n"
+            . "\"Deplace le rappel 3 a demain 9h\" (texte + heure)\n\n"
+            . "*Dupliquer un rappel :*\n"
+            . "\"Duplique le rappel 1\" (copie pour demain meme heure)\n"
+            . "\"Copie le rappel 2 pour vendredi 15h\"\n\n"
             . "*Reporter un rappel :*\n"
             . "\"Reporte le rappel 1 a demain 10h\"\n"
             . "\"Reporte le rappel 2 de +1h\" ou \"+1sem\"\n"
@@ -735,6 +1310,10 @@ PROMPT;
             . "*Supprimer un rappel :*\n"
             . "\"Supprime le rappel 2\"\n"
             . "\"Supprime les rappels 1 et 3\"\n\n"
+            . "*Actions en masse (retards) :*\n"
+            . "\"Marque tous les retards comme faits\"\n"
+            . "\"Supprime tous mes retards\"\n"
+            . "\"Reporte tous les retards de +1j\"\n\n"
             . "*Recurrences supportees :*\n"
             . "- Chaque jour : \"tous les jours a 7h\"\n"
             . "- En semaine : \"en semaine a 8h\"\n"
@@ -743,6 +1322,164 @@ PROMPT;
 
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'reminder_help']);
+    }
+
+    /**
+     * Bulk action on a set of reminders (currently only target=overdue).
+     */
+    private function handleBulk(AgentContext $context, array $parsed): AgentResult
+    {
+        $operation = $parsed['operation'] ?? null;
+        $target    = $parsed['target']    ?? 'overdue';
+        $newTime   = trim($parsed['new_time'] ?? '');
+        $tz        = AppSetting::timezone();
+
+        if (!in_array($operation, ['complete', 'delete', 'postpone'], true)) {
+            $reply = "Operation non reconnue. Dis-moi:\n"
+                . "\"Marque tous les retards comme faits\"\n"
+                . "\"Supprime tous mes retards\"\n"
+                . "\"Reporte tous les retards de +1j\"";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_bulk_bad_operation']);
+        }
+
+        $query = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending');
+
+        if ($target === 'overdue') {
+            $query->where('scheduled_at', '<', now()->utc());
+        }
+
+        $reminders = $query->orderBy('scheduled_at')->get();
+
+        if ($reminders->isEmpty()) {
+            $what  = $target === 'overdue' ? 'en retard' : 'concernes';
+            $reply = "Aucun rappel {$what} a traiter. Tu es a jour !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_bulk_empty']);
+        }
+
+        $count = $reminders->count();
+
+        switch ($operation) {
+            case 'complete':
+                $reminders->each(fn($r) => $r->update(['status' => 'sent', 'sent_at' => now()]));
+                $reply = "{$count} rappel(s) marque(s) comme faits !\n\n"
+                    . "Tape \"stats rappels\" pour voir ton bilan.";
+                break;
+
+            case 'delete':
+                $reminders->each(fn($r) => $r->update(['status' => 'done']));
+                $reply = "{$count} rappel(s) supprime(s) !\n\n"
+                    . "Tape \"stats rappels\" pour voir ton bilan.";
+                break;
+
+            case 'postpone':
+                if (empty($newTime)) {
+                    $reply = "Precise de combien reporter. Ex:\n"
+                        . "\"Reporte tous les retards de +1j\"\n"
+                        . "\"Reporte tous les retards a demain 9h\"";
+                    $this->sendText($context->from, $reply);
+                    return AgentResult::reply($reply, ['action' => 'reminder_bulk_postpone_missing_time']);
+                }
+
+                $postponed = 0;
+                foreach ($reminders as $reminder) {
+                    $newScheduledAt = $this->parseNewTime($newTime, $reminder->scheduled_at);
+                    if ($newScheduledAt && !$newScheduledAt->isPast()) {
+                        $reminder->update(['scheduled_at' => $newScheduledAt->copy()->utc()]);
+                        $postponed++;
+                    }
+                }
+
+                $firstNew = $this->parseNewTime($newTime, $reminders->first()->scheduled_at);
+                $timeLabel = $firstNew
+                    ? $firstNew->copy()->setTimezone($tz)->format('d/m a H:i')
+                    : $newTime;
+                $reply = "{$postponed}/{$count} rappel(s) reporte(s) (a partir du {$timeLabel}).";
+                break;
+
+            default:
+                $reply = "Operation inconnue.";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Bulk reminder action', [
+            'operation' => $operation,
+            'target'    => $target,
+            'count'     => $count,
+        ]);
+
+        return AgentResult::reply($reply, [
+            'action'    => 'reminder_bulk',
+            'operation' => $operation,
+            'target'    => $target,
+            'count'     => $count,
+        ]);
+    }
+
+    /**
+     * Show reminders for the next 30 days, grouped by week.
+     */
+    private function handleMonth(AgentContext $context): AgentResult
+    {
+        $tz         = AppSetting::timezone();
+        $monthStart = now($tz)->startOfDay()->utc();
+        $monthEnd   = now($tz)->addDays(29)->endOfDay()->utc();
+
+        $reminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->whereBetween('scheduled_at', [$monthStart, $monthEnd])
+            ->orderBy('scheduled_at')
+            ->limit(self::MAX_REMINDERS)
+            ->get();
+
+        if ($reminders->isEmpty()) {
+            $reply = "Aucun rappel prevu dans les 30 prochains jours.\n\n"
+                . "Tape \"mes rappels\" pour voir tous tes rappels actifs.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'reminder_month', 'count' => 0]);
+        }
+
+        $today   = now($tz)->startOfDay();
+        $grouped = [];
+
+        foreach ($reminders as $reminder) {
+            $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
+            $weekKey   = $parisTime->format('o') . '-W' . $parisTime->format('W');
+
+            if (!isset($grouped[$weekKey])) {
+                $weekMonday = $parisTime->copy()->startOfWeek(Carbon::MONDAY);
+                $weekSunday = $parisTime->copy()->endOfWeek(Carbon::SUNDAY);
+                $grouped[$weekKey] = [
+                    'label' => 'Semaine du ' . $weekMonday->format('d/m') . ' au ' . $weekSunday->format('d/m'),
+                    'items' => [],
+                ];
+            }
+
+            $dayLabel = $this->getDayLabel($parisTime, $today);
+            $recIcon  = $reminder->recurrence_rule ? ' [rec]' : '';
+            $grouped[$weekKey]['items'][] = "  {$dayLabel} {$parisTime->format('H:i')} — {$reminder->message}{$recIcon}";
+        }
+
+        $total = $reminders->count();
+        $lines = ["*Planning mensuel — 30 prochains jours ({$total} rappels) :*"];
+
+        foreach ($grouped as $week) {
+            $lines[] = "\n*{$week['label']} :*";
+            foreach ($week['items'] as $item) {
+                $lines[] = $item;
+            }
+        }
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+
+        $this->log($context, 'Reminder month viewed', ['count' => $total]);
+
+        return AgentResult::reply($reply, ['action' => 'reminder_month', 'count' => $total]);
     }
 
     private function handleUnknownAction(AgentContext $context, string $action): AgentResult
@@ -758,6 +1495,31 @@ PROMPT;
         $expr = trim($expr);
         $tz   = AppSetting::timezone();
         $now  = now($tz);
+
+        // "ce soir" -> today at 20:00 (or tomorrow if past)
+        if (preg_match('/^ce\s+soir$/i', $expr)) {
+            $candidate = $now->copy()->setTime(20, 0, 0);
+            return $candidate->isPast() ? $candidate->addDay() : $candidate;
+        }
+
+        // "ce matin" -> today at 08:00 (or tomorrow if past)
+        if (preg_match('/^ce\s+matin$/i', $expr)) {
+            $candidate = $now->copy()->setTime(8, 0, 0);
+            return $candidate->isPast() ? $candidate->addDay() : $candidate;
+        }
+
+        // "ce midi" -> today at 12:00 (or tomorrow if past)
+        if (preg_match('/^ce\s+midi$/i', $expr)) {
+            $candidate = $now->copy()->setTime(12, 0, 0);
+            return $candidate->isPast() ? $candidate->addDay() : $candidate;
+        }
+
+        // "dans X minutes/heures" (without leading +)
+        if (preg_match('/^dans\s+(\d+)\s*(min|minutes?|h|heures?)$/i', $expr, $m)) {
+            $amount = (int) $m[1];
+            $unit   = strtolower($m[2]);
+            return str_starts_with($unit, 'h') ? $now->copy()->addHours($amount) : $now->copy()->addMinutes($amount);
+        }
 
         // Relative: +Xmin, +Xh, +Xj, +Xsem/w (also handles spaces: "+ 2 j")
         if (preg_match('/^\+\s*(\d+)\s*(min|minutes?|h|heures?|j|jours?|sem|semaines?|w|weeks?)$/i', $expr, $m)) {
@@ -826,6 +1588,17 @@ PROMPT;
             } catch (\Exception $e) {
                 return null;
             }
+        }
+
+        // "HH:MM" or "HHh" or "HHhMM" — same day, or tomorrow if hour has passed
+        if (preg_match('/^(\d{1,2})[h:](\d{2})?$/i', $expr, $m)) {
+            $h         = (int) $m[1];
+            $min       = isset($m[2]) && $m[2] !== '' ? (int) $m[2] : 0;
+            $candidate = $now->copy()->setTime($h, $min, 0);
+            if ($candidate->isPast()) {
+                $candidate->addDay();
+            }
+            return $candidate;
         }
 
         return null;
@@ -943,11 +1716,14 @@ PROMPT;
         $tz    = AppSetting::timezone();
         $lines = [];
 
+        $nowUtc = now()->utc();
+
         foreach ($reminders->values() as $i => $reminder) {
-            $num       = $i + 1;
-            $parisTime = $reminder->scheduled_at->copy()->setTimezone($tz);
-            $recText   = $reminder->recurrence_rule ? " [recurrent: {$reminder->recurrence_rule}]" : '';
-            $lines[]   = "#{$num} {$parisTime->format('Y-m-d H:i')} — {$reminder->message}{$recText}";
+            $num        = $i + 1;
+            $parisTime  = $reminder->scheduled_at->copy()->setTimezone($tz);
+            $recText    = $reminder->recurrence_rule ? " [recurrent: {$reminder->recurrence_rule}]" : '';
+            $overdueTag = $reminder->scheduled_at->lt($nowUtc) ? ' [RETARD]' : '';
+            $lines[]    = "#{$num} {$parisTime->format('Y-m-d H:i')} — {$reminder->message}{$recText}{$overdueTag}";
         }
 
         return implode("\n", $lines);

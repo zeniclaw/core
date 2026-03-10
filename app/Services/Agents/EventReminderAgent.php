@@ -22,7 +22,7 @@ class EventReminderAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion d\'evenements et calendrier. Permet de creer, lister, rechercher, modifier, dupliquer, reporter et supprimer des evenements avec date, heure, lieu, participants et rappels automatiques configurables. Supporte la vue du jour, de la semaine, du mois, le detail par ID et la confirmation avant suppression.';
+        return 'Agent de gestion d\'evenements et calendrier. Permet de creer, lister, rechercher, modifier, dupliquer, reporter et supprimer des evenements avec date, heure, lieu, participants et rappels automatiques configurables. Supporte la vue du jour, de la semaine, du mois, l\'agenda par date precise, l\'historique des evenements passes/annules, le detail par ID, la confirmation avant suppression, l\'ajout de notes sur un evenement et l\'export formaté de la semaine.';
     }
 
     public function keywords(): array
@@ -51,18 +51,32 @@ class EventReminderAgent extends BaseAgent
             'stats', 'statistiques', 'statistics', 'bilan calendrier',
             'done event', 'terminer evenement', 'evenement termine', 'mark done',
             'marquer fait', 'marquer termine',
+            'history', 'historique', 'history events', 'historique evenements',
+            'prochains jours', 'next days', 'prochains evenements', 'upcoming',
+            'restore event', 'restaurer evenement', 'reactiver evenement', 'restore',
+            'evenements passes', 'événements passés', 'archives', 'archives evenements',
+            'termines', 'annules', 'evenements termines', 'evenements annules',
+            'agenda', 'agenda date', 'evenements le', 'events on',
+            'briefing', 'briefing agenda', 'resume agenda', 'digest agenda', 'resume du jour',
+            'clear history', 'vider historique', 'purge history', 'purger evenements',
+            'effacer historique', 'supprimer historique',
+            'note event', 'ajouter note', 'note evenement', 'append note',
+            'export week', 'export semaine', 'recap semaine', 'recap week',
+            'partager semaine', 'partager agenda', 'summary week',
+            'conflicts', 'conflits', 'check conflicts', 'verifier conflits', 'conflit agenda',
+            'conflit horaire', 'chevauchement', 'overlap events',
         ];
     }
 
     public function version(): string
     {
-        return '1.4.0';
+        return '1.9.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
-        return (bool) preg_match('/\b(event|evenement|événement|calendrier|calendar|agenda|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|modifier\s+evenement|event\s+on|rdv|rendez-vous|rendez\s+vous|appointment|planifier|search\s+event|chercher\s+evenement|week\s+events?|cette\s+semaine|this\s+week|duplicate\s+event|dupliquer|copier\s+evenement|copy\s+event|show\s+event|detail\s+event|month\s+events?|ce\s+mois|this\s+month|postpone|reporter\s+evenement|decaler|next\s+event|prochain\s+evenement|prochain\s+événement|stats\s+events?|statistiques|done\s+event|terminer\s+evenement|mark\s+done|marquer\s+fait)\b/iu', $context->body);
+        return (bool) preg_match('/\b(event|evenement|événement|calendrier|calendar|agenda|remind\s+me\s+about|add\s+event|list\s+events?|remove\s+event|update\s+event|modifier\s+evenement|event\s+on|rdv|rendez-vous|rendez\s+vous|appointment|planifier|search\s+event|chercher\s+evenement|week\s+events?|cette\s+semaine|this\s+week|duplicate\s+event|dupliquer|copier\s+evenement|copy\s+event|show\s+event|detail\s+event|month\s+events?|ce\s+mois|this\s+month|postpone|reporter\s+evenement|decaler|next\s+event|prochain\s+evenement|prochain\s+événement|stats\s+events?|statistiques|done\s+event|terminer\s+evenement|mark\s+done|marquer\s+fait|history|historique|archives?|evenements?\s+passes?|termines?|annules?|prochains?\s+\d+\s+jours?|next\s+\d+\s+days?|restore\s+event|restaurer\s+evenement|reactiver\s+evenement|upcoming|briefing|digest\s+agenda|resume\s+agenda|clear\s+history|vider\s+historique|purge\s+history|purger\s+evenements|effacer\s+historique|supprimer\s+historique|note\s+event|ajouter\s+note|note\s+evenement|append\s+note|export\s+(?:week|semaine)|recap\s+(?:week|semaine)|partager\s+(?:semaine|agenda)|summary\s+week|conflicts?|conflits?|check\s+conflicts?|v[eé]rifier\s+conflits?|conflit\s+(?:agenda|horaire)|chevauchement)\b/iu', $context->body);
     }
 
     public function handle(AgentContext $context): AgentResult
@@ -77,14 +91,37 @@ class EventReminderAgent extends BaseAgent
             return $this->showEventDetails($context, (int) $m[2]);
         }
 
+        // Batch mark events as done: done events #1 #2 #3
+        if (preg_match('/\b(done|terminer|termine|fait|completed?|mark\s+done|marquer\s+(?:fait|termine))\s*(?:events?|evenements?)?\s+((?:#?\d+[\s,]+){1,}#?\d+)\b/iu', $body, $bm)) {
+            preg_match_all('/\d+/', $bm[2], $bids);
+            if (!empty($bids[0]) && count($bids[0]) > 1) {
+                return $this->batchMarkDone($context, array_map('intval', $bids[0]));
+            }
+        }
+
         // Mark event as done
         if (preg_match('/\b(done|terminer|termine|fait|completed?|mark\s+done|marquer\s+(?:fait|termine))\s*(?:event|evenement)?\s*#?(\d+)/iu', $lower, $m)) {
             return $this->markEventDone($context, (int) $m[2]);
         }
 
+        // Briefing (smart daily briefing with LLM)
+        if (preg_match('/\b(briefing|digest\s+agenda|resume\s+agenda|resume\s+du\s+jour)\b/iu', $lower)) {
+            return $this->briefingEvents($context);
+        }
+
+        // Clear history (purge done/cancelled events)
+        if (preg_match('/\b(clear\s+history|vider\s+historique|purge\s+history|purger\s+evenements?|effacer\s+historique|supprimer\s+historique)\b/iu', $lower)) {
+            return $this->confirmClearHistory($context);
+        }
+
         // Stats
         if (preg_match('/\b(stats?|statistiques?|statistics?|bilan)\s*(?:events?|evenements?|calendrier)?/iu', $lower)) {
             return $this->statsEvents($context);
+        }
+
+        // Detect scheduling conflicts
+        if (preg_match('/\b(conflicts?|conflits?|check\s+conflicts?|v[eé]rifier\s+conflits?|conflit\s+(?:agenda|horaire)|chevauchement|overlap\s+events?)\b/iu', $lower)) {
+            return $this->detectConflicts($context);
         }
 
         // Next event
@@ -138,6 +175,50 @@ class EventReminderAgent extends BaseAgent
             return $this->searchEvents($context, trim($m[2]));
         }
 
+        // History (past/done/cancelled events) with optional status filter
+        if (preg_match('/\b(history|historique|archives?|evenements?\s+passes?|evenements?\s+termines?|evenements?\s+annules?)\b/iu', $lower)) {
+            $statusFilter = null;
+            if (preg_match('/\b(?:history|historique)\s+(?:done|termines?)\b/iu', $lower)
+                || preg_match('/\bevenements?\s+termines?\b/iu', $lower)) {
+                $statusFilter = 'done';
+            } elseif (preg_match('/\b(?:history|historique)\s+(?:cancel(?:led)?|annules?)\b/iu', $lower)
+                || preg_match('/\bevenements?\s+annules?\b/iu', $lower)) {
+                $statusFilter = 'cancelled';
+            }
+            return $this->historyEvents($context, $statusFilter);
+        }
+
+        // Restore event
+        if (preg_match('/\b(restore|restaurer|reactiver)\s*(?:event|evenement)?\s*#?(\d+)/iu', $lower, $m)) {
+            return $this->restoreEvent($context, (int) $m[2]);
+        }
+
+        // Upcoming N days
+        if (preg_match('/\b(?:prochains?\s+(\d+)\s+jours?|next\s+(\d+)\s+days?|upcoming\s+(\d+))\b/iu', $lower, $m)) {
+            $days = (int) ($m[1] ?: $m[2] ?: $m[3]);
+            return $this->upcomingDays($context, max(1, min($days, 90)));
+        }
+
+        // Upcoming without N → default 7 days
+        if (preg_match('/\b(upcoming|prochains?\s+evenements?|prochains?\s+jours?|next\s+events?)\b/iu', $lower)) {
+            return $this->upcomingDays($context, 7);
+        }
+
+        // Agenda for a specific date
+        if (preg_match('/\b(?:agenda|events?\s+on|evenements?\s+(?:le|du|pour))\s+(.+)/iu', $body, $m)) {
+            return $this->agendaDate($context, trim($m[1]));
+        }
+
+        // Append note to event
+        if (preg_match('/\b(?:note|ajouter?\s*(?:une?\s*)?note|append\s+note)\s*(?:event|evenement|evenement)?\s*#?(\d+)\s+(.+)/iu', $body, $m)) {
+            return $this->appendNoteToEvent($context, (int) $m[1], trim($m[2]));
+        }
+
+        // Export / recap week
+        if (preg_match('/\b(export|recap|recapitulatif|partager|partage|summary)\s*(?:de\s+(?:la\s+)?)?(?:semaine|week|agenda)?\b/iu', $lower)) {
+            return $this->exportWeek($context);
+        }
+
         // Natural language: use Claude to parse event details
         return $this->handleNaturalLanguage($context, $body);
     }
@@ -157,6 +238,21 @@ class EventReminderAgent extends BaseAgent
             }
 
             $reply = "Suppression annulee. L'evenement #{$eventId} est conserve.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        if ($type === 'confirm_clear_history') {
+            $body  = mb_strtolower(trim($context->body ?? ''));
+            $count = (int) ($pendingContext['data']['count'] ?? 0);
+
+            $this->clearPendingContext($context);
+
+            if (preg_match('/^(oui|yes|o|y|ok|confirme|confirm|delete|si|1)\b/iu', $body)) {
+                return $this->clearHistory($context, $count);
+            }
+
+            $reply = "Purge annulee. Ton historique est conserve.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
@@ -212,8 +308,26 @@ class EventReminderAgent extends BaseAgent
             'done'      => isset($parsed['event_id'])
                 ? $this->markEventDone($context, (int) $parsed['event_id'])
                 : $this->showHelp($context),
-            'help'      => $this->showHelp($context),
-            default     => $this->showHelp($context),
+            'history'        => $this->historyEvents($context),
+            'agenda'         => isset($parsed['date'])
+                ? $this->agendaDate($context, $parsed['date'])
+                : $this->showHelp($context),
+            'upcoming_days'  => isset($parsed['days'])
+                ? $this->upcomingDays($context, max(1, min((int) $parsed['days'], 90)))
+                : $this->upcomingDays($context, 7),
+            'restore'        => isset($parsed['event_id'])
+                ? $this->restoreEvent($context, (int) $parsed['event_id'])
+                : $this->showHelp($context),
+            'briefing'       => $this->briefingEvents($context),
+            'clear_history'  => $this->confirmClearHistory($context),
+            'note'           => isset($parsed['event_id'], $parsed['note'])
+                ? $this->appendNoteToEvent($context, (int) $parsed['event_id'], $parsed['note'])
+                : $this->showHelp($context),
+            'export_week'    => $this->exportWeek($context),
+            'conflicts'      => $this->detectConflicts($context),
+            'upcoming'       => $this->upcomingDays($context, 7),
+            'help'           => $this->showHelp($context),
+            default          => $this->showHelp($context),
         };
     }
 
@@ -227,7 +341,7 @@ class EventReminderAgent extends BaseAgent
 Tu es un assistant de gestion d'evenements. Analyse le message et reponds UNIQUEMENT en JSON valide, sans markdown.
 
 FORMAT JSON:
-{"action": "create|list|today|week|month|show|remove|update|search|duplicate|postpone|next|stats|done|help", ...champs selon action}
+{"action": "create|list|today|week|month|show|remove|update|search|duplicate|postpone|next|stats|done|history|agenda|upcoming_days|restore|briefing|clear_history|note|export_week|conflicts|upcoming|help", ...champs selon action}
 
 ACTIONS:
 
@@ -276,8 +390,39 @@ days = nombre de jours entier positif (1 semaine = 7, 2 semaines = 14, 1 mois �
 14. MARQUER un evenement comme TERMINE:
 {"action": "done", "event_id": 5}
 
-15. AIDE:
+15. HISTORIQUE (evenements passes, termines, annules):
+{"action": "history"}
+
+16. AGENDA pour une date precise:
+{"action": "agenda", "date": "YYYY-MM-DD"}
+
+17. AIDE:
 {"action": "help"}
+
+18. PROCHAINS N JOURS (liste events des N prochains jours):
+{"action": "upcoming_days", "days": 5}
+days = nombre de jours (1 a 90)
+
+19. RESTAURER un evenement annule ou termine:
+{"action": "restore", "event_id": 5}
+
+20. BRIEFING AGENDA (resume IA du jour + semaine):
+{"action": "briefing"}
+
+21. VIDER L'HISTORIQUE (supprimer tous les evenements termines/annules):
+{"action": "clear_history"}
+
+22. AJOUTER UNE NOTE a un evenement (ajoute du texte a la description):
+{"action": "note", "event_id": 5, "note": "texte de la note"}
+
+23. EXPORTER / RECAP de la semaine (resume partageabe des evenements de la semaine):
+{"action": "export_week"}
+
+24. DETECTER LES CONFLITS D'HORAIRE (evenements au meme moment):
+{"action": "conflicts"}
+
+25. VOIR LES PROCHAINS EVENEMENTS (sans nombre de jours specifie, defaut 7 jours):
+{"action": "upcoming"}
 
 REGLES:
 - 'remind me about X on DATE at TIME' → create
@@ -297,6 +442,16 @@ REGLES:
 - 'prochain event' / 'next event' / 'c\'est quoi le prochain' → next
 - 'stats events' / 'statistiques' / 'bilan' → stats
 - 'event #5 done' / 'mark event #5 done' / 'terminer event #5' → done
+- 'history' / 'historique' / 'mes evenements passes' / 'archives' → history
+- 'agenda 15 mars' / 'events on 2026-03-20' / 'evenements du 20 mars' → agenda avec date
+- 'prochains 5 jours' / 'next 5 days' / 'evenements prochains 3 jours' → upcoming_days avec days
+- 'restore event #5' / 'restaurer evenement #5' / 'reactiver event #5' → restore avec event_id
+- 'briefing' / 'resume agenda' / 'digest agenda' / 'mon briefing du jour' → briefing
+- 'clear history' / 'vider historique' / 'purge history' / 'supprimer historique' → clear_history
+- 'note event #5 Apporter le rapport' / 'ajouter note evenement #3 Call conference' → note avec event_id et note
+- 'export semaine' / 'recap semaine' / 'partager agenda' / 'summary week' → export_week
+- 'conflicts' / 'conflits' / 'check conflicts' / 'verifier conflits' / 'chevauchement' → conflicts
+- 'upcoming' / 'prochains evenements' → upcoming
 - Ne mets que les champs pertinents pour l'action
 
 EXEMPLES:
@@ -317,6 +472,12 @@ EXEMPLES:
 - "reporte l'event #3 de 1 semaine" → {"action":"postpone","event_id":3,"days":7}
 - "postpone event #2 by 3 days" → {"action":"postpone","event_id":2,"days":3}
 - "l'event #4 est termine" → {"action":"done","event_id":4}
+- "mes evenements passes" → {"action":"history"}
+- "agenda du 20 mars" → {"action":"agenda","date":"{$nextWeek}"}
+- "evenements le 2026-03-20" → {"action":"agenda","date":"2026-03-20"}
+- "prochains 5 jours" → {"action":"upcoming_days","days":5}
+- "next 3 days events" → {"action":"upcoming_days","days":3}
+- "restaure l'event #7" → {"action":"restore","event_id":7}
 
 Reponds UNIQUEMENT avec le JSON.
 PROMPT;
@@ -371,6 +532,23 @@ PROMPT;
             return AgentResult::reply($reply);
         }
 
+        // Conflict detection: warn if another active event exists on same date/time
+        $conflictQuery = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', $parsedDate->format('Y-m-d'));
+
+        if ($eventTime) {
+            $conflictQuery->where('event_time', $eventTime);
+        }
+
+        $conflict = $conflictQuery->first();
+        $conflictWarning = '';
+        if ($conflict) {
+            $conflictTime = $eventTime ?: 'toute la journee';
+            $conflictWarning = "\n\n⚠️ _Attention : tu as deja un evenement ce jour"
+                . ($eventTime ? " a {$eventTime}" : '') . " : *{$conflict->event_name}* (#{$conflict->id})._";
+        }
+
         $event = EventReminder::create([
             'user_phone'              => $context->from,
             'event_name'              => $eventName,
@@ -386,14 +564,17 @@ PROMPT;
 
         $this->log($context, 'Event created', ['event_id' => $event->id, 'name' => $eventName]);
 
-        $reply = $this->enrichResponse($event, 'create');
+        $reply = $this->enrichResponse($event, 'create') . $conflictWarning;
         $this->sendText($context->from, $reply);
 
-        return AgentResult::reply($reply, ['event_id' => $event->id]);
+        return AgentResult::reply($reply, ['event_id' => $event->id, 'conflict' => $conflict?->id]);
     }
 
     private function listEvents(AgentContext $context): AgentResult
     {
+        $totalCount = EventReminder::where('user_phone', $context->from)
+            ->active()->upcoming()->count();
+
         $events = EventReminder::where('user_phone', $context->from)
             ->active()
             ->upcoming()
@@ -411,8 +592,8 @@ PROMPT;
             return AgentResult::reply($reply);
         }
 
-        $total = $events->count();
-        $reply = "*Tes evenements a venir ({$total}) :*\n";
+        $shown = $events->count();
+        $reply = "*Tes evenements a venir ({$totalCount}) :*\n";
 
         $currentDay = null;
         foreach ($events as $event) {
@@ -424,12 +605,16 @@ PROMPT;
             $reply .= $this->formatEventLine($event) . "\n";
         }
 
-        $reply .= "\n_Commandes : show/remove/update/postpone/duplicate event #ID_";
+        if ($totalCount > 20) {
+            $reply .= "\n_... et " . ($totalCount - 20) . " autre(s). Tape *prochains 30 jours* ou *search event [mot-cle]* pour voir plus._\n";
+        }
+
+        $reply .= "\n_Commandes : show/done/remove/update/postpone/duplicate event #ID_";
 
         $this->sendText($context->from, $reply);
-        $this->log($context, 'Events listed', ['count' => $total]);
+        $this->log($context, 'Events listed', ['count' => $totalCount]);
 
-        return AgentResult::reply($reply, ['count' => $total]);
+        return AgentResult::reply($reply, ['count' => $totalCount]);
     }
 
     private function todayEvents(AgentContext $context): AgentResult
@@ -442,22 +627,44 @@ PROMPT;
             ->orderBy('event_time')
             ->get();
 
-        if ($events->isEmpty()) {
+        // Also fetch overdue active events (previous days, still active)
+        $overdueEvents = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', '<', $today->format('Y-m-d'))
+            ->orderBy('event_date', 'desc')
+            ->orderBy('event_time')
+            ->limit(5)
+            ->get();
+
+        if ($events->isEmpty() && $overdueEvents->isEmpty()) {
             $reply = "Aucun evenement prevu aujourd'hui (" . $today->translatedFormat('l j F') . ").\n\n"
                 . "Tape *list events* pour voir tous tes evenements a venir.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        $reply = "*Evenements du " . $today->translatedFormat('l j F Y') . " :*\n\n";
-        foreach ($events as $event) {
-            $reply .= $this->formatEventLine($event) . "\n";
+        $reply = "*Agenda du " . $today->translatedFormat('l j F Y') . " :*\n\n";
+
+        if ($events->isNotEmpty()) {
+            foreach ($events as $event) {
+                $reply .= $this->formatEventLine($event) . "\n";
+            }
+        } else {
+            $reply .= "_Aucun evenement aujourd'hui._\n";
+        }
+
+        if ($overdueEvents->isNotEmpty()) {
+            $reply .= "\n*En retard ({$overdueEvents->count()}) :*\n";
+            foreach ($overdueEvents as $event) {
+                $reply .= $this->formatEventLine($event) . "\n";
+            }
+            $reply .= "\n_Ces evenements sont passes mais toujours actifs. Tape *done event #ID* ou *remove event #ID*._";
         }
 
         $this->sendText($context->from, $reply);
-        $this->log($context, 'Today events listed', ['count' => $events->count()]);
+        $this->log($context, 'Today events listed', ['count' => $events->count(), 'overdue' => $overdueEvents->count()]);
 
-        return AgentResult::reply($reply, ['count' => $events->count()]);
+        return AgentResult::reply($reply, ['count' => $events->count(), 'overdue' => $overdueEvents->count()]);
     }
 
     private function weekEvents(AgentContext $context): AgentResult
@@ -555,7 +762,8 @@ PROMPT;
         $dateFormatted = $event->event_date->translatedFormat('l j F Y');
         $timeFormatted = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : 'non definie';
         $timeUntil     = $event->timeUntilEvent();
-        $statusLabel   = $event->status === 'active' ? 'Actif' : ucfirst($event->status);
+        $isOverdue     = $event->status === 'active' && $event->event_date->isPast() && !$event->event_date->isToday();
+        $statusLabel   = $isOverdue ? 'En retard ⚠️' : ($event->status === 'active' ? 'Actif' : ucfirst($event->status));
 
         $reply  = "*Detail de l'evenement #{$event->id}*\n\n";
         $reply .= "*{$event->event_name}*\n";
@@ -750,6 +958,12 @@ PROMPT;
         $tz    = AppSetting::timezone();
         $today = Carbon::today($tz);
 
+        // Fetch next upcoming event for summary at top
+        $nextEvent = EventReminder::where('user_phone', $context->from)
+            ->active()->upcoming()
+            ->orderBy('event_date')->orderBy('event_time')
+            ->first();
+
         $totalActive = EventReminder::where('user_phone', $context->from)
             ->active()->count();
 
@@ -777,22 +991,87 @@ PROMPT;
             ])
             ->count();
 
+        $overdueCount = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', '<', $today->format('Y-m-d'))
+            ->count();
+
         $cancelledCount = EventReminder::where('user_phone', $context->from)
             ->where('status', 'cancelled')->count();
 
         $doneCount = EventReminder::where('user_phone', $context->from)
             ->where('status', 'done')->count();
 
+        $next30Count = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [
+                $today->format('Y-m-d'),
+                $today->copy()->addDays(29)->format('Y-m-d'),
+            ])
+            ->count();
+
+        // Busiest upcoming week (next 28 days, grouped by ISO week)
+        $busiestWeekLabel = null;
+        $busiestWeekCount = 0;
+        $upcomingEvents   = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->where('event_date', '>=', $today->format('Y-m-d'))
+            ->where('event_date', '<=', $today->copy()->addDays(27)->format('Y-m-d'))
+            ->get(['event_date']);
+
+        if ($upcomingEvents->isNotEmpty()) {
+            $weekGroups = $upcomingEvents->groupBy(fn ($e) => $e->event_date->format('W'));
+            $busiest    = $weekGroups->map->count()->sortDesc()->first();
+            $busiestKey = $weekGroups->map->count()->sortDesc()->keys()->first();
+            if ($busiest > 1) {
+                $busiestWeekCount = $busiest;
+                // Find a representative date from that week
+                $sampleDate       = $weekGroups[$busiestKey]->first()->event_date;
+                $weekStart        = $sampleDate->copy()->startOfWeek(\Carbon\Carbon::MONDAY)->format('d/m');
+                $weekEnd          = $sampleDate->copy()->endOfWeek(\Carbon\Carbon::SUNDAY)->format('d/m');
+                $busiestWeekLabel = "{$weekStart}-{$weekEnd}";
+            }
+        }
+
         $monthLabel = $today->translatedFormat('F Y');
 
-        $reply  = "*Statistiques de ton calendrier :*\n\n";
-        $reply .= "Actifs a venir : *{$upcoming}*\n";
+        $reply = "*Statistiques de ton calendrier :*\n\n";
+
+        if ($nextEvent) {
+            $nextDateFmt  = $nextEvent->event_date->translatedFormat('l j F');
+            $nextTimeFmt  = $nextEvent->event_time ? ' a ' . Carbon::parse($nextEvent->event_time)->format('H:i') : '';
+            $nextTimeUntil = $nextEvent->timeUntilEvent();
+            $reply .= "Prochain : *{$nextEvent->event_name}* — {$nextDateFmt}{$nextTimeFmt} _{$nextTimeUntil}_\n\n";
+        }
+
         $reply .= "Aujourd'hui : *{$todayCount}*\n";
         $reply .= "Cette semaine (7j) : *{$weekCount}*\n";
         $reply .= "Ce mois ({$monthLabel}) : *{$monthCount}*\n";
+        $reply .= "Prochains 30 jours : *{$next30Count}*\n";
+        $reply .= "Total actifs a venir : *{$upcoming}*\n";
+
+        if ($overdueCount > 0) {
+            $reply .= "En retard (a traiter) : *{$overdueCount}* ⚠️\n";
+        }
+
+        if ($busiestWeekLabel && $busiestWeekCount > 1) {
+            $reply .= "\nSemaine la plus chargee : *{$busiestWeekLabel}* ({$busiestWeekCount} events)\n";
+        }
+
         $reply .= "\nTermines : *{$doneCount}*\n";
         $reply .= "Annules : *{$cancelledCount}*\n";
         $reply .= "Total actifs : *{$totalActive}*";
+
+        // Completion rate (done / (done + cancelled), i.e. among resolved events)
+        $resolved = $doneCount + $cancelledCount;
+        if ($resolved > 0) {
+            $completionRate = round(($doneCount / $resolved) * 100);
+            $reply .= "\nTaux de completion : *{$completionRate}%*";
+        }
+
+        if ($overdueCount > 0) {
+            $reply .= "\n\n_Tape *today events* pour voir les evenements en retard._";
+        }
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Stats shown', [
@@ -809,6 +1088,7 @@ PROMPT;
             'month'      => $monthCount,
             'cancelled'  => $cancelledCount,
             'done'       => $doneCount,
+            'overdue'    => $overdueCount,
         ]);
     }
 
@@ -855,7 +1135,6 @@ PROMPT;
         }
 
         $events = EventReminder::where('user_phone', $context->from)
-            ->active()
             ->where(function ($q) use ($keyword) {
                 $q->where('event_name', 'like', "%{$keyword}%")
                     ->orWhere('description', 'like', "%{$keyword}%")
@@ -873,12 +1152,28 @@ PROMPT;
             return AgentResult::reply($reply);
         }
 
-        $reply = "*Resultats pour \"{$keyword}\" ({$events->count()}) :*\n\n";
+        $activeCount    = $events->where('status', 'active')->count();
+        $archivedCount  = $events->whereIn('status', ['done', 'cancelled'])->count();
+        $total          = $events->count();
+
+        $reply = "*Resultats pour \"{$keyword}\" ({$total}) :*\n\n";
         foreach ($events as $event) {
-            $reply .= $this->formatEventLine($event) . "\n";
+            if ($event->status === 'done') {
+                $time = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : '--:--';
+                $reply .= "✓ #{$event->id} _{$event->event_name}_ — " . $event->event_date->format('d/m/Y') . " {$time} [termine]\n";
+            } elseif ($event->status === 'cancelled') {
+                $time = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : '--:--';
+                $reply .= "✗ #{$event->id} _{$event->event_name}_ — " . $event->event_date->format('d/m/Y') . " {$time} [annule]\n";
+            } else {
+                $reply .= $this->formatEventLine($event) . "\n";
+            }
         }
 
-        $reply .= "\nTape *show event #ID* pour voir les details.";
+        if ($archivedCount > 0) {
+            $reply .= "\n_Actifs : {$activeCount} | Archives : {$archivedCount}_";
+        }
+
+        $reply .= "\n\nTape *show event #ID* pour voir les details.";
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Events searched', ['keyword' => $keyword, 'count' => $events->count()]);
@@ -1103,7 +1398,10 @@ PROMPT;
         }
         $extra = $parts ? ' [' . implode(', ', $parts) . ']' : '';
 
-        return "#{$event->id} *{$event->event_name}* — {$date} {$time}{$location}{$extra} — _{$timeUntil}_";
+        $overdueTag = ($event->status === 'active' && $event->event_date->isPast() && !$event->event_date->isToday())
+            ? ' ⚠️' : '';
+
+        return "#{$event->id} *{$event->event_name}*{$overdueTag} — {$date} {$time}{$location}{$extra} — _{$timeUntil}_";
     }
 
     private function minutesToLabel(int $minutes): string
@@ -1231,32 +1529,57 @@ PROMPT;
 
     private function showHelp(AgentContext $context): AgentResult
     {
-        $reply = "*Event Reminder v1.4 — Gestion d'evenements :*\n\n"
+        $reply = "*Event Reminder v1.9 — Gestion d'evenements :*\n\n"
             . "*Creer :*\n"
             . "remind me about [evenement] on [date] at [heure]\n"
             . "add event [nom] [date] [heure]\n\n"
             . "*Consulter :*\n"
+            . "briefing — Briefing IA du jour + semaine\n"
             . "list events — Tous les evenements a venir\n"
             . "next event — Prochain evenement\n"
-            . "today events — Evenements du jour\n"
+            . "upcoming — Prochains 7 jours\n"
+            . "today events — Agenda du jour + retards\n"
             . "week events — Evenements de la semaine\n"
             . "month events — Evenements du mois\n"
+            . "prochains N jours — Evenements des N prochains jours\n"
+            . "agenda [date] — Evenements d'une date precise\n"
             . "show event #ID — Detail d'un evenement\n"
-            . "stats events — Statistiques du calendrier\n\n"
+            . "stats events — Statistiques + taux de completion\n"
+            . "conflicts — Detecter les conflits horaires\n"
+            . "history — Evenements termines / annules\n"
+            . "history done — Uniquement les termines\n"
+            . "history cancelled — Uniquement les annules\n"
+            . "export semaine — Resume partageble de la semaine\n\n"
             . "*Gerer :*\n"
             . "done event #ID — Marquer comme termine\n"
+            . "done events #1 #2 #3 — Marquer plusieurs comme termines\n"
+            . "restore event #ID — Restaurer un evenement annule/termine\n"
             . "remove event #ID — Supprimer (avec confirmation)\n"
             . "update event #ID [champ] [valeur] — Modifier\n"
             . "postpone event #ID by [duree] — Reporter\n"
             . "duplicate event #ID to [date] — Dupliquer\n"
-            . "search event [mot-cle] — Rechercher\n\n"
+            . "note event #ID [texte] — Ajouter une note\n"
+            . "search event [mot-cle] — Rechercher (actifs + archives)\n"
+            . "clear history — Vider l'historique (confirmation requise)\n\n"
             . "*Exemples :*\n"
+            . "- briefing\n"
             . "- remind me about Reunion equipe on 2026-03-15 at 14:00\n"
             . "- add event Dentiste demain a 10h\n"
             . "- next event\n"
+            . "- upcoming\n"
+            . "- conflicts\n"
             . "- stats events\n"
+            . "- prochains 5 jours\n"
+            . "- agenda 2026-03-20\n"
+            . "- history\n"
+            . "- history done\n"
+            . "- clear history\n"
             . "- show event #5\n"
             . "- done event #5\n"
+            . "- done events #5 #6 #7\n"
+            . "- note event #5 Apporter le rapport\n"
+            . "- export semaine\n"
+            . "- restore event #5\n"
             . "- month events\n"
             . "- postpone event #3 by 1 semaine\n"
             . "- update event #3 location Salle A\n"
@@ -1266,5 +1589,602 @@ PROMPT;
 
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply);
+    }
+
+    private function agendaDate(AgentContext $context, string $dateStr): AgentResult
+    {
+        try {
+            $date = Carbon::parse($dateStr, AppSetting::timezone());
+        } catch (\Exception $e) {
+            $reply = "Date non reconnue : *{$dateStr}*.\n"
+                . "Exemples : *agenda 2026-03-20*, *agenda demain*, *agenda lundi prochain*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $events = EventReminder::where('user_phone', $context->from)
+            ->whereDate('event_date', $date->format('Y-m-d'))
+            ->whereIn('status', ['active', 'done'])
+            ->orderBy('event_time')
+            ->get();
+
+        $dayLabel = $date->translatedFormat('l j F Y');
+        $isToday  = $date->isToday();
+        $isPast   = $date->isPast() && !$isToday;
+
+        if ($events->isEmpty()) {
+            $qualifier = $isPast ? 'ce jour-la' : ($isToday ? "aujourd'hui" : 'ce jour');
+            $reply     = "Aucun evenement {$qualifier} ({$dayLabel}).";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $total = $events->count();
+        $emoji = $isPast ? '📅' : ($isToday ? '📌' : '📆');
+        $reply = "{$emoji} *Agenda du {$dayLabel} ({$total}) :*\n\n";
+
+        foreach ($events as $event) {
+            $statusTag = $event->status === 'done' ? ' ✓' : '';
+            $time      = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : '--:--';
+            $location  = $event->location ? " ({$event->location})" : '';
+            $reply    .= "#{$event->id} *{$event->event_name}*{$statusTag} — {$time}{$location}\n";
+        }
+
+        $reply .= "\n_Tape *show event #ID* pour les details._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Agenda date shown', ['date' => $date->format('Y-m-d'), 'count' => $total]);
+
+        return AgentResult::reply($reply, ['date' => $date->format('Y-m-d'), 'count' => $total]);
+    }
+
+    private function historyEvents(AgentContext $context, ?string $statusFilter = null): AgentResult
+    {
+        $query = EventReminder::where('user_phone', $context->from);
+
+        if ($statusFilter === 'done') {
+            $query->where('status', 'done');
+        } elseif ($statusFilter === 'cancelled') {
+            $query->where('status', 'cancelled');
+        } else {
+            $query->whereIn('status', ['done', 'cancelled']);
+        }
+
+        $events = $query->orderBy('event_date', 'desc')
+            ->orderBy('event_time', 'desc')
+            ->limit(15)
+            ->get();
+
+        $filterLabel = match ($statusFilter) {
+            'done'      => ' (termines)',
+            'cancelled' => ' (annules)',
+            default     => '',
+        };
+
+        if ($events->isEmpty()) {
+            $emptyMsg = match ($statusFilter) {
+                'done'      => "Aucun evenement termine dans ton historique.",
+                'cancelled' => "Aucun evenement annule dans ton historique.",
+                default     => "Aucun evenement termine ou annule dans ton historique.",
+            };
+            $this->sendText($context->from, $emptyMsg);
+            return AgentResult::reply($emptyMsg);
+        }
+
+        $doneCount      = $events->where('status', 'done')->count();
+        $cancelledCount = $events->where('status', 'cancelled')->count();
+        $total          = $events->count();
+
+        $reply = "*Historique de tes evenements{$filterLabel} ({$total}) :*\n";
+        $reply .= "_Termines : {$doneCount} | Annules : {$cancelledCount}_\n\n";
+
+        $currentDay = null;
+        foreach ($events as $event) {
+            $dayLabel = $event->event_date->translatedFormat('l j F Y');
+            if ($dayLabel !== $currentDay) {
+                $reply     .= "\n_{$dayLabel}_\n";
+                $currentDay = $dayLabel;
+            }
+            $statusIcon = $event->status === 'done' ? '✓' : '✗';
+            $time       = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : '--:--';
+            $loc        = $event->location ? " ({$event->location})" : '';
+            $reply     .= "[{$statusIcon}] #{$event->id} *{$event->event_name}* — {$time}{$loc}\n";
+        }
+
+        if ($total >= 15) {
+            $reply .= "\n_Affichage limite aux 15 derniers evenements._";
+        }
+
+        $reply .= "\n\n_Tape *restore event #ID* pour reactiver un evenement annule._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'History shown', ['done' => $doneCount, 'cancelled' => $cancelledCount, 'filter' => $statusFilter]);
+
+        return AgentResult::reply($reply, ['done' => $doneCount, 'cancelled' => $cancelledCount, 'total' => $total]);
+    }
+
+    private function upcomingDays(AgentContext $context, int $days): AgentResult
+    {
+        $today  = Carbon::today(AppSetting::timezone());
+        $endDay = $today->copy()->addDays($days - 1)->endOfDay();
+
+        $events = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [$today->format('Y-m-d'), $endDay->format('Y-m-d')])
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->get();
+
+        $label = $days === 1 ? "aujourd'hui" : "les {$days} prochains jours";
+
+        if ($events->isEmpty()) {
+            $reply = "Aucun evenement dans {$label} "
+                . "(" . $today->format('d/m') . " - " . $endDay->format('d/m/Y') . ").\n\n"
+                . "Tape *list events* pour voir tous tes evenements a venir.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $reply = "*Evenements : {$label} (" . $today->format('d/m') . " - " . $endDay->format('d/m') . ") — {$events->count()} event(s) :*\n";
+
+        $currentDay = null;
+        foreach ($events as $event) {
+            $dayLabel = $event->event_date->translatedFormat('l j F');
+            if ($dayLabel !== $currentDay) {
+                $reply     .= "\n_{$dayLabel}_\n";
+                $currentDay = $dayLabel;
+            }
+            $reply .= $this->formatEventLine($event) . "\n";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Upcoming days listed', ['days' => $days, 'count' => $events->count()]);
+
+        return AgentResult::reply($reply, ['days' => $days, 'count' => $events->count()]);
+    }
+
+    private function briefingEvents(AgentContext $context): AgentResult
+    {
+        $tz    = AppSetting::timezone();
+        $today = Carbon::today($tz);
+        $now   = Carbon::now($tz);
+
+        $todayEvents = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', $today->format('Y-m-d'))
+            ->orderBy('event_time')
+            ->get();
+
+        $upcomingEvents = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [
+                $today->copy()->addDay()->format('Y-m-d'),
+                $today->copy()->addDays(7)->format('Y-m-d'),
+            ])
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->limit(10)
+            ->get();
+
+        $overdueCount = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereDate('event_date', '<', $today->format('Y-m-d'))
+            ->count();
+
+        $dayLabel = $now->translatedFormat('l j F Y');
+
+        // Build a context string for the LLM
+        $eventsContext = "Aujourd'hui ({$dayLabel}) : ";
+        if ($todayEvents->isNotEmpty()) {
+            $items = $todayEvents->map(fn ($e) => $e->event_name . ($e->event_time ? ' à ' . Carbon::parse($e->event_time)->format('H:i') : ''))->implode(', ');
+            $eventsContext .= $items;
+        } else {
+            $eventsContext .= 'aucun evenement';
+        }
+
+        $eventsContext .= "\nProchains 7 jours : ";
+        if ($upcomingEvents->isNotEmpty()) {
+            $items = $upcomingEvents->map(fn ($e) => $e->event_name . ' (' . $e->event_date->translatedFormat('l j') . ')')->implode(', ');
+            $eventsContext .= $items;
+        } else {
+            $eventsContext .= 'aucun evenement prevu';
+        }
+
+        if ($overdueCount > 0) {
+            $eventsContext .= "\nEvenements en retard (actifs mais date passee) : {$overdueCount}";
+        }
+
+        $model        = $this->resolveModel($context);
+        $briefingText = $this->claude->chat(
+            "Genere un briefing agenda matinal court et motivant (3-5 phrases max) pour cet utilisateur. "
+            . "Contexte agenda : {$eventsContext}. "
+            . "Sois chaleureux et professionnel. Texte simple sans markdown.",
+            $model,
+            "Tu es un assistant de calendrier personnel. Genere un briefing agenda positif et concis. "
+            . "Mets en avant les evenements du jour, signale les retards si applicable, "
+            . "et conclus avec une note motivante. Maximum 5 phrases. Pas de markdown."
+        );
+
+        $reply  = "*Briefing du {$dayLabel}*\n\n";
+        $reply .= ($briefingText ?: "Bonjour ! Voici ton agenda du jour.") . "\n";
+
+        if ($todayEvents->isNotEmpty()) {
+            $reply .= "\n*Aujourd'hui :*\n";
+            foreach ($todayEvents as $event) {
+                $time         = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') : '--:--';
+                $loc          = $event->location ? " ({$event->location})" : '';
+                $participants = !empty($event->participants) ? ' — ' . implode(', ', $event->participants) : '';
+                $reply       .= "• {$time} *{$event->event_name}*{$loc}{$participants}\n";
+            }
+        } else {
+            $reply .= "\n_Aucun evenement prevu aujourd'hui._\n";
+        }
+
+        if ($upcomingEvents->isNotEmpty()) {
+            $reply .= "\n*Cette semaine :*\n";
+            foreach ($upcomingEvents as $event) {
+                $dayStr = $event->event_date->translatedFormat('l j');
+                $time   = $event->event_time ? ' ' . Carbon::parse($event->event_time)->format('H:i') : '';
+                $reply .= "• {$dayStr}{$time} — *{$event->event_name}*\n";
+            }
+        }
+
+        if ($overdueCount > 0) {
+            $reply .= "\n⚠️ *{$overdueCount} evenement(s) en retard* — Tape *today events* pour les voir.";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Briefing generated', [
+            'today'    => $todayEvents->count(),
+            'upcoming' => $upcomingEvents->count(),
+            'overdue'  => $overdueCount,
+        ]);
+
+        return AgentResult::reply($reply, [
+            'today'    => $todayEvents->count(),
+            'upcoming' => $upcomingEvents->count(),
+            'overdue'  => $overdueCount,
+        ]);
+    }
+
+    private function confirmClearHistory(AgentContext $context): AgentResult
+    {
+        $count = EventReminder::where('user_phone', $context->from)
+            ->whereIn('status', ['done', 'cancelled'])
+            ->count();
+
+        if ($count === 0) {
+            $reply = "Ton historique est deja vide. Aucun evenement termine ou annule.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $this->setPendingContext($context, 'confirm_clear_history', ['count' => $count], ttlMinutes: 3, expectRawInput: true);
+
+        $doneCount      = EventReminder::where('user_phone', $context->from)->where('status', 'done')->count();
+        $cancelledCount = EventReminder::where('user_phone', $context->from)->where('status', 'cancelled')->count();
+
+        $reply = "Tu veux vraiment supprimer *{$count} evenement(s)* de ton historique ?\n"
+            . "_Termines : {$doneCount} | Annules : {$cancelledCount}_\n\n"
+            . "⚠️ Cette action est *irreversible*.\n"
+            . "Reponds *oui* pour confirmer ou *non* pour annuler.";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Clear history confirmation requested', ['count' => $count]);
+
+        return AgentResult::reply($reply, ['count' => $count, 'pending' => 'confirm_clear_history']);
+    }
+
+    private function clearHistory(AgentContext $context, int $expectedCount): AgentResult
+    {
+        $deleted = EventReminder::where('user_phone', $context->from)
+            ->whereIn('status', ['done', 'cancelled'])
+            ->delete();
+
+        $this->log($context, 'History cleared', ['deleted' => $deleted]);
+
+        $reply = "Historique supprime : *{$deleted} evenement(s)* efface(s).\n"
+            . "_Ton calendrier actif est intact._\n\n"
+            . "Tape *list events* pour voir tes evenements a venir.";
+
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, ['deleted' => $deleted]);
+    }
+
+    private function appendNoteToEvent(AgentContext $context, int $eventId, string $note): AgentResult
+    {
+        $note = trim($note);
+
+        if (mb_strlen($note) < 1) {
+            $reply = "La note est vide. Precise le texte a ajouter.\nExemple : *note event #5 Apporter le rapport*";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $event = EventReminder::where('id', $eventId)
+            ->where('user_phone', $context->from)
+            ->first();
+
+        if (!$event) {
+            $reply = "Evenement #{$eventId} introuvable. Tape *list events* pour voir tes evenements.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $existing    = $event->description ? rtrim($event->description) . "\n" : '';
+        $newNote     = $existing . $note;
+        $event->update(['description' => $newNote]);
+
+        $dateStr = $event->event_date->translatedFormat('l j F Y');
+        $reply   = "Note ajoutee a *{$event->event_name}* (#{$event->id}) !\n\n"
+            . "_\"{$note}\"_\n\n"
+            . "Date : {$dateStr}\n"
+            . "_Tape *show event #{$event->id}* pour voir les details complets._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Note appended to event', ['event_id' => $eventId, 'note_length' => mb_strlen($note)]);
+
+        return AgentResult::reply($reply, ['event_id' => $eventId]);
+    }
+
+    private function exportWeek(AgentContext $context): AgentResult
+    {
+        $today   = Carbon::today(AppSetting::timezone());
+        $endWeek = $today->copy()->addDays(6)->endOfDay();
+
+        $events = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->whereBetween('event_date', [$today->format('Y-m-d'), $endWeek->format('Y-m-d')])
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->get();
+
+        $weekRange = $today->format('d/m') . ' - ' . $endWeek->format('d/m/Y');
+
+        if ($events->isEmpty()) {
+            $reply = "Aucun evenement cette semaine ({$weekRange}) a exporter.\n\n"
+                . "Ajoute-en un avec *remind me about [evenement] on [date] at [heure]*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $count = $events->count();
+        $reply = "Semaine du {$weekRange} — {$count} evenement(s)\n";
+        $reply .= str_repeat('-', 30) . "\n";
+
+        $currentDay = null;
+        foreach ($events as $event) {
+            $dayLabel = $event->event_date->translatedFormat('l j F');
+            if ($dayLabel !== $currentDay) {
+                $reply     .= "\n{$dayLabel}\n";
+                $currentDay = $dayLabel;
+            }
+            $time         = $event->event_time ? Carbon::parse($event->event_time)->format('H:i') . ' ' : '';
+            $loc          = $event->location ? " — {$event->location}" : '';
+            $participants = !empty($event->participants)
+                ? ' (' . implode(', ', $event->participants) . ')'
+                : '';
+            $reply .= "  {$time}{$event->event_name}{$loc}{$participants}\n";
+        }
+
+        $reply .= str_repeat('-', 30);
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Week exported', ['count' => $count, 'range' => $weekRange]);
+
+        return AgentResult::reply($reply, ['count' => $count, 'range' => $weekRange]);
+    }
+
+    private function restoreEvent(AgentContext $context, int $eventId): AgentResult
+    {
+        $event = EventReminder::where('id', $eventId)
+            ->where('user_phone', $context->from)
+            ->whereIn('status', ['done', 'cancelled'])
+            ->first();
+
+        if (!$event) {
+            // Check if it exists but is already active
+            $activeEvent = EventReminder::where('id', $eventId)
+                ->where('user_phone', $context->from)
+                ->where('status', 'active')
+                ->first();
+
+            if ($activeEvent) {
+                $reply = "L'evenement *{$activeEvent->event_name}* (#{$eventId}) est deja actif.";
+            } else {
+                $reply = "Evenement #{$eventId} introuvable. Tape *history* pour voir les evenements termines/annules.";
+            }
+
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $oldStatus = $event->status;
+        $event->update(['status' => 'active']);
+
+        $dateStr   = $event->event_date->translatedFormat('l j F Y');
+        $timeStr   = $event->event_time ? ' a ' . Carbon::parse($event->event_time)->format('H:i') : '';
+        $fromLabel = $oldStatus === 'done' ? 'termine' : 'annule';
+        $isPast    = $event->event_date->isPast() && !$event->event_date->isToday();
+
+        $reply = "Evenement reactive ! ✓\n\n"
+            . "*{$event->event_name}* (#{$event->id})\n"
+            . "Date : {$dateStr}{$timeStr}\n"
+            . "Statut : _{$fromLabel}_ → *actif*\n\n"
+            . "_Dans : " . $event->fresh()->timeUntilEvent() . "_";
+
+        if ($isPast) {
+            $reply .= "\n\n⚠️ _Attention : la date de cet evenement est passee. Pense a le reporter avec *postpone event #{$event->id} by [duree]* ou a le marquer termine avec *done event #{$event->id}*._";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Event restored', ['event_id' => $eventId, 'from_status' => $oldStatus]);
+
+        return AgentResult::reply($reply, ['event_id' => $eventId, 'from_status' => $oldStatus]);
+    }
+
+    private function detectConflicts(AgentContext $context): AgentResult
+    {
+        $events = EventReminder::where('user_phone', $context->from)
+            ->active()
+            ->upcoming()
+            ->orderBy('event_date')
+            ->orderBy('event_time')
+            ->get();
+
+        if ($events->isEmpty()) {
+            $reply = "Aucun evenement a venir dans ton calendrier. Aucun conflit possible !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Group by date, then find same-time conflicts
+        $conflicts = [];
+        $grouped   = $events->groupBy(fn ($e) => $e->event_date->format('Y-m-d'));
+
+        foreach ($grouped as $date => $dayEvents) {
+            // Full-day events on a busy day (>= 3 events on same day)
+            if ($dayEvents->count() >= 3) {
+                $conflicts[] = [
+                    'type'   => 'busy_day',
+                    'date'   => $date,
+                    'events' => $dayEvents,
+                ];
+            }
+
+            // Same time conflicts
+            $withTime = $dayEvents->filter(fn ($e) => $e->event_time !== null);
+            $byTime   = $withTime->groupBy('event_time');
+
+            foreach ($byTime as $time => $timeEvents) {
+                if ($timeEvents->count() > 1) {
+                    $conflicts[] = [
+                        'type'   => 'same_time',
+                        'date'   => $date,
+                        'time'   => $time,
+                        'events' => $timeEvents,
+                    ];
+                }
+            }
+        }
+
+        // Remove duplicates: if a day is flagged as busy_day AND has a same_time conflict, keep only same_time
+        $sameTimeDates = collect($conflicts)
+            ->where('type', 'same_time')
+            ->pluck('date')
+            ->unique()
+            ->toArray();
+
+        $conflicts = array_filter($conflicts, function ($c) use ($sameTimeDates) {
+            return !($c['type'] === 'busy_day' && in_array($c['date'], $sameTimeDates));
+        });
+
+        $conflicts = array_values($conflicts);
+
+        if (empty($conflicts)) {
+            $reply = "✅ Aucun conflit d'horaire detecte dans ton calendrier !\n"
+                . "_Tous tes evenements sont bien espaces._";
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Conflicts checked', ['conflicts' => 0]);
+            return AgentResult::reply($reply, ['conflicts' => 0]);
+        }
+
+        $sameTimeCount = count(array_filter($conflicts, fn ($c) => $c['type'] === 'same_time'));
+        $busyDayCount  = count(array_filter($conflicts, fn ($c) => $c['type'] === 'busy_day'));
+        $total         = count($conflicts);
+
+        $reply = "*{$total} conflit(s) detecte(s) dans ton calendrier :*\n\n";
+
+        foreach ($conflicts as $conflict) {
+            $dateFmt = Carbon::parse($conflict['date'], AppSetting::timezone())->translatedFormat('l j F Y');
+
+            if ($conflict['type'] === 'same_time') {
+                $timeFmt = Carbon::parse($conflict['time'])->format('H:i');
+                $reply  .= "⚠️ *{$dateFmt} a {$timeFmt}* — evenements simultanees :\n";
+                foreach ($conflict['events'] as $ev) {
+                    $loc    = $ev->location ? " ({$ev->location})" : '';
+                    $reply .= "  • #{$ev->id} {$ev->event_name}{$loc}\n";
+                }
+            } else {
+                $count  = $conflict['events']->count();
+                $reply .= "📅 *{$dateFmt}* — journee chargee ({$count} evenements) :\n";
+                foreach ($conflict['events'] as $ev) {
+                    $time   = $ev->event_time ? Carbon::parse($ev->event_time)->format('H:i') . ' ' : '--:-- ';
+                    $reply .= "  • {$time}{$ev->event_name}\n";
+                }
+            }
+            $reply .= "\n";
+        }
+
+        $reply .= "_Tape *postpone event #ID by [duree]* pour decaler un evenement._";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Conflicts detected', [
+            'total'      => $total,
+            'same_time'  => $sameTimeCount,
+            'busy_days'  => $busyDayCount,
+        ]);
+
+        return AgentResult::reply($reply, ['conflicts' => $total, 'same_time' => $sameTimeCount, 'busy_days' => $busyDayCount]);
+    }
+
+    private function batchMarkDone(AgentContext $context, array $eventIds): AgentResult
+    {
+        $eventIds = array_unique($eventIds);
+        $results  = ['done' => [], 'already_done' => [], 'not_found' => []];
+
+        foreach ($eventIds as $id) {
+            $event = EventReminder::where('id', $id)
+                ->where('user_phone', $context->from)
+                ->first();
+
+            if (!$event) {
+                $results['not_found'][] = $id;
+                continue;
+            }
+
+            if ($event->status === 'done') {
+                $results['already_done'][] = ['id' => $id, 'name' => $event->event_name];
+                continue;
+            }
+
+            $event->update(['status' => 'done']);
+            $results['done'][] = ['id' => $id, 'name' => $event->event_name];
+        }
+
+        $doneCount = count($results['done']);
+        $reply     = "*{$doneCount} evenement(s) marque(s) comme termines !*\n\n";
+
+        if (!empty($results['done'])) {
+            foreach ($results['done'] as $item) {
+                $reply .= "✓ #{$item['id']} {$item['name']}\n";
+            }
+        }
+
+        if (!empty($results['already_done'])) {
+            $reply .= "\n_Deja termines :_\n";
+            foreach ($results['already_done'] as $item) {
+                $reply .= "• #{$item['id']} {$item['name']}\n";
+            }
+        }
+
+        if (!empty($results['not_found'])) {
+            $ids    = implode(', #', $results['not_found']);
+            $reply .= "\n_Introuvables : #{$ids}_";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Batch events marked done', [
+            'done'        => count($results['done']),
+            'already_done' => count($results['already_done']),
+            'not_found'   => count($results['not_found']),
+        ]);
+
+        return AgentResult::reply($reply, [
+            'done'         => count($results['done']),
+            'already_done' => count($results['already_done']),
+            'not_found'    => count($results['not_found']),
+        ]);
     }
 }

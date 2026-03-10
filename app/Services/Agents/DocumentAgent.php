@@ -8,6 +8,7 @@ use Dompdf\Dompdf;
 use Dompdf\Options;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\IOFactory as WordIOFactory;
@@ -25,7 +26,7 @@ class DocumentAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Creation de documents: Excel (XLSX), PDF, Word (DOCX), CSV. Tableaux, rapports, lettres, factures, CV.';
+        return 'Creation de documents: Excel (XLSX), PDF, Word (DOCX), CSV. Tableaux, rapports, lettres, factures, CV, contrats. Blocs visuels: callout, citation, surlignage, signature, paires cle/valeur, badge statut, encadre recapitulatif. Pied de page PDF. Orientation paysage.';
     }
 
     public function keywords(): array
@@ -44,12 +45,21 @@ class DocumentAgent extends BaseAgent
             'liste numerotee', 'liste ordonnee',
             'note encadree', 'callout', 'encadre', 'avertissement', 'alerte document',
             'note importante', 'mise en evidence', 'encart',
+            'citation', 'bloc citation', 'reference legale', 'article de loi',
+            'texte surligne', 'surlignage', 'mise en valeur',
+            'alerte critique', 'danger document', 'erreur critique',
+            'signature', 'signer', 'contresigner', 'bon pour accord', 'signe par',
+            'paysage', 'orientation paysage', 'mode paysage', 'landscape',
+            'cle valeur', 'champ valeur', 'informations client', 'donnees facture',
+            'badge', 'statut', 'tag statut', 'etiquette',
+            'recapitulatif', 'synthese', 'resume document', 'points cles',
+            'pied de page', 'footer', 'bas de page',
         ];
     }
 
     public function version(): string
     {
-        return '1.2.0';
+        return '1.5.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -123,9 +133,14 @@ FORMAT PDF (rapports, factures, lettres formelles):
     "filename": "facture_2026_001",
     "title": "Facture #2026-001",
     "content": {
+        "orientation": "portrait",
         "sections": [
-            {"type": "heading", "text": "Informations client", "level": 2},
-            {"type": "paragraph", "text": "Client: ACME Corp — 12 rue de la Paix, 75001 Paris"},
+            {"type": "key_value", "pairs": [
+                {"label": "Client", "value": "ACME Corp — 12 rue de la Paix, 75001 Paris"},
+                {"label": "Date", "value": "09/03/2026"},
+                {"label": "Reference", "value": "FC-2026-001"},
+                {"label": "IBAN", "value": "FR76 3000 6000 0112 3456 7890 189"}
+            ]},
             {"type": "separator"},
             {"type": "table", "headers": ["Designation", "Qte", "PU HT", "Total HT"], "rows": [
                 ["Developpement web", "10h", "150 EUR", "1 500 EUR"],
@@ -134,11 +149,15 @@ FORMAT PDF (rapports, factures, lettres formelles):
             {"type": "separator"},
             {"type": "bold", "text": "Sous-total HT: 2 100 EUR"},
             {"type": "bold", "text": "TVA 20%: 420 EUR"},
-            {"type": "bold", "text": "TOTAL TTC: 2 520 EUR"},
+            {"type": "highlight", "text": "TOTAL TTC: 2 520 EUR", "color": "yellow"},
             {"type": "ordered_list", "items": ["Paiement sous 30 jours", "Penalites de retard: 3x le taux legal en vigueur"]},
             {"type": "page_break"},
             {"type": "heading", "text": "Conditions Generales", "level": 2},
-            {"type": "paragraph", "text": "..."}
+            {"type": "paragraph", "text": "..."},
+            {"type": "signature", "signers": [
+                {"name": "Jean Dupont", "title": "Directeur General"},
+                {"name": "Marie Martin", "title": "Client — ACME Corp"}
+            ]}
         ]
     }
 }
@@ -172,14 +191,60 @@ FORMAT DOCX (lettres, contrats, CV, rapports editables):
 ---
 TYPE CALLOUT (encart visuel — fonctionne dans PDF et DOCX):
 {"type": "callout", "text": "Texte de la note ou de l'avertissement", "style": "info"}
-  style: "info" (bleu, pour des informations), "warning" (orange, pour des avertissements), "success" (vert, pour des confirmations)
+  style: "info" (bleu), "warning" (orange), "success" (vert), "danger" (rouge — erreurs critiques, clauses risquees)
   Utilise pour: conditions importantes dans les contrats, notes legales dans les factures, conseils dans les rapports, points cles dans les CV.
+
+---
+TYPE QUOTE (bloc citation — fonctionne dans PDF et DOCX):
+{"type": "quote", "text": "Article L.1234-56 du Code du travail: Le contrat de travail..."}
+  Utilise pour: citations legales, references reglementaires, extraits de jurisprudence, temoignages, conditions generales citees.
+
+---
+TYPE HIGHLIGHT (texte surligne — fonctionne dans PDF et DOCX):
+{"type": "highlight", "text": "Montant total TTC: 2 520 EUR", "color": "yellow"}
+  color: "yellow" (defaut), "green", "cyan", "pink"
+  Utilise pour: chiffres cles, montants importants, dates critiques, termes essentiels dans les contrats.
+
+---
+TYPE SIGNATURE (bloc de signature — fonctionne dans PDF et DOCX):
+{"type": "signature", "signers": [{"name": "Jean Dupont", "title": "Directeur General"}, {"name": "Marie Martin", "title": "Client"}]}
+  Utilise pour: fins de contrats, lettres officielles, bons de commande, accords. Peut inclure 1 a 4 signataires.
+  Chaque signataire affiche une ligne de signature avec son nom et sa fonction.
+
+---
+TYPE KEY_VALUE (paires cle/valeur — fonctionne dans PDF et DOCX):
+{"type": "key_value", "pairs": [{"label": "Client", "value": "ACME Corp"}, {"label": "Date", "value": "09/03/2026"}, {"label": "Reference", "value": "FC-2026-001"}]}
+  Utilise pour: en-tetes de factures, informations client/fournisseur, metadata de documents, recapitulatif de commande, fiches contact.
+
+---
+TYPE BADGE (pastille de statut — fonctionne dans PDF et DOCX):
+{"type": "badge", "items": [{"label": "Actif", "color": "green"}, {"label": "En attente", "color": "orange"}, {"label": "Cloture", "color": "red"}]}
+  color: "green", "orange", "red", "blue", "gray"
+  Utilise pour: statuts de projets, etiquettes de priorite, indicateurs dans des rapports, syntheses de tableaux de bord.
+
+---
+TYPE SUMMARY_BOX (encadre recapitulatif — fonctionne dans PDF et DOCX):
+{"type": "summary_box", "title": "Points Cles", "items": ["Chiffre d'affaires en hausse de 12%", "3 nouveaux clients signes", "Objectif Q1 atteint a 95%"]}
+  Utilise pour: recapitulatifs de rapports, points cles de reunions, syntheses de projets, conclusions de bilans.
+
+---
+PIED DE PAGE PDF (footer — s'affiche en bas de chaque page):
+Pour ajouter un pied de page a un PDF, ajoute "footer" dans content (en dehors de sections):
+{"format": "pdf", ..., "content": {"footer": "Entreprise XYZ — SIRET 123 456 789 — contact@xyz.fr | Confidentiel", "sections": [...]}}
+  Utilise pour: coordonnees entreprise, mentions legales, numero de document, confidentialite.
+
+---
+ORIENTATION PAYSAGE (PDF, DOCX et XLSX):
+Pour des tableaux larges ou des rapports necessitant plus d'espace horizontal, ajoute "orientation": "landscape" dans content:
+{"format": "pdf", ..., "content": {"orientation": "landscape", "sections": [...]}}
+{"format": "xlsx", ..., "content": {"orientation": "landscape", "sheets": [...]}}
+  Par defaut: "portrait". Utilise "landscape" uniquement si le document contient des tableaux tres larges (> 6 colonnes) ou si l'utilisateur le demande explicitement.
 
 ---
 REGLES STRICTES:
 - Reponds UNIQUEMENT avec le JSON brut (jamais de ```json```, jamais de commentaire avant/apres)
 - Genere du contenu COMPLET et REALISTE (jamais de placeholder "Item 1", "Valeur X", etc.)
-- Pour les factures: inclure references, dates, TVA, totaux TTC, IBAN
+- Pour les factures: inclure references, dates, TVA, totaux TTC, IBAN, et bloc signature
 - Pour les CV: structure professionnelle complete (experience, formation, competences, langues, contact)
 - Pour les rapports: introduction, corps, conclusion
 - filename: uniquement lettres, chiffres, tirets, underscores — PAS d'espaces, PAS d'extension
@@ -309,7 +374,8 @@ PROMPT;
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getProperties()->setTitle($title);
 
-        $sheets = $content['sheets'] ?? [['name' => 'Sheet1', 'headers' => [], 'rows' => []]];
+        $isLandscape = ($content['orientation'] ?? 'portrait') === 'landscape';
+        $sheets      = $content['sheets'] ?? [['name' => 'Sheet1', 'headers' => [], 'rows' => []]];
 
         foreach ($sheets as $i => $sheetData) {
             if ($i > 0) {
@@ -318,8 +384,27 @@ PROMPT;
             $sheet = $spreadsheet->setActiveSheetIndex($i);
             $sheet->setTitle(mb_substr($sheetData['name'] ?? "Feuille " . ($i + 1), 0, 31));
 
+            if ($isLandscape) {
+                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+            }
+
             $headers = $sheetData['headers'] ?? [];
             $rows    = $sheetData['rows'] ?? [];
+
+            // Detect monetary columns by header keywords
+            $currencyKeywords = ['montant', 'prix', 'total', 'ht', 'ttc', 'tva', 'salaire',
+                                 'budget', 'cout', 'coût', 'tarif', 'revenue', 'revenu',
+                                 'depense', 'dépense', 'amount', 'price', 'cost', 'salary'];
+            $currencyColumns = [];
+            foreach ($headers as $col => $header) {
+                $headerLower = strtolower((string) $header);
+                foreach ($currencyKeywords as $kw) {
+                    if (str_contains($headerLower, $kw)) {
+                        $currencyColumns[] = $col;
+                        break;
+                    }
+                }
+            }
 
             // Write headers with bold + blue background
             foreach ($headers as $col => $header) {
@@ -365,6 +450,11 @@ PROMPT;
                     // Bold total rows
                     if ($isTotalRow) {
                         $style->getFont()->setBold(true);
+                    }
+
+                    // Apply currency number format to monetary columns
+                    if (in_array($col, $currencyColumns, true) && is_numeric(str_replace(',', '.', trim((string) $value)))) {
+                        $style->getNumberFormat()->setFormatCode('#,##0.00');
                     }
 
                     // Alternating row background (or total row highlight)
@@ -432,8 +522,10 @@ PROMPT;
 
     private function generatePdf(string $filename, string $title, array $content): string
     {
-        $sections = $content['sections'] ?? [];
-        $html     = $this->buildPdfHtml($title, $sections);
+        $sections    = $content['sections'] ?? [];
+        $orientation = ($content['orientation'] ?? 'portrait') === 'landscape' ? 'landscape' : 'portrait';
+        $footer      = isset($content['footer']) ? (string) $content['footer'] : null;
+        $html        = $this->buildPdfHtml($title, $sections, $footer);
 
         $options = new Options();
         $options->set('isRemoteEnabled', false);
@@ -441,7 +533,7 @@ PROMPT;
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html);
-        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->setPaper('A4', $orientation);
         $dompdf->render();
 
         $path = storage_path("app/{$filename}.pdf");
@@ -450,7 +542,7 @@ PROMPT;
         return $path;
     }
 
-    private function buildPdfHtml(string $title, array $sections): string
+    private function buildPdfHtml(string $title, array $sections, ?string $footer = null): string
     {
         $body = '';
 
@@ -511,15 +603,28 @@ PROMPT;
 
                 case 'callout':
                     $style = $section['style'] ?? 'info';
-                    $bgColors     = ['info' => '#EBF5FB', 'warning' => '#FEF9E7', 'success' => '#EAFAF1'];
-                    $borderColors = ['info' => '#3498DB', 'warning' => '#F39C12', 'success' => '#27AE60'];
-                    $icons        = ['info' => 'i', 'warning' => '!', 'success' => 'v'];
+                    $bgColors     = ['info' => '#EBF5FB', 'warning' => '#FEF9E7', 'success' => '#EAFAF1', 'danger' => '#FDEDEC'];
+                    $borderColors = ['info' => '#3498DB', 'warning' => '#F39C12', 'success' => '#27AE60', 'danger' => '#E74C3C'];
+                    $icons        = ['info' => 'i', 'warning' => '!', 'success' => 'v', 'danger' => 'X'];
                     $bg           = $bgColors[$style]     ?? '#EBF5FB';
                     $border       = $borderColors[$style] ?? '#3498DB';
                     $icon         = $icons[$style]        ?? 'i';
                     $body .= "<div style=\"background:{$bg};border-left:4px solid {$border};"
                            . "padding:10px 14px;margin:10px 0;border-radius:2px;\">"
                            . "<strong>[{$icon}]</strong> {$text}</div>";
+                    break;
+
+                case 'quote':
+                    $body .= "<blockquote style=\"border-left:3px solid #718096;padding:8px 16px;"
+                           . "margin:12px 0 12px 8px;color:#4a5568;font-style:italic;"
+                           . "background:#F8F9FA;\">{$text}</blockquote>";
+                    break;
+
+                case 'highlight':
+                    $colorMap = ['yellow' => '#FFF9C4', 'green' => '#C8F7C5', 'cyan' => '#D1F2EB', 'pink' => '#FDDDE6'];
+                    $hlColor  = $colorMap[$section['color'] ?? 'yellow'] ?? '#FFF9C4';
+                    $body .= "<p style=\"background:{$hlColor};padding:4px 8px;border-radius:3px;"
+                           . "display:inline-block;\">{$text}</p>";
                     break;
 
                 case 'separator':
@@ -529,8 +634,88 @@ PROMPT;
                 case 'page_break':
                     $body .= '<div class="page-break"></div>';
                     break;
+
+                case 'signature':
+                    $signers = $section['signers'] ?? [];
+                    if (!empty($signers)) {
+                        $cols  = max(1, count($signers));
+                        $width = (int) (100 / $cols);
+                        $body .= '<table style="width:100%;border:none;border-collapse:collapse;margin-top:30px;">';
+                        $body .= '<tr>';
+                        foreach ($signers as $signer) {
+                            $signerName  = htmlspecialchars((string) ($signer['name'] ?? ''), ENT_QUOTES, 'UTF-8');
+                            $signerTitle = htmlspecialchars((string) ($signer['title'] ?? ''), ENT_QUOTES, 'UTF-8');
+                            $body .= "<td style=\"width:{$width}%;vertical-align:bottom;padding:0 20px 0 0;border:none;\">";
+                            $body .= '<div style="margin-top:48px;border-top:1px solid #333;padding-top:6px;">';
+                            if ($signerName) {
+                                $body .= "<strong>{$signerName}</strong><br>";
+                            }
+                            if ($signerTitle) {
+                                $body .= "<span style=\"font-size:9pt;color:#555;\">{$signerTitle}</span>";
+                            }
+                            $body .= '</div></td>';
+                        }
+                        $body .= '</tr></table>';
+                    }
+                    break;
+
+                case 'key_value':
+                    $pairs = $section['pairs'] ?? [];
+                    if (!empty($pairs)) {
+                        $body .= '<table style="width:100%;border:none;border-collapse:collapse;margin:8px 0;">';
+                        foreach ($pairs as $pair) {
+                            $label = htmlspecialchars((string) ($pair['label'] ?? ''), ENT_QUOTES, 'UTF-8');
+                            $value = htmlspecialchars((string) ($pair['value'] ?? ''), ENT_QUOTES, 'UTF-8');
+                            $body .= '<tr>'
+                                   . "<td style=\"width:30%;font-weight:bold;padding:3px 12px 3px 0;color:#2d3748;border:none;\">{$label}</td>"
+                                   . "<td style=\"padding:3px 0;border:none;\">{$value}</td>"
+                                   . '</tr>';
+                        }
+                        $body .= '</table>';
+                    }
+                    break;
+
+                case 'badge':
+                    $badgeColorMap = [
+                        'green'  => ['bg' => '#D5F5E3', 'border' => '#27AE60', 'text' => '#1E8449'],
+                        'orange' => ['bg' => '#FEF9E7', 'border' => '#F39C12', 'text' => '#B7770D'],
+                        'red'    => ['bg' => '#FDEDEC', 'border' => '#E74C3C', 'text' => '#C0392B'],
+                        'blue'   => ['bg' => '#EBF5FB', 'border' => '#3498DB', 'text' => '#1A6FA1'],
+                        'gray'   => ['bg' => '#F2F3F4', 'border' => '#95A5A6', 'text' => '#566573'],
+                    ];
+                    $body .= '<p style="margin:8px 0;">';
+                    foreach ($section['items'] ?? [] as $badge) {
+                        $badgeLabel  = htmlspecialchars((string) ($badge['label'] ?? ''), ENT_QUOTES, 'UTF-8');
+                        $badgeColor  = $badge['color'] ?? 'blue';
+                        $colors      = $badgeColorMap[$badgeColor] ?? $badgeColorMap['blue'];
+                        $body .= "<span style=\"background:{$colors['bg']};border:1px solid {$colors['border']};"
+                               . "color:{$colors['text']};padding:2px 10px;border-radius:12px;"
+                               . "font-size:9pt;font-weight:bold;margin-right:6px;\">{$badgeLabel}</span>";
+                    }
+                    $body .= '</p>';
+                    break;
+
+                case 'summary_box':
+                    $boxTitle = htmlspecialchars((string) ($section['title'] ?? 'Recapitulatif'), ENT_QUOTES, 'UTF-8');
+                    $body .= '<div style="border:2px solid #4472C4;border-radius:4px;padding:14px 18px;margin:16px 0;background:#F0F4FF;">';
+                    $body .= "<p style=\"font-weight:bold;color:#1a1a2e;margin:0 0 8px 0;font-size:12pt;\">{$boxTitle}</p>";
+                    $body .= '<ul style="margin:0;padding-left:20px;">';
+                    foreach ($section['items'] ?? [] as $item) {
+                        $body .= '<li style="margin:4px 0;">' . htmlspecialchars((string) $item, ENT_QUOTES, 'UTF-8') . '</li>';
+                    }
+                    $body .= '</ul></div>';
+                    break;
             }
         }
+
+        $footerHtml = '';
+        if ($footer) {
+            $escapedFooter = htmlspecialchars($footer, ENT_QUOTES, 'UTF-8');
+            $footerHtml    = "<div class=\"footer\">{$escapedFooter}</div>";
+        }
+        $footerCss = $footer
+            ? '.footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8pt; color: #718096; border-top: 1px solid #e2e8f0; padding-top: 4px; text-align: center; } body { margin-bottom: 60px; }'
+            : '';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -551,11 +736,13 @@ PROMPT;
     hr { border: none; border-top: 1px solid #cbd5e0; margin: 16px 0; }
     p { margin: 8px 0; }
     .page-break { page-break-after: always; }
+    {$footerCss}
 </style>
 </head>
 <body>
 <h1>{$title}</h1>
 {$body}
+{$footerHtml}
 </body>
 </html>
 HTML;
@@ -571,7 +758,22 @@ HTML;
         $phpWord->setDefaultFontName('Calibri');
         $phpWord->setDefaultFontSize(11);
 
-        $section = $phpWord->addSection();
+        $orientation = ($content['orientation'] ?? 'portrait') === 'landscape' ? 'landscape' : 'portrait';
+
+        if ($orientation === 'landscape') {
+            $section = $phpWord->addSection([
+                'orientation' => 'landscape',
+                'pageSizeW'   => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(29.7),
+                'pageSizeH'   => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(21.0),
+                'marginLeft'  => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2.0),
+                'marginRight' => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2.0),
+                'marginTop'   => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2.0),
+                'marginBottom'=> \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2.0),
+            ]);
+        } else {
+            $section = $phpWord->addSection();
+        }
+
         $section->addTitle($title, 1);
 
         $sections = $content['sections'] ?? [];
@@ -639,7 +841,7 @@ HTML;
 
                 case 'callout':
                     $callStyle = $item['style'] ?? 'info';
-                    $bgMap     = ['info' => 'D6EAF8', 'warning' => 'FEF9E7', 'success' => 'D5F5E3'];
+                    $bgMap     = ['info' => 'D6EAF8', 'warning' => 'FEF9E7', 'success' => 'D5F5E3', 'danger' => 'FADBD8'];
                     $bgColor   = $bgMap[$callStyle] ?? 'D6EAF8';
                     $callTable = $section->addTable([
                         'borderSize'  => 8,
@@ -654,12 +856,132 @@ HTML;
                     $section->addTextBreak();
                     break;
 
+                case 'quote':
+                    $quoteTable = $section->addTable([
+                        'borderSize'   => 0,
+                        'borderColor'  => 'FFFFFF',
+                        'cellMargin'   => 80,
+                        'width'        => 100 * 50,
+                        'unit'         => 'pct',
+                    ]);
+                    $quoteTable->addRow();
+                    $quoteCell = $quoteTable->addCell(null, [
+                        'bgColor'         => 'F8F9FA',
+                        'borderLeftColor' => 'A0AEC0',
+                        'borderLeftSize'  => 18,
+                    ]);
+                    $quoteCell->addText((string) ($item['text'] ?? ''), ['size' => 10, 'italic' => true, 'color' => '4A5568']);
+                    $section->addTextBreak();
+                    break;
+
+                case 'highlight':
+                    $hlColorMap = ['yellow' => 'yellow', 'green' => 'green', 'cyan' => 'cyan', 'pink' => 'magenta'];
+                    $hlColor    = $hlColorMap[$item['color'] ?? 'yellow'] ?? 'yellow';
+                    $section->addText((string) ($item['text'] ?? ''), ['size' => 11, 'highlight' => $hlColor]);
+                    break;
+
                 case 'separator':
                     $section->addTextBreak(1);
                     break;
 
                 case 'page_break':
                     $section->addText('', null, ['pageBreakBefore' => true]);
+                    break;
+
+                case 'signature':
+                    $signers = $item['signers'] ?? [];
+                    if (!empty($signers)) {
+                        $section->addTextBreak(2);
+                        $sigTable = $section->addTable([
+                            'borderSize'  => 0,
+                            'borderColor' => 'FFFFFF',
+                            'cellMargin'  => 120,
+                            'width'       => 100 * 50,
+                            'unit'        => 'pct',
+                        ]);
+                        $sigTable->addRow();
+                        foreach ($signers as $signer) {
+                            $cell = $sigTable->addCell(null, [
+                                'borderTopColor' => '333333',
+                                'borderTopSize'  => 12,
+                                'borderTopStyle' => 'single',
+                            ]);
+                            if (!empty($signer['name'])) {
+                                $cell->addText((string) $signer['name'], ['bold' => true, 'size' => 11]);
+                            }
+                            if (!empty($signer['title'])) {
+                                $cell->addText((string) $signer['title'], ['size' => 9, 'italic' => true, 'color' => '555555']);
+                            }
+                        }
+                        $section->addTextBreak();
+                    }
+                    break;
+
+                case 'key_value':
+                    $pairs = $item['pairs'] ?? [];
+                    if (!empty($pairs)) {
+                        $kvTable = $section->addTable([
+                            'borderSize'  => 0,
+                            'borderColor' => 'FFFFFF',
+                            'cellMargin'  => 60,
+                            'width'       => 100 * 50,
+                            'unit'        => 'pct',
+                        ]);
+                        foreach ($pairs as $pair) {
+                            $kvTable->addRow();
+                            $labelCell = $kvTable->addCell(2500);
+                            $labelCell->addText((string) ($pair['label'] ?? ''), ['bold' => true, 'size' => 11]);
+                            $valueCell = $kvTable->addCell(5000);
+                            $valueCell->addText((string) ($pair['value'] ?? ''), ['size' => 11]);
+                        }
+                        $section->addTextBreak();
+                    }
+                    break;
+
+                case 'badge':
+                    $badgeDocxColors = [
+                        'green'  => ['bg' => 'D5F5E3', 'text' => '1E8449'],
+                        'orange' => ['bg' => 'FEF9E7', 'text' => 'B7770D'],
+                        'red'    => ['bg' => 'FADBD8', 'text' => 'C0392B'],
+                        'blue'   => ['bg' => 'EBF5FB', 'text' => '1A6FA1'],
+                        'gray'   => ['bg' => 'F2F3F4', 'text' => '566573'],
+                    ];
+                    $badgeTable = $section->addTable([
+                        'borderSize'  => 0,
+                        'borderColor' => 'FFFFFF',
+                        'cellMargin'  => 60,
+                    ]);
+                    $badgeTable->addRow();
+                    foreach ($item['items'] ?? [] as $badge) {
+                        $badgeColor  = $badge['color'] ?? 'blue';
+                        $badgeColors = $badgeDocxColors[$badgeColor] ?? $badgeDocxColors['blue'];
+                        $badgeCell   = $badgeTable->addCell(1500, ['bgColor' => $badgeColors['bg']]);
+                        $badgeCell->addText(
+                            (string) ($badge['label'] ?? ''),
+                            ['bold' => true, 'size' => 9, 'color' => $badgeColors['text']]
+                        );
+                    }
+                    $section->addTextBreak();
+                    break;
+
+                case 'summary_box':
+                    $boxTable = $section->addTable([
+                        'borderSize'  => 12,
+                        'borderColor' => '4472C4',
+                        'cellMargin'  => 150,
+                        'width'       => 100 * 50,
+                        'unit'        => 'pct',
+                    ]);
+                    $boxTable->addRow();
+                    $boxCell = $boxTable->addCell(null, ['bgColor' => 'EEF2FF']);
+                    $boxCell->addText(
+                        (string) ($item['title'] ?? 'Recapitulatif'),
+                        ['bold' => true, 'size' => 12, 'color' => '1a1a2e']
+                    );
+                    foreach ($item['items'] ?? [] as $bullet) {
+                        $boxCell->addListItem((string) $bullet, 0, ['size' => 11]);
+                    }
+                    $section->addTextBreak();
                     break;
             }
         }
