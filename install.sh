@@ -179,12 +179,13 @@ install_package() {
     mgr=$(detect_pkg_manager)
 
     info "Installing ${pkg} via ${mgr}..."
+    # Use sudo -E to preserve proxy env vars (http_proxy, https_proxy, etc.)
     case "$mgr" in
-        apt)    sudo apt-get update -qq && sudo apt-get install -y -qq "$pkg" ;;
-        dnf)    sudo dnf install -y -q "$pkg" ;;
-        yum)    sudo yum install -y -q "$pkg" ;;
-        pacman) sudo pacman -Sy --noconfirm "$pkg" ;;
-        apk)    sudo apk add --quiet "$pkg" ;;
+        apt)    sudo -E apt-get update -qq && sudo -E apt-get install -y -qq "$pkg" ;;
+        dnf)    sudo -E dnf install -y "$pkg" ;;
+        yum)    sudo -E yum install -y "$pkg" ;;
+        pacman) sudo -E pacman -Sy --noconfirm "$pkg" ;;
+        apk)    sudo -E apk add --quiet "$pkg" ;;
         *)
             error "Unknown package manager. Please install '${pkg}' manually."
             return 1
@@ -245,7 +246,7 @@ install_container_runtime() {
     if [[ "$choice" == "docker" ]]; then
         info "Installing Docker via official script (https://get.docker.com)..."
         echo ""
-        if curl -fsSL https://get.docker.com | sudo sh; then
+        if curl -fsSL https://get.docker.com | sudo -E sh; then
             if check_command docker; then
                 success "Docker installed successfully!"
                 if [[ $EUID -ne 0 ]]; then
@@ -267,9 +268,9 @@ install_container_runtime() {
             # Install podman-compose
             if check_command pip3; then
                 info "Installing podman-compose..."
-                sudo pip3 install podman-compose 2>/dev/null || pip3 install --user podman-compose 2>/dev/null || true
+                sudo -E pip3 install podman-compose 2>/dev/null || pip3 install --user podman-compose 2>/dev/null || true
             elif check_command pip; then
-                sudo pip install podman-compose 2>/dev/null || true
+                sudo -E pip install podman-compose 2>/dev/null || true
             fi
             if ! command -v podman-compose &>/dev/null && ! podman compose version &>/dev/null 2>&1; then
                 warn "podman-compose not available. Install it: pip3 install podman-compose"
@@ -369,8 +370,8 @@ preflight_checks() {
         read -r answer
         if [[ "${answer,,}" != "n" ]]; then
             info "Installing Node.js 20 via nodesource..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
-            sudo apt-get install -y nodejs
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo -E apt-get install -y nodejs
             if check_command node; then
                 success "Node.js installed ($(node --version))"
             else
@@ -390,7 +391,7 @@ preflight_checks() {
         read -r answer
         if [[ "${answer,,}" != "n" ]]; then
             info "Installing @anthropic-ai/claude-code..."
-            sudo npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
+            sudo -E npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
             if check_command claude; then
                 success "Claude Code CLI installed"
             else
@@ -777,6 +778,11 @@ ask_proxy_early() {
         export HTTPS_PROXY="$CONF_HTTPS_PROXY"
         export no_proxy="$CONF_NO_PROXY"
         export NO_PROXY="$CONF_NO_PROXY"
+
+        # Configure git proxy (workaround for older libcurl that chokes on proxy URLs)
+        git config --global http.proxy "$CONF_HTTP_PROXY"
+        git config --global https.proxy "$CONF_HTTPS_PROXY"
+
         success "Proxy configure: $CONF_HTTP_PROXY"
     fi
 }
@@ -797,8 +803,8 @@ clone_or_update_repo() {
         success "Repository updated"
     else
         info "Cloning $REPO_URL into $INSTALL_DIR..."
-        sudo mkdir -p "$(dirname "$INSTALL_DIR")"
-        sudo git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+        sudo -E mkdir -p "$(dirname "$INSTALL_DIR")"
+        sudo -E git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
         sudo chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"
         success "Repository cloned"
     fi
@@ -813,6 +819,9 @@ main() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     show_banner
+
+    # Ask for proxy FIRST — needed before any downloads (git pull, dnf, curl...)
+    ask_proxy_early
 
     if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
         # Running from inside the repo — git pull latest first
@@ -839,8 +848,6 @@ main() {
         exit 1
     fi
 
-    # Ask for proxy FIRST — needed before any curl/download in preflight
-    ask_proxy_early
     preflight_checks
     collect_configuration
     generate_env
