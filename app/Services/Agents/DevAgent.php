@@ -379,6 +379,7 @@ class DevAgent extends BaseAgent
         $projectCode = $this->discoverProjectApi($project);
         $collectedData = [];
         $maxIterations = 10;
+        $parseFailures = 0;
 
         $this->log($context, 'runApiAgent starting', [
             'project' => $project->name,
@@ -468,15 +469,30 @@ PROMPT;
             $response = $this->claude->chat($query, ModelResolver::powerful(), $systemPrompt);
             $parsed = $this->parseJson($response);
 
+            // Self-healing: if JSON parse fails, send the raw response back to Claude to fix it
             if (!$parsed || empty($parsed['action'])) {
-                Log::warning('DevAgent parse failed', [
-                    'from' => $context->from ?? null,
-                    'project' => $project->name,
-                    'raw_response' => mb_substr($response ?? '', 0, 2000),
-                    'parsed' => $parsed,
-                    'query' => mb_substr($query, 0, 500),
-                ]);
-                return "[{$project->name}] Erreur d'analyse. Reformule ta demande.";
+                $parseFailures++;
+                $this->log($context, "runApiAgent parse failed at iteration {$i} (attempt {$parseFailures})", [
+                    'raw_response' => mb_substr($response ?? '', 0, 500),
+                ], 'warning');
+
+                if ($parseFailures >= 3) {
+                    return "[{$project->name}] Erreur d'analyse apres plusieurs tentatives. Reformule ta demande.";
+                }
+
+                // Ask Claude to fix its own broken JSON
+                $fixPrompt = "Ta reponse precedente n'est PAS du JSON valide. Voici ce que tu as repondu:\n\n"
+                    . mb_substr($response ?? '', 0, 3000)
+                    . "\n\nCorrige et renvoie UNIQUEMENT le JSON valide avec le champ 'action' (call/reply/ask/web_fetch). JSON UNIQUEMENT, rien d'autre.";
+                $fixResponse = $this->claude->chat($fixPrompt, ModelResolver::fast(), "Tu corriges du JSON invalide. Reponds UNIQUEMENT avec le JSON corrige.");
+                $parsed = $this->parseJson($fixResponse);
+
+                if (!$parsed || empty($parsed['action'])) {
+                    $this->log($context, "Self-heal also failed, continuing to next iteration", [], 'warning');
+                    continue;
+                }
+
+                $this->log($context, "Self-heal succeeded, recovered valid JSON", ['action' => $parsed['action']]);
             }
 
             // Store extracted info
