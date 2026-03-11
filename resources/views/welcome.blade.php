@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 {{-- SEO --}}
-<title>ZeniClaw — Plateforme IA WhatsApp Self-Hosted | 23 Agents Autonomes</title>
-<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 23 agents specialises. Gerez vos projets, finances, rappels et plus depuis un simple chat WhatsApp. On-prem ou Cloud, propulse par Claude, GPT-4 et Ollama.">
-<meta name="keywords" content="zeniclaw, whatsapp ia, chatbot whatsapp, ai agents, self-hosted, open source, claude, gpt-4, ollama, on-prem, assistant ia, automatisation whatsapp, crm whatsapp">
+<title>ZeniClaw — Plateforme IA Multi-Canal Self-Hosted | 23 Agents Autonomes | On-Prem &amp; Cloud</title>
+<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 23 agents specialises. Multi-canal (WhatsApp, Web Chat, bientot plus), On-Prem avec Ollama ou Cloud avec Claude/GPT-4. Routing intelligent, classification par intent, API agent autonome.">
+<meta name="keywords" content="zeniclaw, ia multi-canal, ai agents, self-hosted, open source, claude, gpt-4, ollama, on-prem, llm local, assistant ia, automatisation, crm, intent classifier, agentic loop">
 <meta name="author" content="ZeniBiz">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="{{ url('/') }}">
@@ -15,8 +15,8 @@
 {{-- Open Graph (Facebook, Instagram, WhatsApp, LinkedIn) --}}
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ url('/') }}">
-<meta property="og:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
-<meta property="og:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Projets, finances, rappels, code reviews, flashcards — tout depuis WhatsApp. On-prem ou Cloud. Open source et gratuit.">
+<meta property="og:title" content="ZeniClaw — Your AI Army, Any Channel">
+<meta property="og:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Multi-canal, On-Prem ou Cloud, intent classifier, API agent autonome. Open source et gratuit.">
 <meta property="og:image" content="{{ url('/og-image.php') }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -26,8 +26,8 @@
 
 {{-- Twitter Card --}}
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="ZeniClaw — Your AI Army, One WhatsApp Away">
-<meta name="twitter:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Projets, finances, rappels, code reviews — tout depuis WhatsApp.">
+<meta name="twitter:title" content="ZeniClaw — Your AI Army, Any Channel">
+<meta name="twitter:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Multi-canal, On-Prem ou Cloud. Intent classifier, API agent autonome.">
 <meta name="twitter:image" content="{{ url('/og-image.php') }}">
 
 {{-- Favicon --}}
@@ -39,7 +39,7 @@
   "@@context": "https://schema.org",
   "@@type": "SoftwareApplication",
   "name": "ZeniClaw",
-  "description": "Plateforme IA open source et self-hosted avec 23 agents specialises accessibles via WhatsApp. On-prem ou Cloud.",
+  "description": "Plateforme IA open source et self-hosted avec 23 agents specialises. Multi-canal (WhatsApp, Web Chat, et plus). On-prem avec Ollama ou Cloud avec Claude/GPT-4.",
   "url": "{{ url('/') }}",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Linux",
@@ -54,7 +54,7 @@
     "url": "https://www.zenibiz.com"
   },
   "screenshot": "{{ url('/og-image.php') }}",
-  "featureList": "23 AI Agents, WhatsApp Integration, Self-Hosted, Open Source, On-Prem LLM, Ollama, Agentic Loop, Web Search, API Tracking, Confidence Routing, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Flashcards, Reminders, Document Generation, Games, Persistent Memory"
+  "featureList": "23 AI Agents, Multi-Channel (WhatsApp, Web Chat), Self-Hosted, Open Source, On-Prem LLM, Ollama, Intent Classifier, Agentic Loop, Autonomous API Agent, Web Search, Configurable Model Roles, Parallel Sub-Agents, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Document Generation, Persistent Memory"
 }
 </script>
 
@@ -405,14 +405,14 @@ footer {
   <div class="hero-content">
     <div class="hero-badge fade-up">
       <span class="dot"></span>
-      <span>v2.26 &middot; Open Source &middot; Self-Hosted &middot; On-Prem Ready</span>
+      <span>v2.27 &middot; Open Source &middot; Self-Hosted &middot; On-Prem Ready</span>
     </div>
     <h1 class="fade-up d1">
       Your AI Army,<br>
-      <span class="gradient-text">One WhatsApp Away</span>
+      <span class="gradient-text">Any Channel, Any Model</span>
     </h1>
     <p class="fade-up d2">
-      ZeniClaw is a self-hosted AI platform with 23 specialized agents that turn your WhatsApp into an autonomous command center. Cloud or On-Prem LLMs, agentic tool loops, persistent memory &mdash; all from a single chat.
+      ZeniClaw is a self-hosted AI platform with 23 specialized agents. Multi-channel (WhatsApp, Web Chat, more coming), Cloud or fully On-Prem with Ollama &mdash; intent classification, autonomous API agents, parallel execution, and persistent memory.
     </p>
     <div class="hero-actions fade-up d3">
       @auth
@@ -459,12 +459,13 @@ footer {
     <div class="features-grid">
       <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>23 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, document generation, meeting notes, habits, games, and more. Each agent has its own memory and tools.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x1F500;</div><h3>Agentic Loop</h3><p>LLM-driven decision loop with tool usage. Agents autonomously decide which tools to call, chain API operations, and iterate up to 10 times to complete complex tasks without human intervention.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon cyan">&#x1F5A5;</div><h3>On-Prem LLMs (Ollama)</h3><p>Run models locally with the built-in Ollama container. Download Qwen 2.5, CodeLlama, or any model directly from the UI. Zero API costs, full privacy, no data leaves your server.</p></div>
-      <div class="feature-card"><div class="feature-icon green">&#x1F4AC;</div><h3>WhatsApp + Web Chat</h3><p>Native Baileys integration &mdash; no paid APIs. Full multimodal support: text, images, voice, PDFs. Plus a built-in web chat panel on the dashboard for instant testing.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon pink">&#x1F9E0;</div><h3>Persistent User Knowledge</h3><p>Per-user fact storage that survives across sessions. Agents remember your preferences, past API results, and project details. Recall before asking, store after learning.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon amber">&#x1F3AF;</div><h3>Model Selection per Agent</h3><p>Assign different LLMs to different sub-agents. Use Claude Opus for complex analysis, Haiku for routing, and Qwen on-prem for everyday chat. Full control over cost and quality.</p></div>
+      <div class="feature-card" style="border-color: rgba(6,182,212,0.4); background: linear-gradient(135deg, rgba(6,182,212,0.08), var(--bg-card));"><span class="feature-new" style="background: var(--accent-cyan);">Highlight</span><div class="feature-icon cyan">&#x1F5A5;</div><h3>On-Prem LLMs (Ollama)</h3><p>Run models 100% locally with the built-in Ollama container. Download Qwen 2.5, CodeLlama, DeepSeek, or any model from the UI. <strong>Zero API costs, full privacy, no data leaves your server.</strong> Configure model roles (fast/balanced/powerful) per use-case.</p></div>
+      <div class="feature-card"><div class="feature-icon green">&#x1F4AC;</div><h3>Multi-Channel</h3><p>WhatsApp (Baileys, no paid API), Web Chat dashboard, and more channels coming soon. Full multimodal support: text, images, voice, PDFs. Same agents, any channel.</p></div>
+      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon pink">&#x1F9E0;</div><h3>Intent Classifier</h3><p>LLM-based intent classification in every agent. Conversation history injected for context-aware routing. Anti-hallucination rules prevent agents from claiming actions they didn't perform.</p></div>
+      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon amber">&#x1F3AF;</div><h3>Configurable Model Roles</h3><p>3 roles (Fast, Balanced, Powerful) configurable from the UI. Assign Claude Opus for complex tasks, Haiku for routing, Ollama for privacy. All agents use roles automatically.</p></div>
       <div class="feature-card"><div class="feature-icon red">&#x1F6E0;</div><h3>GitLab DevOps</h3><p>SubAgents clone repos, create branches, write code with Claude Code CLI, auto-commit, push, and open merge requests. Full CI/CD pipeline from a WhatsApp message.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon blue">&#x1F310;</div><h3>Claude-Driven API Agent</h3><p>Claude autonomously decides which HTTP calls to make, chains multi-step API requests, extracts and stores results. No hardcoded endpoints &mdash; pure LLM-driven API interaction.</p></div>
+      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon blue">&#x1F310;</div><h3>Autonomous API Agent</h3><p>Claude chains multi-step API calls, fetches web pages for analysis, stores credentials, and self-heals broken JSON. Up to 10 iterations with auto-continuation for large responses.</p></div>
+      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x26A1;</div><h3>Parallel Sub-Agents</h3><p>Run multiple sub-agents concurrently (configurable 1-10, default 3). Throttle middleware, smart queue workers, and settings UI for full control over parallelism.</p></div>
       <div class="feature-card"><div class="feature-icon purple">&#x1F512;</div><h3>Self-Hosted & Secure</h3><p>100% on-premise. AES-256 encrypted secrets, role-based access (superadmin/admin/operator/viewer), agent sandboxing, auto-updates, and health monitoring with watchdog.</p></div>
       <div class="feature-card"><div class="feature-icon green">&#x1F4CA;</div><h3>Finance Tracker</h3><p>Track expenses, manage budgets, get financial analytics and alerts. Categorize spending, set thresholds, and receive WhatsApp notifications when limits are reached.</p></div>
       <div class="feature-card"><div class="feature-icon pink">&#x1F4DD;</div><h3>Smart Meetings</h3><p>Record meetings, generate transcriptions, produce structured summaries with action items. Never miss a decision or follow-up again.</p></div>
@@ -513,26 +514,26 @@ footer {
     <p class="section-desc">Five containers (Podman or Docker), zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</p>
     <div class="arch-diagram">
 <pre>
-  <span class="hl-green">WhatsApp</span>                 <span class="hl-blue">ZeniClaw Stack</span>                    <span class="hl-purple">AI Providers</span>
+  <span class="hl-green">Channels</span>                 <span class="hl-blue">ZeniClaw Stack</span>                    <span class="hl-purple">AI Providers</span>
 
   +-----------+       +----------------------------------+       +-------------+
-  |           |  QR   |  <span class="hl-green">WhatsApp Gateway</span> (port 3000)    |       |  <span class="hl-purple">Claude</span>     |
+  |  <span class="hl-green">WhatsApp</span> |  QR   |  <span class="hl-green">WhatsApp Gateway</span> (port 3000)    |       |  <span class="hl-purple">Claude</span>     |
   |  Phone    |&lt;-----&gt;|  Baileys + Express               |       |  Opus/Sonnet|
-  |           |       |  Auto-reconnect, webhook relay    |       |  Haiku      |
-  +-----------+       +-----------|----------------------+       +-------------+
-                                  | webhook POST                        ^
-  +-----------+                   v                                     |
+  +-----------+       +-----------|----------------------+       |  Haiku      |
+                                  | webhook POST                 +-------------+
+  +-----------+                   v                                     ^
   |  <span class="hl-blue">Web Chat</span> |       +----------------------------------+       +-------------+
   |  Dashboard|------&gt;|  <span class="hl-blue">App</span> (port 8080)                |       |  <span class="hl-purple">OpenAI</span>    |
-  |  Panel    |       |  Laravel 12 + PHP 8.4            |------&gt;|  GPT-4o     |
-  +-----------+       |                                  |       +-------------+
-                      |  <span class="hl-amber">RouterAgent</span> --&gt; 23 Agents      |
-                      |  <span class="hl-amber">Agentic Loop</span> (tool chaining)   |       +-------------+
-                      |  <span class="hl-amber">SubAgents</span> (Claude Code CLI)    |       |  <span class="hl-cyan">Ollama</span>    |
-                      |  <span class="hl-amber">Knowledge Store</span> (per-user)     |&lt;-----&gt;|  Qwen 2.5  |
-                      |  Dashboard + Admin UI            |       |  CodeLlama  |
+  +-----------+       |  Laravel 12 + PHP 8.4            |------&gt;|  GPT-4o     |
+                      |                                  |       +-------------+
+  +-----------+       |  <span class="hl-amber">RouterAgent</span> (fast-path + LLM)   |
+  |  <span class="hl-green">More...</span>  |       |  <span class="hl-amber">Intent Classifier</span> (per agent)  |       +-------------+
+  |  (coming) |------&gt;|  <span class="hl-amber">23 Agents</span> (parallel execution) |       | <span class="hl-cyan">Ollama</span> &#x2B50; |
+  +-----------+       |  <span class="hl-amber">Agentic Loop</span> + API Agent       |&lt;-----&gt;| Qwen 2.5   |
+                      |  <span class="hl-amber">SubAgents</span> (x3 parallel)        |       | DeepSeek   |
+                      |  <span class="hl-amber">Model Roles</span> (fast/balanced/pow)|       | CodeLlama  |
                       +-----------|----------------------+       +-------------+
-                                  |
+                                  |                                <span class="hl-cyan">100% Private</span>
                       +-----------|-----------+          +-------------+
                       |           v           |          |  <span class="hl-pink">GitLab</span>    |
                 +----------+  +---------+                |  Repos, MRs |
@@ -564,6 +565,21 @@ footer {
     <h2 class="section-title">What's <span class="gradient-text">new</span></h2>
     <p class="section-desc">Recent updates and improvements to the platform.</p>
     <div class="changelog">
+      <div class="changelog-item">
+        <div class="changelog-version">v2.27</div>
+        <div class="changelog-content">
+          <h4>Intent Classifier, Parallel Sub-Agents, Model Roles & API Agent v2</h4>
+          <p>
+            <span class="changelog-tag tag-feat">feat</span><strong>Intent Classifier</strong> in BaseAgent &mdash; LLM-based intent classification with conversation history, available to all 23 agents.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Configurable Model Roles</strong> &mdash; 3 roles (fast/balanced/powerful) configurable from Settings UI, replacing 50+ hardcoded model strings.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Parallel Sub-Agents</strong> &mdash; up to 10 concurrent sub-agents with throttle middleware, configurable from Settings (default: 3).<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>API Agent v2</strong> &mdash; web page fetching, self-healing JSON, auto-continuation for truncated responses, context-aware credential storage.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Anti-hallucination rules</strong> &mdash; agents never claim actions they didn't perform via tools.<br>
+            <span class="changelog-tag tag-feat">feat</span>Context-aware fast-path routing &mdash; bypasses fast-path when user has active API project.<br>
+            <span class="changelog-tag tag-fix">fix</span>Dynamic HTTP timeouts (120s for large token requests), truncated JSON salvage, conversation history in all agent prompts.
+          </p>
+        </div>
+      </div>
       <div class="changelog-item">
         <div class="changelog-version">v2.26</div>
         <div class="changelog-content">
@@ -689,8 +705,8 @@ footer {
       <div class="install-step">
         <div class="step-number">3</div>
         <div class="step-content">
-          <h3>Connect WhatsApp</h3>
-          <p>Open the dashboard, go to Settings > WhatsApp and scan the QR code. Auto-reconnect handles restarts.</p>
+          <h3>Connect a Channel</h3>
+          <p>Open the dashboard. For WhatsApp: go to Settings and scan the QR code. Or use the built-in Web Chat directly from the dashboard. More channels coming soon.</p>
         </div>
       </div>
       <div class="install-step">
@@ -705,7 +721,7 @@ footer {
         <div class="step-number">5</div>
         <div class="step-content">
           <h3>Start Chatting</h3>
-          <p>Send a message to your linked WhatsApp number or use the built-in web chat. The RouterAgent auto-dispatches to the right agent.</p>
+          <p>Send a message from any connected channel. The RouterAgent with intent classifier auto-dispatches to the right agent.</p>
         </div>
       </div>
     </div>
@@ -743,7 +759,7 @@ footer {
         <li><a href="{{ route('login') }}">Sign In</a></li>
       @endauth
     </ul>
-    <p class="footer-copy">&copy; {{ date('Y') }} ZeniClaw v2.26 by ZeniBiz &mdash; Self-hosted AI WhatsApp Platform</p>
+    <p class="footer-copy">&copy; {{ date('Y') }} ZeniClaw v2.27 by ZeniBiz &mdash; Self-hosted Multi-Channel AI Platform</p>
   </div>
 </footer>
 
