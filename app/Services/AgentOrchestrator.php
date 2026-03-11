@@ -244,14 +244,14 @@ class AgentOrchestrator
                     );
 
                     $dispatchAgent = $newRouting['agent'];
-                    if (!in_array($dispatchAgent, ['dev', 'document', 'streamline', 'assistant'])) {
+                    if (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
                         $dispatchAgent = 'chat';
                     }
                 } else {
                     // Low confidence or failed — voice agent already replied to user
                     return $voiceResult;
                 }
-            } elseif (!in_array($dispatchAgent, ['dev', 'document', 'streamline', 'assistant'])) {
+            } elseif (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
                 $dispatchAgent = 'chat';
             }
 

@@ -9,6 +9,9 @@ use App\Models\Todo;
 use App\Models\UserKnowledge;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Writer\Csv;
 
 /**
  * Defines all tools available to the agentic loop.
@@ -259,6 +262,32 @@ class AgentTools
                     'required' => ['query'],
                 ],
             ],
+            // ── Document creation tool ──
+            [
+                'name' => 'create_document',
+                'description' => 'Create and send a document file (XLSX, CSV, PDF, DOCX) to the user. Use this when the user asks to create a file, spreadsheet, report, or export data. You MUST provide the data — collect it first via web_search or other tools if needed.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'format' => ['type' => 'string', 'enum' => ['xlsx', 'csv', 'pdf', 'docx'], 'description' => 'File format'],
+                        'title' => ['type' => 'string', 'description' => 'Document title (used as filename and header)'],
+                        'headers' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                            'description' => 'Column headers for the table (e.g. ["Ville", "Temperature", "Conditions"])',
+                        ],
+                        'rows' => [
+                            'type' => 'array',
+                            'items' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                            'description' => 'Data rows as arrays of strings (e.g. [["Paris", "18°C", "Ensoleillé"], ["Lyon", "15°C", "Nuageux"]])',
+                        ],
+                    ],
+                    'required' => ['format', 'title', 'headers', 'rows'],
+                ],
+            ],
         ];
     }
 
@@ -289,6 +318,7 @@ class AgentTools
                 'recall_knowledge' => self::executeRecallKnowledge($input, $context),
                 'list_knowledge' => self::executeListKnowledge($context),
                 'web_search' => self::executeWebSearch($input, $context),
+                'create_document' => self::executeCreateDocument($input, $context),
                 default => json_encode(['error' => "Unknown tool: {$toolName}"]),
             };
         } catch (\Exception $e) {
@@ -886,5 +916,83 @@ class AgentTools
         }
 
         return json_encode(['results' => $results, 'count' => count($results)]);
+    }
+
+    // ── Document creation executor ──────────────────────────────────
+
+    private static function executeCreateDocument(array $input, AgentContext $context): string
+    {
+        $format = $input['format'] ?? 'xlsx';
+        $title = $input['title'] ?? 'Document';
+        $headers = $input['headers'] ?? [];
+        $rows = $input['rows'] ?? [];
+
+        if (empty($headers) || empty($rows)) {
+            return json_encode(['error' => 'headers and rows are required']);
+        }
+
+        $slug = preg_replace('/[^a-z0-9]+/', '-', mb_strtolower($title));
+        $filename = $slug . '.' . $format;
+        $storagePath = storage_path('app/public/documents/' . $filename);
+
+        $dir = dirname($storagePath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+
+        try {
+            if (in_array($format, ['xlsx', 'csv'])) {
+                $spreadsheet = new Spreadsheet();
+                $sheet = $spreadsheet->getActiveSheet();
+                $sheet->setTitle(mb_substr($title, 0, 31));
+
+                // Headers
+                foreach ($headers as $col => $header) {
+                    $letter = chr(65 + $col); // A, B, C...
+                    $sheet->setCellValue("{$letter}1", $header);
+                    $sheet->getStyle("{$letter}1")->getFont()->setBold(true);
+                }
+
+                // Data rows
+                foreach ($rows as $rowIdx => $row) {
+                    foreach ($row as $col => $value) {
+                        $letter = chr(65 + $col);
+                        $sheet->setCellValue("{$letter}" . ($rowIdx + 2), $value);
+                    }
+                }
+
+                // Auto-size columns
+                foreach (range(0, count($headers) - 1) as $col) {
+                    $sheet->getColumnDimension(chr(65 + $col))->setAutoSize(true);
+                }
+
+                if ($format === 'xlsx') {
+                    $writer = new Xlsx($spreadsheet);
+                } else {
+                    $writer = new Csv($spreadsheet);
+                }
+                $writer->save($storagePath);
+            } else {
+                return json_encode(['error' => "Format '{$format}' not yet supported in create_document tool. Use xlsx or csv."]);
+            }
+
+            // Send the file via WhatsApp
+            $url = url("storage/documents/{$filename}");
+            $whatsapp = new \App\Services\WhatsAppService();
+            $whatsapp->sendDocument($context->from, $url, $filename, $title);
+
+            return json_encode([
+                'success' => true,
+                'filename' => $filename,
+                'format' => $format,
+                'rows_count' => count($rows),
+                'columns_count' => count($headers),
+                'url' => $url,
+                'message' => "Document '{$title}' created and sent ({$format}, " . count($rows) . " rows).",
+            ]);
+        } catch (\Exception $e) {
+            Log::error('[create_document] Error: ' . $e->getMessage());
+            return json_encode(['error' => 'Document creation failed: ' . $e->getMessage()]);
+        }
     }
 }
