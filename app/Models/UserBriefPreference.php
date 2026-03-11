@@ -11,6 +11,7 @@ class UserBriefPreference extends Model
         'brief_time',
         'enabled',
         'preferred_sections',
+        'weather_city',
     ];
 
     protected $casts = [

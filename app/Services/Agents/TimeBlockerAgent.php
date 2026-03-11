@@ -25,25 +25,37 @@ class TimeBlockerAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Optimisation intelligente de la journee par blocs de temps. Analyse taches et projets, propose des blocs focus, pauses et reunions avec justifications IA.';
+        return 'Optimisation intelligente de la journee par blocs de temps. Analyse taches et projets, propose des blocs focus, pauses et reunions avec justifications IA. Affiche le planning actif, suggere le prochain focus, planifie la semaine.';
     }
 
     public function keywords(): array
     {
         return [
+            // Génération de planning
             'bloque ma journee', 'organise mon temps', 'optimise mon agenda',
             'comment je gere mon temps', 'time blocking', 'blocs de temps',
             'planifie ma journee', 'organise ma journee', 'emploi du temps',
             'schedule', 'planning optimal', 'bloc focus', 'deep work',
             'creneaux', 'optimiser planning', 'gestion du temps',
             'journee productive', 'organiser demain', 'plan de journee',
-            'time management', 'focus blocks', 'pause', 'energie',
+            'time management', 'focus blocks', 'energie',
+            // Consulter le planning actif
+            'voir mon planning', 'mon planning', 'consulter planning',
+            'afficher planning', 'voir agenda', 'mon agenda', 'agenda du jour',
+            'quel est mon planning', 'montre mon planning', 'show planning',
+            // Focus immédiat
+            'que faire maintenant', 'quoi faire maintenant', 'sur quoi travailler',
+            'aide moi a focus', 'aide moi a me concentrer', 'focus maintenant',
+            'prochaine tache', 'bloc actuel', 'next focus', 'que faire',
+            // Planning hebdomadaire
+            'planifie ma semaine', 'organise ma semaine', 'plan de la semaine',
+            'planning semaine', 'weekly planning', 'preview semaine',
         ];
     }
 
     public function version(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -62,23 +74,45 @@ class TimeBlockerAgent extends BaseAgent
         $body = trim($context->body ?? '');
         $lower = mb_strtolower($body);
 
-        // Gather user tasks and projects via TodoAgent + ProjectAgent data
-        $taskData = $this->optimizer->gatherUserData($context);
-
-        // Detect specific sub-commands
+        // Apply/accept plan
         if (preg_match('/\b(appliquer?|accepter?|valider?|apply)\s+(le\s+)?(bloc|block|planning)/iu', $lower)) {
             return $this->applyBlocks($context, $body);
         }
 
-        if (preg_match('/\b(modifier?|decaler?|ajuster?|shift|move)\s+(le\s+)?(bloc|block)/iu', $lower)) {
+        // Modify block
+        if (preg_match('/\b(modifier?|decaler?|ajuster?|changer?|shift|move)\s+(le\s+)?(bloc|block)/iu', $lower)) {
+            $taskData = $this->optimizer->gatherUserData($context);
             return $this->modifyBlock($context, $body, $taskData);
         }
 
+        // Show current plan
+        if (preg_match('/\b(voir|afficher?|montre|consulter?|show)\s+(mon\s+)?(planning|agenda|blocs?)/iu', $lower)
+            || preg_match('/\b(mon\s+planning|mon\s+agenda|agenda\s+du\s+jour|quel\s+est\s+mon\s+planning)\b/iu', $lower)
+        ) {
+            return $this->showCurrentPlan($context);
+        }
+
+        // Quick focus — what to do right now
+        if (preg_match('/\b(que\s+faire|quoi\s+faire|sur\s+quoi\s+travailler|next\s+focus|focus\s+maintenant|prochaine\s+tache|bloc\s+actuel)\b/iu', $lower)
+            || preg_match('/\b(aide.{0,5}(focus|concentr))/iu', $lower)
+        ) {
+            return $this->quickFocusNow($context);
+        }
+
+        // Weekly planning
+        if (preg_match('/\b(semaine|weekly|week)\b/iu', $lower)) {
+            $taskData = $this->optimizer->gatherUserData($context);
+            return $this->generateWeeklyPreview($context, $body, $taskData);
+        }
+
+        // Tomorrow
         if (preg_match('/\b(demain|tomorrow)\b/iu', $lower)) {
+            $taskData = $this->optimizer->gatherUserData($context);
             return $this->generatePlan($context, $body, $taskData, 'tomorrow');
         }
 
-        // Default: generate optimized day plan
+        // Default: generate optimized day plan for today
+        $taskData = $this->optimizer->gatherUserData($context);
         return $this->generatePlan($context, $body, $taskData, 'today');
     }
 
@@ -87,9 +121,9 @@ class TimeBlockerAgent extends BaseAgent
         $type = $pendingContext['type'] ?? '';
         $body = trim($context->body ?? '');
         $lower = mb_strtolower($body);
+        $day = $pendingContext['data']['day'] ?? 'today';
 
         if ($type === 'awaiting_plan_action') {
-            // User is responding to a generated plan
             if (preg_match('/\b(appliquer?|accepter?|valider?|ok|go|oui|yes|apply)\b/iu', $lower)) {
                 $this->clearPendingContext($context);
                 return $this->applyBlocks($context, $body);
@@ -110,16 +144,20 @@ class TimeBlockerAgent extends BaseAgent
             }
 
             // Unrecognized response - re-prompt
-            $reply = "Que souhaites-tu faire ?\n\n"
-                . "1. *Appliquer* - Activer les rappels pour chaque bloc\n"
-                . "2. *Modifier* - Ajuster le planning\n"
-                . "3. *Annuler* - Abandonner ce planning";
+            $reply = "Que souhaites-tu faire avec ce planning ?\n\n"
+                . "✅ Tape *\"appliquer planning\"* pour activer les rappels\n"
+                . "✏️ Tape *\"modifier bloc [detail]\"* pour ajuster\n"
+                . "❌ Tape *\"annuler\"* pour abandonner";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
         return null;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Core actions
+    // ─────────────────────────────────────────────────────────────────────────
 
     private function generatePlan(AgentContext $context, string $query, array $taskData, string $day): AgentResult
     {
@@ -129,10 +167,11 @@ class TimeBlockerAgent extends BaseAgent
         $timezone = $prefs['timezone'] ?? 'Europe/Paris';
 
         $now = now()->setTimezone($timezone);
-        $dayLabel = $day === 'tomorrow' ? $now->copy()->addDay()->format('l d/m/Y') : $now->format('l d/m/Y');
+        $dayLabel = $day === 'tomorrow'
+            ? $now->copy()->addDay()->format('l d/m/Y')
+            : $now->format('l d/m/Y');
         $currentHour = $day === 'today' ? $now->format('H:i') : '08:00';
 
-        // Use TimeBlockOptimizer to analyze urgency and energy patterns
         $scoredTasks = $this->optimizer->analyzeTaskUrgency($taskData['todos'] ?? []);
         $energyDips = $this->optimizer->estimateEnergyDips();
         $breakSuggestions = $this->optimizer->suggestBreakTiming($currentHour);
@@ -142,73 +181,69 @@ class TimeBlockerAgent extends BaseAgent
         $urgencySummary = $this->formatUrgencySummary($scoredTasks);
 
         $systemPrompt = <<<PROMPT
-Tu es un expert en productivite et gestion du temps. Tu crees des plannings optimises par blocs de temps.
+Tu es un expert en productivite et gestion du temps. Tu crees des plannings optimises par blocs de temps adaptes a WhatsApp.
 
 DONNEES UTILISATEUR:
 {$taskSummary}
 
-ANALYSE D'URGENCE (scores calcules):
+ANALYSE D'URGENCE (scores 0-100 calcules automatiquement):
 {$urgencySummary}
 
-COURBE D'ENERGIE JOURNALIERE:
+COURBE D'ENERGIE JOURNALIERE (rythme circadien):
 {$energySummary}
 
-REGLES:
-1. Analyse les taches/projets de l'utilisateur et propose un planning par blocs de temps pour {$dayLabel}
-2. Commence a partir de {$currentHour}
-3. Structure les blocs ainsi:
-   - Blocs focus (1h30-2h) pour les taches importantes/complexes
-   - Pauses courtes (15-30min) entre les blocs
-   - Blocs admin/emails (30min-1h) pour les taches legeres
-   - Pause dejeuner (1h)
-4. Priorise selon:
-   - Urgence (deadlines proches) - utilise les scores d'urgence fournis
-   - Importance (impact projet)
-   - Energie: taches complexes le matin (pic 08h-11h), taches legeres apres-midi (creux 14h-15h)
-5. Pour chaque bloc, indique:
-   - Heure debut - fin
-   - Emoji de type (focus, pause, reunion, admin)
-   - Tache(s) a realiser
-   - Justification courte
-6. Integre les creux d'energie dans la planification
-7. Formate pour WhatsApp avec emojis et formatage riche:
-   - Utilise *gras* pour les titres et heures
-   - Utilise _italique_ pour les justifications
-   - Emojis: focus=🎯, pause=☕, reunion=📞, admin=📧, dejeuner=🍽️, sport=💪
-8. Termine par:
-   a) Resume: nombre de blocs focus, temps total productif, taches couvertes
-   b) Actions interactives claires
-9. Langue: {$lang}
+REGLES DE CONSTRUCTION DU PLANNING:
+1. Planifie pour {$dayLabel}, en commencant a partir de {$currentHour}
+2. Structure les blocs:
+   - 🎯 Blocs focus (1h30-2h) pour les taches importantes/complexes → le matin en priorite
+   - ☕ Pauses courtes (15-30min) obligatoires entre les blocs focus
+   - 📧 Blocs admin/emails (30-45min) pour taches legeres → apres-midi creux 13h-15h
+   - 📞 Blocs reunion → apres le premier bloc focus du matin ou en milieu d'apres-midi
+   - 🍽️ Pause dejeuner (1h) vers 12h-13h
+3. Priorites:
+   - Score urgence ≥80 🔴 = obligatoire en matin pic (08h-11h)
+   - Score 60-79 🟡 = planifie en matinee ou debut d'apres-midi
+   - Score <60 🟢 = apres-midi ou fin de journee
+4. Evite de planifier plus de 5 blocs focus par journee (risque d'epuisement)
+5. Pour chaque bloc, inclus:
+   - Heure debut - fin en *gras*
+   - Emoji du type
+   - Titre de la tache
+   - Une justification courte en _italique_ (1 ligne max)
+6. Formate pour WhatsApp:
+   - *gras* pour titres et heures
+   - _italique_ pour justifications
+   - Lignes bien espacees (lisibilite mobile)
 
-FORMAT OBLIGATOIRE:
+FORMAT OBLIGATOIRE DE REPONSE:
 📅 *Planning {$dayLabel}*
 ━━━━━━━━━━━━━━━━━━━━
 
-🎯 *08:00 - 10:00* | *Focus: [Tache]*
-   _→ Justification basee sur urgence/energie_
+🎯 *08:00 - 10:00* | *Focus: [Tache la plus urgente]*
+   _→ Score urgence 85/100 — a traiter en pic d'energie matinal_
 
 ☕ *10:00 - 10:15* | *Pause*
-   _→ Recuperation avant prochain bloc_
+   _→ Marche courte ou etirement avant le prochain bloc_
 
 📧 *10:15 - 11:00* | *Admin: Emails & messages*
-   _→ Traiter les urgences_
+   _→ Traiter les urgences administratives_
 
-...
+...continuer selon les taches disponibles...
 
 ━━━━━━━━━━━━━━━━━━━━
 📊 *Resume:* X blocs focus | Xh productives | X taches planifiees
 
-⚡ *Courbe d'energie:*
-🌅 Matin: pic d'energie → taches complexes
-😴 Apres-midi: creux → taches legeres
-💨 Fin de journee: second souffle
+⚡ *Courbe d'energie du jour:*
+🌅 Matin 08h-11h: pic → taches complexes prioritaires
+😴 13h-15h: creux → taches legeres, emails, reunions
+💨 16h-18h: second souffle → revues, collaboration
 
 ━━━━━━━━━━━━━━━━━━━━
-💡 *Actions:*
-✅ Tape *"appliquer planning"* pour activer les rappels
-✏️ Tape *"modifier bloc [detail]"* pour ajuster
-🔄 Tape *"decaler bloc [heure]"* pour decaler
-❌ Tape *"annuler"* pour abandonner
+💡 *Actions disponibles:*
+✅ *"appliquer planning"* → activer les rappels pour chaque bloc
+✏️ *"modifier bloc [detail]"* → ajuster le planning
+🔄 *"decaler bloc [heure]"* → decaler un bloc specifique
+❌ *"annuler"* → abandonner ce planning
 
 {$contextMemory}
 PROMPT;
@@ -217,15 +252,14 @@ PROMPT;
         $response = $this->claude->chat($query, $model, $systemPrompt);
 
         if (!$response) {
-            $reply = "Desole, je n'ai pas pu generer ton planning optimise. Reessaie en me decrivant tes taches du jour !";
+            $reply = "Desole, je n'ai pas pu generer ton planning optimise.\n\n"
+                . "💡 Decris tes taches du jour dans ton message, ex :\n"
+                . "_\"Planifie ma journee : finir rapport, call client 14h, revue code\"_";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        // Store the generated plan in Redis for potential apply later
         $this->cachePlan($context->from, $response, $day);
-
-        // Set pending context so follow-up messages are routed back here
         $this->setPendingContext($context, 'awaiting_plan_action', ['day' => $day], 30);
 
         $this->sendText($context->from, $response);
@@ -245,7 +279,7 @@ PROMPT;
 
         if (!$cachedPlan) {
             $reply = "Aucun planning en attente.\n\n"
-                . "Demande-moi d'abord d'organiser ta journee :\n"
+                . "Genere d'abord un planning :\n"
                 . "💡 _\"Organise ma journee\"_\n"
                 . "💡 _\"Bloque ma journee\"_\n"
                 . "💡 _\"Planifie demain\"_";
@@ -253,62 +287,71 @@ PROMPT;
             return AgentResult::reply($reply);
         }
 
-        // Extract time blocks from the cached plan using Claude
         $extractPrompt = <<<PROMPT
-Extrais les blocs de temps du planning suivant. Retourne un JSON array avec chaque bloc:
-[{"start": "HH:MM", "end": "HH:MM", "type": "focus|pause|reunion|admin|dejeuner|sport", "label": "description courte"}]
+Extrais TOUS les blocs de temps du planning suivant.
+Retourne un JSON array strict avec chaque bloc :
+[{"start": "HH:MM", "end": "HH:MM", "type": "focus|pause|reunion|admin|dejeuner|sport", "label": "description courte max 100 caracteres"}]
 
-Planning:
+Regles :
+- "start" et "end" DOIVENT etre au format HH:MM (ex: "08:00", "14:30")
+- "type" doit etre l'un de : focus, pause, reunion, admin, dejeuner, sport
+- "label" : titre court de la tache ou du bloc (sans emojis)
+- Inclus TOUS les blocs du planning, y compris pauses et dejeuner
+
+Planning a analyser :
 {$cachedPlan}
 
-Reponds UNIQUEMENT avec le JSON array, pas de texte autour.
+Reponds UNIQUEMENT avec le JSON array, aucun texte autour, aucun commentaire.
 PROMPT;
 
-        $blocksJson = $this->claude->chat($extractPrompt, 'claude-haiku-4-5-20251001', 'Tu extrais des donnees structurees. Reponds uniquement en JSON valide.');
+        $blocksJson = $this->claude->chat($extractPrompt, 'claude-haiku-4-5-20251001', 'Tu extrais des donnees structurees de plannings. Reponds uniquement en JSON valide, sans texte supplementaire.');
 
-        // Clean JSON response
         $blocksJson = $this->extractJson($blocksJson);
         $blocks = json_decode($blocksJson ?? '[]', true);
 
         if (empty($blocks) || !is_array($blocks)) {
-            $reply = "Je n'ai pas pu extraire les blocs du planning. Regenere ton planning et reessaie.";
+            $reply = "Je n'ai pas pu extraire les blocs du planning.\n\n"
+                . "Regenere ton planning et reessaie avec *\"appliquer planning\"*.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        // Validate block format
         $validBlocks = $this->validateBlocks($blocks);
         if (empty($validBlocks)) {
-            $reply = "Les blocs extraits ne sont pas valides. Regenere ton planning.";
+            $reply = "Les blocs extraits ne sont pas valides (format incorrect).\n\n"
+                . "Regenere ton planning avec _\"planifie ma journee\"_.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        // Store blocks in Redis with expiration (end of day)
+        // Store blocks in Redis until end of day
         $prefs = $this->getUserPrefs($context);
         $timezone = $prefs['timezone'] ?? 'Europe/Paris';
         $endOfDay = now()->setTimezone($timezone)->endOfDay();
-        $ttl = max($endOfDay->diffInSeconds(now()), 60);
+        $ttl = max((int) now()->diffInSeconds($endOfDay), 60);
 
         $redisKey = "time_blocks:{$context->from}";
         Redis::setex($redisKey, $ttl, json_encode($validBlocks));
 
-        // Create reminders for block transitions (sync with ReminderAgent)
         $createdReminders = $this->createBlockReminders($context, $validBlocks, $timezone);
 
+        // Clear cached plan
+        Redis::del("time_plan:{$context->from}");
+
         $blockCount = count($validBlocks);
+        $focusCount = count(array_filter($validBlocks, fn($b) => $b['type'] === 'focus'));
+
         $reply = "✅ *Planning applique !*\n\n"
-            . "📋 {$blockCount} blocs programmes\n"
-            . "🔔 {$createdReminders} rappels crees\n\n"
-            . "Tu recevras une notification au debut de chaque bloc focus, reunion et admin.\n\n"
-            . "💡 _Tape \"modifier bloc [detail]\" pour ajuster a tout moment_\n\n"
+            . "📋 *{$blockCount} blocs* programmes\n"
+            . "🎯 *{$focusCount} blocs focus*\n"
+            . "🔔 *{$createdReminders} rappels* crees\n\n"
+            . "Tu recevras une notification au debut de chaque bloc.\n\n"
+            . "💡 _Tape *\"voir mon planning\"* pour consulter les blocs actifs_\n"
+            . "💡 _Tape *\"que faire maintenant\"* pour connaitre ton focus actuel_\n\n"
             . "Bonne journee productive ! 💪";
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Time blocks applied', ['blocks' => $blockCount, 'reminders' => $createdReminders]);
-
-        // Clear cached plan
-        Redis::del("time_plan:{$context->from}");
 
         return AgentResult::reply($reply, ['action' => 'apply_blocks', 'blocks' => $blockCount, 'reminders' => $createdReminders]);
     }
@@ -316,24 +359,33 @@ PROMPT;
     private function modifyBlock(AgentContext $context, string $query, array $taskData): AgentResult
     {
         $cachedPlan = $this->getCachedPlan($context->from);
+        $cachedDay = $this->getCachedPlanDay($context->from);
         $contextMemory = $this->formatContextMemoryForPrompt($context->from, $context);
         $prefs = $this->getUserPrefs($context);
         $lang = $prefs['language'] ?? 'fr';
+        $timezone = $prefs['timezone'] ?? 'Europe/Paris';
 
-        $planContext = $cachedPlan ? "\nPLANNING ACTUEL:\n{$cachedPlan}" : "\nAucun planning en cours.";
+        $now = now()->setTimezone($timezone);
+        $dayLabel = $cachedDay === 'tomorrow'
+            ? $now->copy()->addDay()->format('l d/m/Y')
+            : $now->format('l d/m/Y');
+
+        $planContext = $cachedPlan
+            ? "\nPLANNING ACTUEL ({$dayLabel}):\n{$cachedPlan}"
+            : "\nAucun planning en cours. Propose un nouveau planning optimise.";
 
         $systemPrompt = <<<PROMPT
-Tu es un expert en gestion du temps. L'utilisateur veut modifier son planning actuel.
+Tu es un expert en gestion du temps. L'utilisateur veut modifier son planning.
 {$planContext}
 
 REGLES:
-1. Comprends la modification demandee (decaler, allonger, raccourcir, supprimer, ajouter un bloc)
-2. Propose le planning modifie complet avec le meme format WhatsApp riche
-3. Explique les changements apportes
-4. Garde le format avec emojis: 🎯 focus, ☕ pause, 📞 reunion, 📧 admin, 🍽️ dejeuner, 💪 sport
-5. Utilise *gras* et _italique_ pour le formatage WhatsApp
-6. Termine par les memes actions interactives:
-   ✅ "appliquer planning" | ✏️ "modifier bloc" | ❌ "annuler"
+1. Comprends la modification demandee : decaler, allonger, raccourcir, supprimer ou ajouter un bloc
+2. Propose le planning COMPLET modifie avec le meme format WhatsApp
+3. Explique brievement les changements apportes (1-2 lignes)
+4. Respecte les emojis de type : 🎯 focus, ☕ pause, 📞 reunion, 📧 admin, 🍽️ dejeuner, 💪 sport
+5. Utilise *gras* pour les heures et _italique_ pour les justifications
+6. Termine toujours par les actions interactives :
+   ✅ *"appliquer planning"* | ✏️ *"modifier bloc [detail]"* | ❌ *"annuler"*
 7. Langue: {$lang}
 
 {$contextMemory}
@@ -343,16 +395,14 @@ PROMPT;
         $response = $this->claude->chat($query, $model, $systemPrompt);
 
         if (!$response) {
-            $reply = "Desole, je n'ai pas pu modifier le planning. Reessaie !";
+            $reply = "Desole, je n'ai pas pu modifier le planning. Reessaie en decrivant la modification souhaitee !";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
 
-        // Update cached plan
-        $this->cachePlan($context->from, $response, 'today');
-
-        // Keep pending context for follow-up
-        $this->setPendingContext($context, 'awaiting_plan_action', ['day' => 'today'], 30);
+        // Preserve the original day when updating cached plan
+        $this->cachePlan($context->from, $response, $cachedDay ?? 'today');
+        $this->setPendingContext($context, 'awaiting_plan_action', ['day' => $cachedDay ?? 'today'], 30);
 
         $this->sendText($context->from, $response);
         $this->log($context, 'Time block modified', ['query' => mb_substr($query, 0, 100)]);
@@ -360,13 +410,301 @@ PROMPT;
         return AgentResult::reply($response, ['action' => 'modify_block']);
     }
 
+    /**
+     * NEW: Show the currently active/cached time block plan.
+     * Highlights the current block if blocks are active in Redis.
+     */
+    private function showCurrentPlan(AgentContext $context): AgentResult
+    {
+        $prefs = $this->getUserPrefs($context);
+        $timezone = $prefs['timezone'] ?? 'Europe/Paris';
+        $now = now()->setTimezone($timezone);
+        $currentTime = $now->format('H:i');
+
+        // Check for active blocks stored after apply
+        $activeBlocksRaw = Redis::get("time_blocks:{$context->from}");
+        $cachedPlan = $this->getCachedPlan($context->from);
+
+        if (!$activeBlocksRaw && !$cachedPlan) {
+            $reply = "Aucun planning actif pour le moment.\n\n"
+                . "Genere un planning avec :\n"
+                . "💡 _\"Organise ma journee\"_\n"
+                . "💡 _\"Planifie demain\"_\n"
+                . "💡 _\"Planifie ma semaine\"_";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        if ($activeBlocksRaw) {
+            $blocks = json_decode($activeBlocksRaw, true) ?? [];
+            $currentBlock = null;
+            $nextBlock = null;
+
+            foreach ($blocks as $block) {
+                $blockStart = $this->timeToMinutes($block['start'] ?? '00:00');
+                $blockEnd = $this->timeToMinutes($block['end'] ?? '23:59');
+                $nowMinutes = $this->timeToMinutes($currentTime);
+
+                if ($nowMinutes >= $blockStart && $nowMinutes < $blockEnd) {
+                    $currentBlock = $block;
+                } elseif ($nowMinutes < $blockStart && !$nextBlock) {
+                    $nextBlock = $block;
+                }
+            }
+
+            $typeEmojis = [
+                'focus' => '🎯', 'pause' => '☕', 'reunion' => '📞',
+                'admin' => '📧', 'dejeuner' => '🍽️', 'sport' => '💪',
+            ];
+
+            $reply = "📅 *Ton planning actif — {$now->format('l d/m/Y')}*\n";
+            $reply .= "🕐 Il est *{$currentTime}*\n";
+            $reply .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+
+            if ($currentBlock) {
+                $emoji = $typeEmojis[$currentBlock['type']] ?? '⏰';
+                $reply .= "▶️ *MAINTENANT* : {$emoji} {$currentBlock['label']}\n";
+                $reply .= "   _{$currentBlock['start']} - {$currentBlock['end']}_\n\n";
+            } else {
+                $reply .= "⏸️ _Aucun bloc actif en ce moment_\n\n";
+            }
+
+            if ($nextBlock) {
+                $emoji = $typeEmojis[$nextBlock['type']] ?? '⏰';
+                $reply .= "⏭️ *PROCHAIN* : {$emoji} {$nextBlock['label']}\n";
+                $reply .= "   _{$nextBlock['start']} - {$nextBlock['end']}_\n\n";
+            }
+
+            $reply .= "━━━━━━━━━━━━━━━━━━━━\n";
+            $reply .= "*Tous les blocs :*\n";
+            foreach ($blocks as $block) {
+                $emoji = $typeEmojis[$block['type']] ?? '⏰';
+                $nowMinutes = $this->timeToMinutes($currentTime);
+                $blockEnd = $this->timeToMinutes($block['end'] ?? '23:59');
+                $done = $nowMinutes >= $blockEnd;
+                $prefix = $done ? '✓' : '○';
+                $reply .= "{$prefix} {$emoji} *{$block['start']}-{$block['end']}* {$block['label']}\n";
+            }
+
+            $reply .= "\n💡 _Tape *\"que faire maintenant\"* pour un focus immédiat_";
+
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Plan shown', ['has_active_blocks' => true, 'block_count' => count($blocks)]);
+            return AgentResult::reply($reply, ['action' => 'show_plan']);
+        }
+
+        // No applied blocks, but a cached (unapplied) plan exists
+        $reply = "📋 *Planning en attente (non applique)*\n\n"
+            . $cachedPlan
+            . "\n\n━━━━━━━━━━━━━━━━━━━━\n"
+            . "✅ Tape *\"appliquer planning\"* pour activer les rappels\n"
+            . "✏️ Tape *\"modifier bloc [detail]\"* pour ajuster";
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, ['action' => 'show_plan']);
+    }
+
+    /**
+     * NEW: Instant suggestion — what to focus on right now based on active blocks and tasks.
+     */
+    private function quickFocusNow(AgentContext $context): AgentResult
+    {
+        $prefs = $this->getUserPrefs($context);
+        $timezone = $prefs['timezone'] ?? 'Europe/Paris';
+        $lang = $prefs['language'] ?? 'fr';
+        $now = now()->setTimezone($timezone);
+        $currentTime = $now->format('H:i');
+        $hour = (int) $now->format('H');
+
+        // Check active blocks first
+        $activeBlocksRaw = Redis::get("time_blocks:{$context->from}");
+        if ($activeBlocksRaw) {
+            $blocks = json_decode($activeBlocksRaw, true) ?? [];
+            $nowMinutes = $this->timeToMinutes($currentTime);
+
+            $typeEmojis = [
+                'focus' => '🎯', 'pause' => '☕', 'reunion' => '📞',
+                'admin' => '📧', 'dejeuner' => '🍽️', 'sport' => '💪',
+            ];
+
+            foreach ($blocks as $block) {
+                $blockStart = $this->timeToMinutes($block['start'] ?? '00:00');
+                $blockEnd = $this->timeToMinutes($block['end'] ?? '23:59');
+                if ($nowMinutes >= $blockStart && $nowMinutes < $blockEnd) {
+                    $emoji = $typeEmojis[$block['type']] ?? '⏰';
+                    $remaining = $blockEnd - $nowMinutes;
+                    $reply = "▶️ *Focus actuel ({$currentTime})*\n\n"
+                        . "{$emoji} *{$block['label']}*\n"
+                        . "🕐 Bloc : {$block['start']} - {$block['end']}\n"
+                        . "⏱️ Temps restant : ~{$remaining} min\n\n"
+                        . "_Reste concentre jusqu'a {$block['end']} !_ 💪";
+                    $this->sendText($context->from, $reply);
+                    return AgentResult::reply($reply, ['action' => 'quick_focus']);
+                }
+            }
+        }
+
+        // No active blocks — use AI with tasks + energy context
+        $taskData = $this->optimizer->gatherUserData($context);
+        $scoredTasks = $this->optimizer->analyzeTaskUrgency($taskData['todos'] ?? []);
+        $taskSummary = $this->formatTaskSummary($taskData);
+        $urgencySummary = $this->formatUrgencySummary($scoredTasks);
+        $contextMemory = $this->formatContextMemoryForPrompt($context->from, $context);
+
+        // Determine current energy level
+        $energyLevel = match (true) {
+            $hour >= 8 && $hour < 11 => 'PIC D\'ENERGIE (taches complexes recommandees)',
+            $hour >= 11 && $hour < 12 => 'ENERGIE HAUTE (termine les taches en cours)',
+            $hour >= 12 && $hour < 14 => 'CREUX DIGESTIF (taches legeres, emails)',
+            $hour >= 14 && $hour < 16 => 'REPRISE PROGRESSIVE (reunions, admin)',
+            $hour >= 16 && $hour < 18 => 'SECOND SOUFFLE (collaboration, revues)',
+            default => 'ENERGIE EN BAISSE (taches legeres)',
+        };
+
+        $systemPrompt = <<<PROMPT
+Tu es un coach de productivite. L'utilisateur te demande sur quoi se concentrer MAINTENANT.
+
+HEURE ACTUELLE: {$currentTime}
+NIVEAU D'ENERGIE: {$energyLevel}
+
+{$taskSummary}
+
+ANALYSE D'URGENCE:
+{$urgencySummary}
+
+REGLES:
+1. Recommande UNE seule tache prioritaire pour maintenant, en 3-4 lignes max
+2. Justifie en 1 phrase pourquoi cette tache maintenant (urgence + energie)
+3. Suggere une duree de session (ex: "Lance un bloc focus de 90 min")
+4. Indique l'heure de fin suggeree
+5. Ajoute un conseil de concentration en 1 ligne
+6. Format WhatsApp compact avec emojis
+7. Langue: {$lang}
+
+FORMAT:
+🎯 *Focus recommande : [Tache]*
+⏱️ *Duree* : Xh (jusqu'a HH:MM)
+💡 *Pourquoi* : [justification courte]
+⚡ *Conseil* : [astuce de concentration]
+
+{$contextMemory}
+PROMPT;
+
+        $model = $this->resolveModel($context);
+        $response = $this->claude->chat($context->body ?? '', $model, $systemPrompt);
+
+        if (!$response) {
+            $reply = "Il est {$currentTime} — niveau d'energie : {$energyLevel}.\n\n"
+                . "Tap *\"planifie ma journee\"* pour que je t'aide a organiser tes prochaines heures !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $this->sendText($context->from, $response);
+        $this->log($context, 'Quick focus suggestion', ['hour' => $currentTime]);
+
+        return AgentResult::reply($response, ['action' => 'quick_focus']);
+    }
+
+    /**
+     * NEW: Generate a weekly planning preview (Monday to Friday overview).
+     */
+    private function generateWeeklyPreview(AgentContext $context, string $query, array $taskData): AgentResult
+    {
+        $contextMemory = $this->formatContextMemoryForPrompt($context->from, $context);
+        $prefs = $this->getUserPrefs($context);
+        $lang = $prefs['language'] ?? 'fr';
+        $timezone = $prefs['timezone'] ?? 'Europe/Paris';
+
+        $now = now()->setTimezone($timezone);
+        $startOfWeek = $now->copy()->startOfWeek(); // Monday
+        $endOfWeek = $now->copy()->endOfWeek();     // Sunday
+
+        $weekLabel = $startOfWeek->format('d/m') . ' - ' . $endOfWeek->format('d/m/Y');
+        $scoredTasks = $this->optimizer->analyzeTaskUrgency($taskData['todos'] ?? []);
+        $taskSummary = $this->formatTaskSummary($taskData);
+        $urgencySummary = $this->formatUrgencySummary($scoredTasks);
+
+        $systemPrompt = <<<PROMPT
+Tu es un expert en planification hebdomadaire. Tu crees une vue d'ensemble de la semaine par distribution intelligente des taches.
+
+SEMAINE: {$weekLabel}
+JOUR ACTUEL: {$now->format('l d/m/Y')}
+
+{$taskSummary}
+
+ANALYSE D'URGENCE:
+{$urgencySummary}
+
+REGLES:
+1. Distribue les taches sur les jours de la semaine (Lundi -> Vendredi)
+2. Pour les jours passes, note "✓ Passe"
+3. Pour aujourd'hui ({$now->format('l')}), propose 2-3 blocs prioritaires
+4. Pour les jours futurs, assigne les taches par importance
+5. Applique la regle 80/20 : taches critiques en debut de semaine
+6. Laisse du temps tampon (30%) pour les imprevu
+7. Evite de surcharger un seul jour
+8. Format WhatsApp avec emojis et separateurs
+9. Termine par un resume et les actions disponibles
+10. Langue: {$lang}
+
+FORMAT OBLIGATOIRE:
+📅 *Planning semaine {$weekLabel}*
+━━━━━━━━━━━━━━━━━━━━
+
+*Lundi [date]* [✓ Passe | 🔴 Aujourd'hui | ⬜]
+  🎯 [Tache 1] | 📧 [Admin] | ☕ Pauses
+
+*Mardi [date]*
+  🎯 [Tache 2]
+
+...
+
+━━━━━━━━━━━━━━━━━━━━
+📊 *Resume semaine:*
+• X taches planifiees sur X jours
+• Charge par jour : [equilibre/charge/legere]
+• Tache prioritaire : [titre]
+
+💡 *Actions:*
+• _"planifie [lundi/mardi/...]"_ pour un planning detaille de ce jour
+• _"organise ma journee"_ pour le planning d'aujourd'hui
+• _"que faire maintenant"_ pour le focus immediat
+
+{$contextMemory}
+PROMPT;
+
+        $model = $this->resolveModel($context);
+        $response = $this->claude->chat($query, $model, $systemPrompt);
+
+        if (!$response) {
+            $reply = "Desole, je n'ai pas pu generer la vue hebdomadaire.\n\n"
+                . "Essaie _\"organise ma journee\"_ pour commencer par aujourd'hui.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        $this->sendText($context->from, $response);
+        $this->log($context, 'Weekly preview generated', [
+            'week' => $weekLabel,
+            'tasks_count' => count($taskData['todos'] ?? []),
+        ]);
+
+        return AgentResult::reply($response, ['action' => 'weekly_preview', 'week' => $weekLabel]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
     private function createBlockReminders(AgentContext $context, array $blocks, string $timezone): int
     {
         $createdReminders = 0;
+        $notifyTypes = ['focus', 'reunion', 'admin', 'sport'];
 
         foreach ($blocks as $block) {
             $type = $block['type'] ?? '';
-            if (!in_array($type, ['focus', 'reunion', 'admin'])) {
+            if (!in_array($type, $notifyTypes)) {
                 continue;
             }
 
@@ -377,22 +715,23 @@ PROMPT;
                 }
 
                 $emoji = match ($type) {
-                    'focus' => '🎯',
+                    'focus'   => '🎯',
                     'reunion' => '📞',
-                    'admin' => '📧',
-                    default => '⏰',
+                    'admin'   => '📧',
+                    'sport'   => '💪',
+                    default   => '⏰',
                 };
 
                 Reminder::create([
                     'requester_phone' => $context->from,
-                    'agent_id' => $context->agent->id,
-                    'message' => "{$emoji} Bloc: {$block['label']} ({$block['start']} - {$block['end']})",
-                    'scheduled_at' => $startTime->setTimezone('UTC'),
-                    'status' => 'pending',
+                    'agent_id'        => $context->agent->id,
+                    'message'         => "{$emoji} Bloc: {$block['label']} ({$block['start']} - {$block['end']})",
+                    'scheduled_at'    => $startTime->setTimezone('UTC'),
+                    'status'          => 'pending',
                 ]);
                 $createdReminders++;
             } catch (\Throwable $e) {
-                Log::warning("TimeBlocker: failed to create reminder for block", [
+                Log::warning('TimeBlocker: failed to create reminder for block', [
                     'block' => $block,
                     'error' => $e->getMessage(),
                 ]);
@@ -408,33 +747,35 @@ PROMPT;
         $allowedTypes = ['focus', 'pause', 'reunion', 'admin', 'dejeuner', 'sport'];
 
         foreach ($blocks as $block) {
-            if (!is_array($block)) continue;
-
-            $start = $block['start'] ?? null;
-            $end = $block['end'] ?? null;
-            $type = $block['type'] ?? null;
-            $label = $block['label'] ?? null;
-
-            // Validate time format HH:MM
-            if (!$start || !$end || !preg_match('/^\d{2}:\d{2}$/', $start) || !preg_match('/^\d{2}:\d{2}$/', $end)) {
+            if (!is_array($block)) {
                 continue;
             }
 
-            // Validate type
+            $start = $block['start'] ?? null;
+            $end   = $block['end'] ?? null;
+            $type  = $block['type'] ?? null;
+            $label = $block['label'] ?? null;
+
+            if (!$start || !$end
+                || !preg_match('/^\d{2}:\d{2}$/', $start)
+                || !preg_match('/^\d{2}:\d{2}$/', $end)
+            ) {
+                continue;
+            }
+
             if (!$type || !in_array($type, $allowedTypes)) {
                 continue;
             }
 
-            // Validate label
-            if (!$label || !is_string($label) || mb_strlen($label) > 255) {
+            if (!$label || !is_string($label) || mb_strlen(trim($label)) === 0) {
                 continue;
             }
 
             $valid[] = [
                 'start' => $start,
-                'end' => $end,
-                'type' => $type,
-                'label' => mb_substr($label, 0, 255),
+                'end'   => $end,
+                'type'  => $type,
+                'label' => mb_substr(trim($label), 0, 255),
             ];
         }
 
@@ -443,7 +784,9 @@ PROMPT;
 
     private function extractJson(?string $text): ?string
     {
-        if (!$text) return null;
+        if (!$text) {
+            return null;
+        }
         $clean = trim($text);
 
         // Strip markdown code blocks
@@ -457,6 +800,12 @@ PROMPT;
         }
 
         return $clean;
+    }
+
+    private function timeToMinutes(string $time): int
+    {
+        $parts = explode(':', $time);
+        return ((int) ($parts[0] ?? 0)) * 60 + (int) ($parts[1] ?? 0);
     }
 
     private function formatTaskSummary(array $taskData): string
@@ -524,12 +873,12 @@ PROMPT;
     {
         try {
             Redis::setex("time_plan:{$userId}", 14400, json_encode([
-                'plan' => $plan,
-                'day' => $day,
+                'plan'       => $plan,
+                'day'        => $day,
                 'created_at' => now()->toIso8601String(),
             ]));
         } catch (\Throwable $e) {
-            Log::warning("TimeBlocker: failed to cache plan", ['error' => $e->getMessage()]);
+            Log::warning('TimeBlocker: failed to cache plan', ['error' => $e->getMessage()]);
         }
     }
 
@@ -542,7 +891,21 @@ PROMPT;
                 return $decoded['plan'] ?? null;
             }
         } catch (\Throwable $e) {
-            Log::warning("TimeBlocker: failed to get cached plan", ['error' => $e->getMessage()]);
+            Log::warning('TimeBlocker: failed to get cached plan', ['error' => $e->getMessage()]);
+        }
+        return null;
+    }
+
+    private function getCachedPlanDay(string $userId): ?string
+    {
+        try {
+            $data = Redis::get("time_plan:{$userId}");
+            if ($data) {
+                $decoded = json_decode($data, true);
+                return $decoded['day'] ?? null;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('TimeBlocker: failed to get cached plan day', ['error' => $e->getMessage()]);
         }
         return null;
     }
