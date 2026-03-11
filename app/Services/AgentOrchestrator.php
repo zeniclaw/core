@@ -620,7 +620,12 @@ class AgentOrchestrator
             'claude-opus-4-5' => 'claude-opus-4-20250514',
             'qwen2.5:3b' => 'qwen2.5:3b',
             'qwen2.5:7b' => 'qwen2.5:7b',
+            'qwen2.5:14b' => 'qwen2.5:14b',
             'qwen2.5-coder:7b' => 'qwen2.5-coder:7b',
+            'llama3.2:3b' => 'llama3.2:3b',
+            'gemma2:2b' => 'gemma2:2b',
+            'phi3:mini' => 'phi3:mini',
+            'deepseek-coder-v2:16b' => 'deepseek-coder-v2:16b',
             default => null,
         };
     }

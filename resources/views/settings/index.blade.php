@@ -256,58 +256,63 @@
                 </div>
 
                 {{-- Model download manager --}}
+                @php
+                    $ollamaModels = [
+                        ['id' => 'qwen2.5:3b',        'name' => 'Qwen 2.5 3B (leger)',     'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'qwen2.5:7b',        'name' => 'Qwen 2.5 7B (intelligent)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
+                        ['id' => 'qwen2.5-coder:7b',  'name' => 'Qwen 2.5 Coder 7B (code)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
+                        ['id' => 'qwen2.5:14b',       'name' => 'Qwen 2.5 14B (puissant)',  'size' => '~9 Go',  'specs' => '16 Go RAM, 4 CPU'],
+                        ['id' => 'llama3.2:3b',       'name' => 'Llama 3.2 3B (Meta)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'gemma2:2b',         'name' => 'Gemma 2 2B (Google)',      'size' => '~1.6 Go', 'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'phi3:mini',         'name' => 'Phi-3 Mini (Microsoft)',   'size' => '~2.3 Go', 'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'deepseek-coder-v2:16b', 'name' => 'DeepSeek Coder V2 (code)', 'size' => '~9 Go', 'specs' => '16 Go RAM, 4 CPU'],
+                    ];
+                @endphp
                 <div class="mt-3 space-y-2">
                     <p class="text-xs font-medium text-gray-600 mb-1">Modeles disponibles</p>
 
-                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-qwen">
+                    @foreach($ollamaModels as $m)
+                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-{{ Str::slug($m['id']) }}">
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-gray-900">Qwen 2.5 7B (intelligent)</p>
-                            <p class="text-xs text-gray-500">qwen2.5:7b — ~4.7 Go</p>
+                            <p class="text-sm font-medium text-gray-900">{{ $m['name'] }}</p>
+                            <p class="text-xs text-gray-500">{{ $m['id'] }} — {{ $m['size'] }} <span class="text-gray-400">| Min: {{ $m['specs'] }}</span></p>
                         </div>
                         <div class="ollama-status">
-                            <button type="button" onclick="ollamaPull('qwen2.5:7b', this)"
+                            <button type="button" onclick="ollamaPull('{{ $m['id'] }}', this)"
                                     class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
                                 Telecharger
                             </button>
                         </div>
                     </div>
-
-                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-deepseek">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-gray-900">Qwen 2.5 Coder 7B (code)</p>
-                            <p class="text-xs text-gray-500">qwen2.5-coder:7b — ~4.7 Go</p>
-                        </div>
-                        <div class="ollama-status">
-                            <button type="button" onclick="ollamaPull('qwen2.5-coder:7b', this)"
-                                    class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
-                                Telecharger
-                            </button>
-                        </div>
-                    </div>
+                    @endforeach
 
                     <p id="ollama-connection-error" class="text-xs text-red-600 mt-1 hidden"></p>
                 </div>
 
                 <script>
+                var OLLAMA_MODELS = @json(array_column($ollamaModels, 'id'));
+
                 // Check installed models on page load
                 document.addEventListener('DOMContentLoaded', function() {
                     ollamaCheckInstalled();
-                    ollamaCheckPulling('qwen2.5:7b');
-                    ollamaCheckPulling('qwen2.5-coder:7b');
+                    OLLAMA_MODELS.forEach(function(m) { ollamaCheckPulling(m); });
                 });
 
                 function ollamaGetStatusEl(model) {
-                    var id = model.includes('coder') ? 'ollama-model-deepseek' : 'ollama-model-qwen';
-                    return document.getElementById(id).querySelector('.ollama-status');
+                    var slug = model.replace(/[.:]/g, '-');
+                    var el = document.getElementById('ollama-model-' + slug);
+                    return el ? el.querySelector('.ollama-status') : null;
                 }
 
                 function ollamaSetInstalled(model) {
                     var el = ollamaGetStatusEl(model);
+                    if (!el) return;
                     el.innerHTML = '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium whitespace-nowrap">Installe</span>';
                 }
 
                 function ollamaSetProgress(model, percent, detail) {
                     var el = ollamaGetStatusEl(model);
+                    if (!el) return;
                     el.innerHTML = '<div class="w-40">' +
                         '<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">' +
                         '<span>' + (detail || 'Telechargement...') + '</span>' +
@@ -319,6 +324,7 @@
 
                 function ollamaSetError(model, detail) {
                     var el = ollamaGetStatusEl(model);
+                    if (!el) return;
                     el.innerHTML = '<div class="flex items-center gap-2">' +
                         '<span class="text-xs text-red-600">' + detail + '</span>' +
                         '<button type="button" onclick="ollamaPull(\'' + model + '\', this)" ' +
@@ -331,9 +337,10 @@
                         if (!res.ok) return;
                         var data = await res.json();
                         var installed = (data.models || []).map(function(m) { return m.name; });
-                        ['qwen2.5:7b', 'qwen2.5-coder:7b'].forEach(function(model) {
+                        OLLAMA_MODELS.forEach(function(model) {
                             var base = model.split(':')[0];
-                            if (installed.some(function(i) { return i === model || i.startsWith(base); })) {
+                            var tag = model.split(':')[1] || 'latest';
+                            if (installed.some(function(i) { return i === model || i === model + ':latest' || (i.startsWith(base + ':') && i.includes(tag)); })) {
                                 ollamaSetInstalled(model);
                             }
                         });
