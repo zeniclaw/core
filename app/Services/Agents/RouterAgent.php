@@ -32,73 +32,73 @@ class RouterAgent
     private array $fastPathPatterns = [
         // Greetings / small talk → chat
         '/^(hey|hi|hello|salut|bonjour|bonsoir|coucou|yo|wesh|slt|bjr|cc|bsr|re|merci|thanks|thx|ok merci)[\s!.?]*$/iu'
-            => ['chat', ModelResolver::fast(), 'simple', 'auto'],
+            => ['chat', 'fast', 'simple', 'auto'],
         // Reminder with time marker → reminder
         '/\b(rappel(le)?[\s-]?(moi)?|remind\s*me|dans\s+\d+\s*(min|minute|heure|hour|h|jour|day|j))\b/iu'
-            => ['reminder', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['reminder', 'fast', 'simple', 'confirm'],
         // Explicit todo keywords → todo
         '/^(ajoute|add|nouvelle?\s+t[aâ]che|new\s+task|todo\s*:)/iu'
-            => ['todo', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['todo', 'fast', 'simple', 'confirm'],
         // Music / Spotify → music
         '/\b(joue|play|met[s]?\s+(de\s+la\s+)?musique|spotify|playlist|next\s*song|chanson\s+suivante|pause\s+musique)\b/iu'
-            => ['music', ModelResolver::fast(), 'simple', 'auto'],
+            => ['music', 'fast', 'simple', 'auto'],
         // URL to summarize → content_summarizer
         '/^(r[eé]sum[eé]|summarize|synth[eè]se|tldr|de\s+quoi\s+[cç]a\s+parle)\s+https?:\/\//iu'
-            => ['content_summarizer', ModelResolver::fast(), 'simple', 'auto'],
+            => ['content_summarizer', 'fast', 'simple', 'auto'],
         // Pomodoro → pomodoro
         '/\b(pomodoro|session\s+de\s+(travail|focus)|lance\s+(un\s+)?focus)\b/iu'
-            => ['pomodoro', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['pomodoro', 'fast', 'simple', 'confirm'],
         // Mood → mood_check
         '/^(je\s+(me\s+sens|suis)\s+(fatigu|stress|triste|heureux|bien|mal|nul|depress|anxieu|énervé|content|motivé))/iu'
-            => ['mood_check', ModelResolver::fast(), 'simple', 'auto'],
+            => ['mood_check', 'fast', 'simple', 'auto'],
         // Hangman → hangman
         '/\b(pendu|hangman|jouer\s+au\s+pendu)\b/iu'
-            => ['hangman', ModelResolver::fast(), 'simple', 'auto'],
+            => ['hangman', 'fast', 'simple', 'auto'],
         // Quiz / trivia / challenge → interactive_quiz
         '/\b(quiz|quizz|trivia|qcm|challenge)\b/iu'
-            => ['interactive_quiz', ModelResolver::fast(), 'simple', 'auto'],
+            => ['interactive_quiz', 'fast', 'simple', 'auto'],
         // Game master → game_master
         '/\b(jeu|game|jouer|play|startgame|enigme|devinette|riddle|anagramme|20\s*questions)\b/iu'
-            => ['game_master', ModelResolver::fast(), 'simple', 'auto'],
+            => ['game_master', 'fast', 'simple', 'auto'],
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
-            => ['user_preferences', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['user_preferences', 'fast', 'simple', 'confirm'],
         // Content curation → content_curator
         '/\b(digest|trending|tendance|follow\s+\w+|veille|curation|mes\s+bookmarks?|resume\s+quotidien|daily\s+digest)\b/iu'
-            => ['content_curator', ModelResolver::fast(), 'simple', 'auto'],
+            => ['content_curator', 'fast', 'simple', 'auto'],
         // Workflow / chain / streamline → streamline
         '/^\/workflow\b/iu'
-            => ['streamline', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['streamline', 'fast', 'simple', 'confirm'],
         '/\b(workflow|chain|enchainer|chainer|pipeline)\s+.*(then|puis|ensuite|etape)/iu'
-            => ['streamline', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['streamline', 'fast', 'simple', 'confirm'],
         // Budget tracker → budget_tracker
         '/\b(d[eé]pense\s+\d|budget\s+\d|\d+\s*€|j[\x27\x{2019}]ai\s+(?:d[eé]pens[eé]|pay[eé])\s+\d|r[eé]sum[eé]\s+budget|mes\s+d[eé]penses|reset\s+budget|cat[eé]gories\s+budget)\b/iu'
-            => ['budget_tracker', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['budget_tracker', 'fast', 'simple', 'confirm'],
         // Daily brief → daily_brief
         '/\b(daily\s*brief|mon\s+brief|briefing\s+du\s+jour|r[eé]sum[eé]\s+du\s+jour|r[eé]sum[eé]\s+matinal|morning\s+brief|configure\s+brief|enable\s+brief|disable\s+brief)\b/iu'
-            => ['daily_brief', ModelResolver::fast(), 'simple', 'auto'],
+            => ['daily_brief', 'fast', 'simple', 'auto'],
         // Collaborative task / vote → collaborative_task
         '/^\/(?:vote|approve|decide)\b/iu'
-            => ['collaborative_task', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['collaborative_task', 'fast', 'simple', 'confirm'],
         '/\b(voter?\s+(?:pour|contre)\s+\d+|consensus|votes?\s+en\s+cours|proposer\s+|soumettre\s+|sondage|poll)\b/iu'
-            => ['collaborative_task', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['collaborative_task', 'fast', 'simple', 'confirm'],
         '/^(👍|👎|❓)\s*\d+\s*$/u'
-            => ['collaborative_task', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['collaborative_task', 'fast', 'simple', 'confirm'],
         // Recipe / cooking → recipe
         '/\b(recette|cuisiner|cuisine|qu[\x27\x{2019}]est[\s-]ce\s+que\s+je\s+peux\s+faire\s+avec|quoi\s+cuisiner|recipe|cook|meal\s+prep|ingr[eé]dients?\s+disponibles?|plat\s+du\s+jour|liste\s+de\s+courses)\b/iu'
-            => ['recipe', ModelResolver::fast(), 'simple', 'auto'],
+            => ['recipe', 'fast', 'simple', 'auto'],
         // API / CRUD operations on project data → dev (api_query)
         '/\b(avec\s+(les?\s+)?api|via\s+(l.?\s+)?api|appel(le)?\s+(l.?\s+)?api|requ[eê]te\s+api|endpoint|cr[eé][eé]\s+une?\s+(campagne|prospect|booking|user|client|facture|commande)|liste[r]?\s+(les|mes)\s+(campagnes|prospects|bookings|users|clients|factures|commandes)|supprime[r]?\s+(la|le|une?)\s+(campagne|prospect|booking))\b/iu'
-            => ['dev', ModelResolver::fast(), 'simple', 'confirm'],
+            => ['dev', 'fast', 'simple', 'confirm'],
         // Time blocker → time_blocker
         '/\b(bloque[r]?\s+(ma|la)\s+journ[eé]e|organise[r]?\s+m(on|a)\s+temps|optimise[r]?\s+m(on|a)\s+(agenda|journ[eé]e)|time\s*block|blocs?\s+de\s+temps|planifie[r]?\s+(ma|la)\s+journ[eé]e|emploi\s+du\s+temps|planning\s+optimal|deep\s*work|bloc[s]?\s+focus|gestion\s+du\s+temps)\b/iu'
-            => ['time_blocker', ModelResolver::fast(), 'simple', 'auto'],
+            => ['time_blocker', 'fast', 'simple', 'auto'],
         // AI Assistant / coaching / stats → assistant
         '/\b(mes\s+stats?|my\s+stats?|coaching|coach|quels?\s+agents?|tips?\s+hebdo|suggestions?\s+agents?|agents?\s+suggestions?|assistant\s+ia|fonctionnalit[eé]s\s+disponibles?|que\s+puis[\s-]je\s+faire|what\s+can\s+you\s+do|astuces?\s+agents?|progression|adoption\s+score|aide\s+agents?|help\s+agents?|recommandations?|upskilling|dashboard\s+stats?)\b/iu'
-            => ['assistant', ModelResolver::fast(), 'simple', 'auto'],
+            => ['assistant', 'fast', 'simple', 'auto'],
         // Debug mode toggle → chat (handled by orchestrator before routing, this is just a safety net)
         '/^(mode\s+debug|debug\s+(mode|on|off)|activ(er|e)\s+(le\s+)?debug|d[eé]sactiv(er|e)\s+(le\s+)?debug|(enable|disable|stop|supprime[r]?|enlève[r]?|arrête[r]?)\s+(le\s+)?debug|\/debug|\/nodebug)$/iu'
-            => ['chat', ModelResolver::fast(), 'simple', 'auto'],
+            => ['chat', 'fast', 'simple', 'auto'],
     ];
 
     public function __construct()
@@ -164,7 +164,7 @@ class RouterAgent
         if ($context->hasMedia && $this->isAudioMessage($effectiveMimetype)) {
             return [
                 'agent' => 'voice_command',
-                'model' => ModelResolver::fast(),
+                'model' => 'fast',
                 'complexity' => 'simple',
                 'autonomy' => 'auto',
                 'confidence' => 99,
@@ -176,7 +176,7 @@ class RouterAgent
         if ($context->body && $this->detectGitlabUrl($context->body)) {
             return [
                 'agent' => 'dev',
-                'model' => ModelResolver::fast(),
+                'model' => 'fast',
                 'complexity' => 'simple',
                 'autonomy' => 'confirm',
                 'reasoning' => 'GitLab URL detected',
@@ -190,7 +190,7 @@ class RouterAgent
             if (str_starts_with($mime, 'image/')) {
                 return [
                     'agent' => 'screenshot',
-                    'model' => ModelResolver::fast(),
+                    'model' => 'fast',
                     'complexity' => 'simple',
                     'autonomy' => 'auto',
                     'reasoning' => 'Image without text → OCR/screenshot',
@@ -200,7 +200,7 @@ class RouterAgent
             if (str_contains($mime, 'pdf') || str_contains($mime, 'document') || str_contains($mime, 'spreadsheet')) {
                 return [
                     'agent' => 'document',
-                    'model' => ModelResolver::fast(),
+                    'model' => 'fast',
                     'complexity' => 'simple',
                     'autonomy' => 'auto',
                     'reasoning' => 'Document without text → document agent',
@@ -434,7 +434,7 @@ CATALOG;
     {
         $default = [
             'agent' => 'chat',
-            'model' => ModelResolver::fast(),
+            'model' => 'fast',
             'complexity' => 'simple',
             'autonomy' => 'confirm',
             'confidence' => 0,
