@@ -81,13 +81,20 @@ class HealthWatchdogCommand extends Command
         $defaultPids = trim(shell_exec('pgrep -f "queue:work.*--queue=default" 2>/dev/null') ?: '');
         $lowPids = trim(shell_exec('pgrep -f "queue:work.*--queue=low" 2>/dev/null') ?: '');
 
-        if (empty($defaultPids)) {
-            $this->log('[queue] DEFAULT worker DEAD — relaunching...');
-            shell_exec(
-                'su -s /bin/bash www-data -c '
-                . '"php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" '
-                . '>/dev/null 2>&1 &'
-            );
+        // Default queue needs multiple workers for parallel sub-agents
+        $maxWorkers = (int) (\App\Models\AppSetting::get('max_concurrent_subagents') ?? 3);
+        $defaultWorkerCount = empty($defaultPids) ? 0 : count(explode("\n", $defaultPids));
+
+        if ($defaultWorkerCount < $maxWorkers) {
+            $needed = $maxWorkers - $defaultWorkerCount;
+            $this->log("[queue] DEFAULT workers: {$defaultWorkerCount}/{$maxWorkers} — launching {$needed} more...");
+            for ($i = 0; $i < $needed; $i++) {
+                shell_exec(
+                    'su -s /bin/bash www-data -c '
+                    . '"php /var/www/html/artisan queue:work redis --queue=default --tries=1 --timeout=660 --sleep=3" '
+                    . '>/dev/null 2>&1 &'
+                );
+            }
             $ok = false;
         }
 

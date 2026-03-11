@@ -12,6 +12,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -24,11 +25,33 @@ class RunSubAgentJob implements ShouldQueue
     public int $tries = 2; // allow 1 retry after container restart
 
     /**
-     * No queue middleware — sequential execution is handled by tries=1 + single worker.
+     * Throttle concurrent sub-agents to the configured max (default: 3).
+     * Jobs beyond the limit are released back to queue and retried after 15s.
      */
     public function middleware(): array
     {
-        return [];
+        $maxConcurrent = (int) (AppSetting::get('max_concurrent_subagents') ?? 3);
+
+        return [
+            new class($maxConcurrent) {
+                public function __construct(private int $max) {}
+
+                public function handle(object $job, \Closure $next): void
+                {
+                    $running = SubAgent::where('status', 'running')->count();
+
+                    if ($running >= $this->max) {
+                        Log::info("SubAgent throttle: {$running}/{$this->max} running, releasing job back to queue", [
+                            'sub_agent_id' => $job->subAgent->id,
+                        ]);
+                        $job->release(15); // retry in 15 seconds
+                        return;
+                    }
+
+                    $next($job);
+                }
+            },
+        ];
     }
 
     /**

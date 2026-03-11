@@ -40,8 +40,9 @@ class SettingsController extends Controller
 
         $modelRoles = ModelResolver::current();
         $availableModels = ModelResolver::AVAILABLE_MODELS;
+        $maxConcurrentSubagents = (int) (AppSetting::get('max_concurrent_subagents') ?? 3);
 
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig', 'modelRoles', 'availableModels'));
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig', 'modelRoles', 'availableModels', 'maxConcurrentSubagents'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -155,6 +156,17 @@ class SettingsController extends Controller
         ModelResolver::clearCache();
 
         return redirect()->route('settings.index')->with('success', 'Roles de modeles mis a jour.');
+    }
+
+    public function saveSubagents(Request $request)
+    {
+        $request->validate([
+            'max_concurrent_subagents' => 'required|integer|min:1|max:10',
+        ]);
+
+        AppSetting::set('max_concurrent_subagents', (string) $request->max_concurrent_subagents);
+
+        return redirect()->route('settings.index')->with('success', 'Configuration sub-agents sauvegardee.');
     }
 
     public function toggleAutoUpdate()

@@ -161,6 +161,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/settings/public-chat', [SettingsController::class, 'savePublicChat'])->name('settings.public-chat');
     Route::post('/settings/proxy', [SettingsController::class, 'saveProxy'])->name('settings.proxy');
     Route::post('/settings/model-roles', [SettingsController::class, 'saveModelRoles'])->name('settings.model-roles');
+    Route::post('/settings/subagents', [SettingsController::class, 'saveSubagents'])->name('settings.subagents');
 
     // Ollama model management
     Route::get('/api/ollama/models', [OllamaController::class, 'models'])->name('api.ollama.models');

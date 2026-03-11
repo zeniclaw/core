@@ -536,6 +536,33 @@
         </form>
     </div>
 
+    {{-- Sub-Agent Concurrency --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-1">🤖 Sub-Agents</h2>
+        <p class="text-sm text-gray-500 mb-5">Configurez le nombre maximum de sub-agents pouvant s'executer en parallele.</p>
+
+        <form method="POST" action="{{ route('settings.subagents') }}" class="space-y-4">
+            @csrf
+
+            <div class="border border-gray-100 rounded-xl p-4 bg-gray-50">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-lg">⚡</span>
+                    <div>
+                        <p class="font-medium text-sm text-gray-900">Executions paralleles</p>
+                        <p class="text-xs text-gray-500">Nombre max de sub-agents executant du code en meme temps (1-10). Plus = plus rapide mais plus de RAM/CPU.</p>
+                    </div>
+                </div>
+                <input type="number" name="max_concurrent_subagents" min="1" max="10"
+                       value="{{ $maxConcurrentSubagents }}"
+                       class="w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+            </div>
+
+            <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                Sauvegarder
+            </button>
+        </form>
+    </div>
+
     {{-- GitLab & Notifications --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🔧 GitLab & Notifications</h2>
