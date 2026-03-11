@@ -15,6 +15,7 @@ use App\Http\Controllers\HealthController;
 use App\Http\Controllers\LogController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ReminderController;
+use App\Http\Controllers\ModelMirrorController;
 use App\Http\Controllers\OllamaController;
 use App\Http\Controllers\PublicChatController;
 use App\Http\Controllers\SettingsController;
@@ -41,6 +42,15 @@ Route::get('/robots.txt', function () {
     return response($content, 200, ['Content-Type' => 'text/plain']);
 });
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
+
+// Model mirror (public — for offline/proxy installs)
+Route::get('/models', [ModelMirrorController::class, 'index'])->name('models.index');
+Route::get('/models/api', [ModelMirrorController::class, 'apiList'])->name('models.api');
+Route::get('/models/download/{slug}', [ModelMirrorController::class, 'download'])->name('models.download');
+Route::get('/models/import-script', function () {
+    $script = file_get_contents(base_path('import-model.sh'));
+    return response($script, 200, ['Content-Type' => 'text/plain']);
+})->name('models.import-script');
 
 // Public AI Chat (served on dedicated port, no auth for page, API key for messages)
 Route::get('/chat', [PublicChatController::class, 'index'])->name('public-chat');
