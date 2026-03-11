@@ -95,20 +95,23 @@ class ChatAgent extends BaseAgent
         }
 
         $model = $this->resolveModel($context);
-        $systemPrompt = $this->buildSystemPrompt($context);
+        $isOnPrem = !str_starts_with($model, 'claude-');
+        $systemPrompt = $isOnPrem
+            ? $this->buildCompactSystemPrompt($context)
+            : $this->buildSystemPrompt($context);
         $this->lastVoiceTranscript = null;
         $claudeMessage = $this->buildMessageContent($context);
 
-        $debug = file_exists(storage_path('app/orchestrator_debug'));
+        $debug = $context->session->debug_mode ?? false;
 
         // Run the agentic loop — the LLM decides which tools to use
-        $loop = new AgenticLoop(maxIterations: 10, debug: $debug);
+        $loop = new AgenticLoop(maxIterations: $isOnPrem ? 1 : 10, debug: $debug);
         $result = $loop->run(
             userMessage: $claudeMessage,
             systemPrompt: $systemPrompt,
             model: $model,
             context: $context,
-            tools: AgentTools::definitions(),
+            tools: $isOnPrem ? [] : AgentTools::definitions(),
         );
 
         $reply = $result->reply;
@@ -182,9 +185,37 @@ class ChatAgent extends BaseAgent
         return AgentResult::reply($reply);
     }
 
-    private function buildSystemPrompt(AgentContext $context): string
+    /**
+     * Compact system prompt for on-prem models (small context, no tools).
+     */
+    private function buildCompactSystemPrompt(AgentContext $context): string
     {
         $now = now(AppSetting::timezone())->format('Y-m-d H:i (l)');
+        $preferredLang = $this->resolvePreferredLanguage($context->from);
+
+        $prompt = "Tu es ZeniClaw, un assistant IA. Tu tutoies, tu es direct et bienveillant. "
+            . ($preferredLang ? "Reponds en {$preferredLang}. " : "Reponds dans la langue de l'utilisateur. ")
+            . "Date: {$now}. Utilisateur: {$context->senderName}.\n"
+            . "Format WhatsApp: *gras* _italique_ `code`. Pas de ## ni **.\n";
+
+        // Inject only recent conversation (3 messages max for small models)
+        $memoryContext = $this->memory->formatForPrompt($context->agent->id, $context->from, 3);
+        if ($memoryContext) {
+            $prompt .= "\n" . $memoryContext;
+        }
+
+        // Inject conversation memory (cross-session facts) — keep it brief
+        if ($context->memoryContext) {
+            $prompt .= "\n" . mb_substr($context->memoryContext, 0, 500);
+        }
+
+        return $prompt;
+    }
+
+    private function buildSystemPrompt(AgentContext $context): string
+    {
+        $tz = AppSetting::timezone();
+        $now = now($tz)->format('Y-m-d H:i (l)');
 
         // Detect user's preferred language from context memory
         $preferredLang = $this->resolvePreferredLanguage($context->from);
@@ -193,42 +224,16 @@ class ChatAgent extends BaseAgent
             : "Reponds dans la meme langue que l'utilisateur (detecte automatiquement).";
 
         $systemPrompt =
-            "Tu es ZeniClaw, un assistant WhatsApp autonome et intelligent. "
-            . "Tu as acces a des outils (tools) que tu dois utiliser proactivement et sans hesitation. "
-            . "\n\n"
-            . "UTILISATION DES OUTILS (OBLIGATOIRE — agis, ne demande pas):\n"
-            . "- Rappel: \"rappelle-moi d'appeler Jean demain a 10h\" → utilise create_reminder immediatement\n"
-            . "- Todo: \"ajoute 'acheter du pain' a ma liste\" → utilise add_todo immediatement\n"
-            . "- Connaissance: l'utilisateur partage son email/numero/preference → utilise store_knowledge\n"
-            . "- Recherche: question sur un fait/actualite recente → utilise web_search si disponible\n"
-            . "- Code: l'utilisateur demande de modifier du code → utilise les outils gitlab/git\n"
-            . "- Apres chaque action reussie, confirme brievement ce qui a ete fait (ex: 'Rappel cree pour 10h !')\n"
-            . "- En cas d'echec d'outil, propose une alternative ou demande de preciser\n"
-            . "Ne JAMAIS dire 'je vais essayer de ...' ou 'je peux ... si tu veux' — FAIS directement.\n"
-            . "\n\n"
-            . "MEMOIRE PERSISTANTE (CRITIQUE):\n"
-            . "- AVANT de demander une info, utilise recall_knowledge/list_knowledge pour verifier si tu l'as deja.\n"
-            . "- Quand tu obtiens des donnees importantes (email, tel, adresse, preference forte), utilise store_knowledge.\n"
-            . "- Les donnees persistent PAR UTILISATEUR entre toutes les conversations.\n"
-            . "- Ne redemande JAMAIS une info deja stockee. Si tu trouves une info en memoire, utilise-la directement.\n"
-            . "- Cles de stockage standardisees: email, telephone, prenom, nom, ville, langue_preferee, preference_[sujet]\n"
-            . "\n\n"
-            . "STYLE: Tu parles comme un ami ou un collegue decontracte. "
-            . "Tu tutoies, tu es direct, drole et bienveillant. "
-            . "Langage naturel et detendu (pas trop formel). "
-            . "Emojis avec moderation (max 2-3 par message). "
-            . $langInstruction . " "
-            . $this->buildLengthDirective($context->complexity)
-            . "\n\nFORMATAGE WHATSAPP STRICT:\n"
-            . "- Gras: *texte* | Italique: _texte_ | Barre: ~texte~\n"
-            . "- Listes: tirets (-) ou numeros (1. 2. 3.) — PAS de puces (•)\n"
-            . "- INTERDIT: ## pour les titres, ** pour le gras, __italique__ — utilise UNIQUEMENT le format WhatsApp ci-dessus\n"
-            . "- Separateurs visuels: --- (tres rarement, seulement pour sections longues)\n"
-            . "- Code: backticks simples (`) pour inline, triple (```) pour blocs\n"
-            . "- Tables: evite les tables HTML/Markdown, prefere des listes formatees\n"
-            . "- Liens: affiche l'URL complete, pas de markdown [texte](url)\n"
-            . "\n\nDate et heure actuelles (" . AppSetting::timezone() . "): {$now}"
-            . "\nLe message vient de {$context->senderName}.";
+            "Tu es ZeniClaw, un assistant WhatsApp autonome. Utilise tes outils (tools) proactivement, sans demander confirmation. "
+            . "FAIS directement, ne dis jamais 'je peux faire X si tu veux'.\n\n"
+            . "OUTILS: rappel→create_reminder, todo→add_todos, info perso→store_knowledge, question factuelle→web_search. "
+            . "Confirme brievement apres chaque action.\n\n"
+            . "MEMOIRE: utilise recall_knowledge AVANT de redemander une info. store_knowledge pour sauver les donnees importantes.\n\n"
+            . "STYLE: Tutoiement, direct, decontracte, bienveillant. Max 2-3 emojis. " . $langInstruction . " "
+            . $this->buildLengthDirective($context->complexity) . "\n\n"
+            . "FORMAT WHATSAPP: *gras* _italique_ ~barre~ `code`. Listes: tirets ou numeros. "
+            . "INTERDIT: ## titres, ** gras markdown, [texte](url).\n\n"
+            . "Date ({$tz}): {$now}. Utilisateur: {$context->senderName}.";
 
         // Inject user context memory (preferences, profile, humor level)
         $contextMemory = $this->formatContextMemoryForPrompt($context->from);

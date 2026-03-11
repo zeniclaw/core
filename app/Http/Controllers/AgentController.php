@@ -472,7 +472,7 @@ class AgentController extends Controller
         $models = $request->input('sub_agent_models', []);
 
         // Validate model values
-        $validModels = ['default', 'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'qwen2.5:7b', 'qwen2.5-coder:7b'];
+        $validModels = ['default', 'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'qwen2.5:3b', 'qwen2.5:7b', 'qwen2.5-coder:7b'];
         $filtered = [];
         foreach ($models as $key => $model) {
             if (array_key_exists($key, self::SUB_AGENTS) && in_array($model, $validModels)) {

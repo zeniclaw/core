@@ -76,8 +76,9 @@
             'claude-haiku-4-5' => 'Haiku 4.5 (rapide)',
             'claude-sonnet-4-5' => 'Sonnet 4.5 (equilibre)',
             'claude-opus-4-5' => 'Opus 4.5 (puissant)',
-            'qwen2.5-72b' => 'Qwen 2.5 72B (on-prem, intelligent)',
-            'deepseek-coder-v2' => 'DeepSeek Coder V2 (on-prem, code)',
+            'qwen2.5:3b' => 'Qwen 2.5 3B (on-prem — 4 GB RAM, 2 CPU)',
+            'qwen2.5:7b' => 'Qwen 2.5 7B (on-prem — 8 GB RAM, 4 CPU)',
+            'qwen2.5-coder:7b' => 'Qwen Coder 7B (on-prem — 8 GB RAM, 4 CPU)',
         ];
     @endphp
 

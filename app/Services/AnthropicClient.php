@@ -121,7 +121,7 @@ class AnthropicClient
         }
 
         try {
-            $response = Http::timeout(180)
+            $response = Http::timeout(60)
                 ->withHeaders($headers)
                 ->post(rtrim($baseUrl, '/') . '/v1/chat/completions', $body);
 

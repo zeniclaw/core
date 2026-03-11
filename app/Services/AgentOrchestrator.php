@@ -618,6 +618,7 @@ class AgentOrchestrator
             'claude-haiku-4-5' => 'claude-haiku-4-5-20251001',
             'claude-sonnet-4-5' => 'claude-sonnet-4-20250514',
             'claude-opus-4-5' => 'claude-opus-4-20250514',
+            'qwen2.5:3b' => 'qwen2.5:3b',
             'qwen2.5:7b' => 'qwen2.5:7b',
             'qwen2.5-coder:7b' => 'qwen2.5-coder:7b',
             default => null,

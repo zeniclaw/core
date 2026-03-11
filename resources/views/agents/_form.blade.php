@@ -3,8 +3,9 @@ $models = [
     'claude-sonnet-4-5' => 'Claude Sonnet 4.5 (Claude Max)',
     'claude-opus-4-5'   => 'Claude Opus 4.5 (Claude Max)',
     'claude-haiku-4-5'  => 'Claude Haiku 4.5 (Claude Max)',
-    'qwen2.5:7b'        => 'Qwen 2.5 7B (On-Prem, intelligent)',
-    'qwen2.5-coder:7b'  => 'Qwen 2.5 Coder 7B (On-Prem, code)',
+    'qwen2.5:3b'        => 'Qwen 2.5 3B (On-Prem — 4 GB RAM, 2 CPU)',
+    'qwen2.5:7b'        => 'Qwen 2.5 7B (On-Prem — 8 GB RAM, 4 CPU)',
+    'qwen2.5-coder:7b'  => 'Qwen 2.5 Coder 7B (On-Prem — 8 GB RAM, 4 CPU)',
 ];
 @endphp
 
