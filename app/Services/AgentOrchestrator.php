@@ -148,20 +148,6 @@ class AgentOrchestrator
             // 2. Route the message
             $routing = $this->router->route($context);
 
-            if ($debug) {
-                $confidence = $routing['confidence'] ?? '?';
-                $routerDebug = "[DEBUG ROUTER]\n"
-                    . "Message: " . mb_substr($context->body ?? '', 0, 80) . "\n"
-                    . "Agent: {$routing['agent']}\n"
-                    . "Confidence: {$confidence}%\n"
-                    . "Model: {$routing['model']}\n"
-                    . "Complexity: {$routing['complexity']}\n"
-                    . "Autonomy: {$routing['autonomy']}\n"
-                    . "Reasoning: {$routing['reasoning']}";
-                $debugTraces[] = $routerDebug;
-                $this->sendDebug($context, $routerDebug);
-            }
-
             // Log routing decision
             AgentLog::create([
                 'agent_id' => $context->agent->id,
@@ -177,6 +163,24 @@ class AgentOrchestrator
             // Override model if the agent has a specific sub-agent model configured
             $configuredModel = $context->agent->getSubAgentModel($routing['agent']);
             $routingModel = $this->resolveFullModelId($configuredModel) ?? $routing['model'];
+
+            if ($debug) {
+                $confidence = $routing['confidence'] ?? '?';
+                $isOnPrem = !str_starts_with($routingModel, 'claude-');
+                $routerDebug = "[DEBUG ROUTER]\n"
+                    . "Message: " . mb_substr($context->body ?? '', 0, 80) . "\n"
+                    . "Agent: {$routing['agent']}\n"
+                    . "Confidence: {$confidence}%\n"
+                    . "Router model: {$routing['model']}\n"
+                    . "Agent default: {$context->agent->model}\n"
+                    . "Sub-agent override: {$configuredModel}\n"
+                    . "Final model: {$routingModel}" . ($isOnPrem ? " (on-prem)" : " (cloud)") . "\n"
+                    . "Complexity: {$routing['complexity']}\n"
+                    . "Autonomy: {$routing['autonomy']}\n"
+                    . "Reasoning: {$routing['reasoning']}";
+                $debugTraces[] = $routerDebug;
+                $this->sendDebug($context, $routerDebug);
+            }
 
             // Enrich context with routing info
             $routedContext = $context->withRouting(
@@ -272,7 +276,10 @@ class AgentOrchestrator
             }
 
             if ($debug) {
-                $dispatchDebug = "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : '');
+                $isOnPrem = !str_starts_with($routingModel, 'claude-');
+                $dispatchDebug = "[DEBUG DISPATCH]\n"
+                    . "Dispatch to: {$dispatchAgent}" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : '') . "\n"
+                    . "Model: {$routingModel}" . ($isOnPrem ? " (on-prem, no tools, compact prompt)" : " (cloud, agentic loop + tools)");
                 $debugTraces[] = $dispatchDebug;
                 $this->sendDebug($context, $dispatchDebug);
             }
@@ -363,13 +370,26 @@ class AgentOrchestrator
 
         $clean = mb_strtolower(trim($context->body));
 
-        // Activate debug mode
+        // Exact match shortcuts
+        if ($clean === '/debug') {
+            $context->session->update(['debug_mode' => true]);
+            return AgentResult::reply(
+                "🔍 *Mode debug activé*\n\nChaque réponse inclura le routing, l'agent choisi, le timing.\nPour désactiver : _/nodebug_"
+            );
+        }
+        if ($clean === '/nodebug') {
+            $context->session->update(['debug_mode' => false]);
+            return AgentResult::reply("✅ Mode debug désactivé.");
+        }
+
+        // Activate debug mode (fuzzy match — contains)
         $activatePatterns = [
             'mode debug', 'debug mode', 'active debug', 'activer debug', 'activer le debug',
-            'active le debug', 'debug on', 'enable debug', '/debug',
+            'active le debug', 'debug on', 'enable debug', 'passer en debug', 'passe en debug',
+            'activer mode debug', 'lance le debug',
         ];
         foreach ($activatePatterns as $pattern) {
-            if ($clean === $pattern) {
+            if (str_contains($clean, $pattern)) {
                 $context->session->update(['debug_mode' => true]);
                 return AgentResult::reply(
                     "🔍 *Mode debug activé*\n\n"
@@ -382,15 +402,16 @@ class AgentOrchestrator
             }
         }
 
-        // Deactivate debug mode
+        // Deactivate debug mode (fuzzy match — contains)
         $deactivatePatterns = [
             'désactiver debug', 'desactiver debug', 'désactive debug', 'desactive debug',
             'debug off', 'disable debug', 'stop debug', 'arrête debug', 'arrete debug',
             'supprimer debug', 'supprime debug', 'enlever debug', 'enlève debug',
-            'désactiver le debug', 'desactiver le debug', 'supprime le debug', '/nodebug',
+            'désactiver le debug', 'desactiver le debug', 'supprime le debug',
+            'couper le debug', 'coupe le debug', 'quitter debug',
         ];
         foreach ($deactivatePatterns as $pattern) {
-            if ($clean === $pattern) {
+            if (str_contains($clean, $pattern)) {
                 $context->session->update(['debug_mode' => false]);
                 return AgentResult::reply("✅ Mode debug désactivé.");
             }
