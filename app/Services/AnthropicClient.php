@@ -198,7 +198,8 @@ class AnthropicClient
         $maxContinuations = 3;
 
         for ($cont = 0; $cont <= $maxContinuations; $cont++) {
-            $response = Http::timeout($isMultimodal ? 60 : 30)
+            $timeoutSec = $isMultimodal ? 90 : ($maxTokens >= 4096 ? 120 : 60);
+            $response = Http::timeout($timeoutSec)
                 ->withHeaders($headers)
                 ->post("{$this->baseUrl}/messages", $body);
 
