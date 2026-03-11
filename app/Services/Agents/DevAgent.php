@@ -1305,6 +1305,19 @@ PROMPT
             return $this->createPendingProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
         }
 
+        // Detect credentials in message — store immediately and run API agent
+        // instead of creating a new awaiting_validation project
+        if ($this->containsCredentials($context->body)) {
+            $project = Project::where('name', $repoName)
+                ->whereIn('status', ['approved', 'in_progress', 'completed'])
+                ->first();
+            if ($project) {
+                $reply = $this->runApiAgent($project, $context->body, [], $context);
+                $this->sendText($context->from, $reply);
+                return AgentResult::reply($reply, ['action' => 'api_credentials_stored']);
+            }
+        }
+
         // Autonomy: auto-execute safe read/diagnostic tasks without confirmation
         if ($context->autonomy === 'auto') {
             return $this->createAndLaunchAutoProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
@@ -1575,6 +1588,26 @@ PROMPT
             ->whereNotIn('status', ['rejected'])
             ->orderByDesc('created_at')
             ->first();
+    }
+
+    /**
+     * Detect if message contains API credentials (keys, tokens, endpoints).
+     * Used to skip the "awaiting_validation" flow and go straight to API agent.
+     */
+    private function containsCredentials(string $body): bool
+    {
+        $lower = mb_strtolower($body);
+
+        // Must contain something that looks like a key/token
+        $hasKey = (bool) preg_match('/\b(pk_|sk_|api[_-]?key|token|bearer|secret|key)\S{8,}/i', $body);
+
+        // Or explicit credential-giving language
+        $hasGivingLang = (bool) preg_match('/\b(voici|voila|utilise|prends?|la\s+cl[eé]|le\s+token|l\'?endpoint|l\'?api)\b/iu', $body);
+
+        // Must contain a URL (endpoint)
+        $hasUrl = (bool) preg_match('/https?:\/\/\S+/i', $body);
+
+        return ($hasKey && $hasUrl) || ($hasGivingLang && ($hasKey || $hasUrl));
     }
 
     private function detectGitlabUrl(string $body): ?array
