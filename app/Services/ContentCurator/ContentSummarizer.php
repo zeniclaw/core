@@ -3,6 +3,7 @@
 namespace App\Services\ContentCurator;
 
 use App\Services\AnthropicClient;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 class ContentSummarizer
@@ -58,7 +59,7 @@ PROMPT;
         try {
             $response = $this->claude->chat(
                 $articlesText,
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 $systemPrompt
             );
 

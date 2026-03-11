@@ -7,6 +7,7 @@ use App\Models\MusicListenHistory;
 use App\Models\UserMusicPreference;
 use App\Services\AgentContext;
 use App\Services\Formatters\MusicFormatter;
+use App\Services\ModelResolver;
 use App\Services\SpotifyService;
 use Illuminate\Support\Facades\Log;
 
@@ -113,7 +114,7 @@ class MusicAgent extends BaseAgent
 
         $response = $this->claude->chat(
             "Message: \"{$body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             $this->buildParserPrompt()
         );
 
@@ -927,7 +928,7 @@ Tu es un assistant musical expert connecte a Spotify. Tu peux aider avec:
 Reponds de facon concise et conviviale en francais (style WhatsApp). Si la demande est floue, propose 2-3 options concretes.
 SYSTEM;
 
-        $aiReply = $this->claude->chat($body, 'claude-haiku-4-5-20251001', $systemPrompt);
+        $aiReply = $this->claude->chat($body, ModelResolver::fast(), $systemPrompt);
 
         $reply = $aiReply ?? $this->buildHelpMessage();
 

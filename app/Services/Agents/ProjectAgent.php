@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\Project;
 use App\Models\SubAgent;
 use App\Services\AgentContext;
+use App\Services\ModelResolver;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -108,7 +109,7 @@ class ProjectAgent extends BaseAgent
         try {
             $response = $this->claude->chat(
                 "Message: \"{$context->body}\"",
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 $this->buildActionPrompt()
             );
 
@@ -191,7 +192,7 @@ PROMPT;
         try {
             $classification = $this->claude->chat(
                 "Message de l'utilisateur: \"{$context->body}\"",
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 "L'utilisateur repond a une demande de confirmation (oui/non).\n"
                 . "Reponds UNIQUEMENT par OUI ou NON.\n"
                 . "OUI = confirme (oui, ok, yes, go, c'est bon, parfait, yep, ouais, confirme, allez, let's go...)\n"
@@ -574,7 +575,7 @@ PROMPT;
                         $list     = $archived->map(fn($p) => "- ID:{$p->id} nom:\"{$p->name}\"")->implode("\n");
                         $response = $this->claude->chat(
                             "Message utilisateur: \"{$name}\"\n\nProjets archives:\n{$list}",
-                            'claude-haiku-4-5-20251001',
+                            ModelResolver::fast(),
                             "Trouve le projet archive le plus probable dans la liste.\n"
                             . "Reponds UNIQUEMENT avec l'ID (ex: 42) ou AUCUN si aucun ne correspond."
                         );
@@ -953,7 +954,7 @@ PROMPT;
         try {
             $classification = $this->claude->chat(
                 "Message: \"{$context->body}\"",
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 "L'utilisateur confirme-t-il une suppression definitive ? Reponds OUI ou NON uniquement.\n"
                 . "OUI = confirme (oui, yes, ok, confirme, go, d'accord, supprimer, delete...)\n"
                 . "NON = refuse (non, annule, stop, non merci, laisse tomber, nope...)"
@@ -1331,7 +1332,7 @@ PROMPT;
         try {
             $response = $this->claude->chat(
                 "Message utilisateur: \"{$body}\"\n\nProjets disponibles:\n{$projectList}",
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 "L'utilisateur mentionne un projet. Trouve le projet le plus probable dans la liste.\n"
                 . "Reponds UNIQUEMENT avec l'ID du projet (ex: 42) ou AUCUN si aucun ne correspond.\n"
                 . "Gere les noms partiels, fautes de frappe, descriptions vagues.\n"

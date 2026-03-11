@@ -9,6 +9,7 @@ use App\Models\SubAgent;
 use App\Models\UserKnowledge;
 use App\Services\AgentContext;
 use App\Services\GitLabService;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 class DevAgent extends BaseAgent
@@ -415,7 +416,7 @@ NE PROPOSE PAS de code, d'integration, ou de plan technique quand l'utilisateur 
 JSON UNIQUEMENT.
 PROMPT;
 
-            $response = $this->claude->chat($query, 'claude-opus-4-20250514', $systemPrompt);
+            $response = $this->claude->chat($query, ModelResolver::powerful(), $systemPrompt);
             $parsed = $this->parseJson($response);
 
             if (!$parsed || empty($parsed['action'])) {
@@ -526,7 +527,7 @@ PROMPT;
 
         $response = $this->claude->chat(
             "Donnees collectees:\n{$dataText}",
-            'claude-sonnet-4-20250514',
+            ModelResolver::balanced(),
             "L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n"
             . "Voici toutes les donnees collectees via API. Fais une analyse complete:\n"
             . "- Resume, totaux, tendances\n- Alertes ou anomalies\n- Recommandations\n"
@@ -1295,7 +1296,7 @@ PROMPT;
     {
         $classification = $this->claude->chat(
             "Message de l'utilisateur: \"{$context->body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             "Tu classes la reponse d'un utilisateur a qui on a demande de confirmer une tache.\n"
             . "Reponds UNIQUEMENT par un seul mot: CONFIRM, MODIFY ou CANCEL.\n"
             . "CONFIRM = l'utilisateur accepte/valide (oui, ok, go, lance, c'est bon, parfait, envoie, yes, let's go, top, nickel...)\n"
@@ -1433,7 +1434,7 @@ PROMPT;
     {
         $response = $this->claude->chat(
             "Message: \"{$body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             "Extrait le nom du projet/repo mentionne dans ce message.\n"
             . "Reponds UNIQUEMENT avec le nom du projet, rien d'autre.\n"
             . "Si aucun projet n'est mentionne, reponds NULL."
@@ -1672,7 +1673,7 @@ PROMPT;
 
         $response = $this->claude->chat(
             "Projet: {$repoName}\nDemande: {$body}{$techContext}",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             "Tu es un assistant technique. Reformule cette demande en un plan d'action clair et concis.\n"
             . "Liste 3 a 5 etapes numerotees.\n"
             . "Sois precis mais bref (1 ligne par etape).\n"

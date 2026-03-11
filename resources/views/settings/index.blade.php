@@ -477,6 +477,65 @@
         </form>
     </div>
 
+    {{-- Model Roles --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 class="font-semibold text-gray-900 mb-1">🎯 Roles de modeles</h2>
+        <p class="text-sm text-gray-500 mb-5">Configurez quel modele utiliser pour chaque type de tache. Tous les agents utilisent ces roles automatiquement.</p>
+
+        <form method="POST" action="{{ route('settings.model-roles') }}" class="space-y-4">
+            @csrf
+
+            @php
+                $roles = [
+                    'fast' => [
+                        'label' => 'Rapide',
+                        'icon' => '⚡',
+                        'desc' => 'Classification, parsing JSON, extraction simple, intent detection',
+                        'color' => 'green',
+                    ],
+                    'balanced' => [
+                        'label' => 'Equilibre',
+                        'icon' => '⚖️',
+                        'desc' => 'Routing, analyse, resume, generation de contenu',
+                        'color' => 'blue',
+                    ],
+                    'powerful' => [
+                        'label' => 'Puissant',
+                        'icon' => '🧠',
+                        'desc' => 'Raisonnement complexe, generation de code, agents API',
+                        'color' => 'purple',
+                    ],
+                ];
+            @endphp
+
+            @foreach($roles as $roleKey => $roleMeta)
+            <div class="border border-gray-100 rounded-xl p-4 bg-gray-50">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">{{ $roleMeta['icon'] }}</span>
+                        <div>
+                            <p class="font-medium text-sm text-gray-900">{{ $roleMeta['label'] }}</p>
+                            <p class="text-xs text-gray-500">{{ $roleMeta['desc'] }}</p>
+                        </div>
+                    </div>
+                </div>
+                <select name="model_role_{{ $roleKey }}"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                    @foreach($availableModels as $modelId => $modelLabel)
+                        <option value="{{ $modelId }}" {{ ($modelRoles[$roleKey] ?? '') === $modelId ? 'selected' : '' }}>
+                            {{ $modelLabel }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            @endforeach
+
+            <button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
+                Sauvegarder les roles
+            </button>
+        </form>
+    </div>
+
     {{-- GitLab & Notifications --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🔧 GitLab & Notifications</h2>

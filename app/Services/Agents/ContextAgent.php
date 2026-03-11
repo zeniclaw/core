@@ -4,6 +4,7 @@ namespace App\Services\Agents;
 
 use App\Services\AgentContext;
 use App\Services\ContextMemoryBridge;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 class ContextAgent extends BaseAgent
@@ -197,7 +198,7 @@ PROMPT;
 
         $response = $this->claude->chat(
             $prompt,
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             'Tu es un extracteur d\'entites JSON. Reponds uniquement avec le JSON demande, sans aucun texte supplementaire ni bloc markdown.'
         );
 

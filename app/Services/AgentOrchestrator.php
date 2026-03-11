@@ -12,6 +12,7 @@ use App\Services\Agents\ToolProviderInterface;
 use App\Models\CollaborativeVote;
 use App\Models\UserAgentAnalytic;
 use App\Jobs\AnalyzeSelfImprovementJob;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -530,7 +531,7 @@ class AgentOrchestrator
         $claude = new AnthropicClient();
         $response = $claude->chat(
             "Message: \"{$body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             "L'utilisateur etait en train de confirmer/modifier une tache precedente.\n"
             . "Determine si ce nouveau message est:\n"
             . "- CONTINUATION = une reponse a la tache en cours (confirmation, modification, precision, annulation)\n"
@@ -674,7 +675,7 @@ class AgentOrchestrator
                 "Résume cet échange en 1 phrase courte (max 20 mots).\n"
                 . "Message de {$context->senderName}: {$bodyForMemory}\n"
                 . "Réponse de ZeniClaw: {$reply}",
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 'Tu es un assistant qui résume des échanges. Réponds uniquement avec le résumé, rien d\'autre.'
             )
             : '';

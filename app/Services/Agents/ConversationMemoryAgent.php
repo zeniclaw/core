@@ -4,6 +4,7 @@ namespace App\Services\Agents;
 
 use App\Models\ConversationMemory;
 use App\Services\AgentContext;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -178,7 +179,7 @@ class ConversationMemoryAgent extends BaseAgent
 
             $response = $this->claude->chat(
                 $prompt,
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 <<<'SYSTEM'
 Tu es un extracteur de faits memorables. Analyse le message et extrais UNIQUEMENT les faits importants a retenir pour les futures conversations.
 
@@ -447,7 +448,7 @@ SYSTEM
             try {
                 $inferredResponse = $this->claude->chat(
                     "Contenu: \"{$content}\"\n\nTypes disponibles: project, preference, decision, skill, constraint\n\nReponds avec UNIQUEMENT le type le plus approprie (un mot).",
-                    'claude-haiku-4-5-20251001',
+                    ModelResolver::fast(),
                     'Tu es un classificateur de faits. Reponds UNIQUEMENT avec un seul mot parmi: project, preference, decision, skill, constraint.'
                 );
                 $inferred = trim(strtolower($inferredResponse ?? ''));

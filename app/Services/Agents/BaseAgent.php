@@ -8,6 +8,7 @@ use App\Services\AnthropicClient;
 use App\Services\ContextMemory\ContextStore;
 use App\Services\ContextMemoryBridge;
 use App\Services\ConversationMemoryService;
+use App\Services\ModelResolver;
 use App\Services\PreferencesManager;
 use Illuminate\Support\Facades\Http;
 
@@ -128,7 +129,7 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
 
     protected function resolveModel(AgentContext $context): string
     {
-        return $context->routedModel ?? 'claude-haiku-4-5-20251001';
+        return $context->routedModel ?? ModelResolver::fast();
     }
 
     protected function getContextMemory(string $userId): array
@@ -261,7 +262,7 @@ PROMPT;
 
         $response = $this->claude->chat(
             "Message: \"{$context->body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             $prompt
         );
 

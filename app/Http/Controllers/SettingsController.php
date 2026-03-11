@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AppSetting;
+use App\Services\ModelResolver;
 use Illuminate\Http\Request;
 
 class SettingsController extends Controller
@@ -37,7 +38,10 @@ class SettingsController extends Controller
             'no_proxy' => AppSetting::get('proxy_no_proxy') ?? env('NO_PROXY', ''),
         ];
 
-        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig'));
+        $modelRoles = ModelResolver::current();
+        $availableModels = ModelResolver::AVAILABLE_MODELS;
+
+        return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig', 'modelRoles', 'availableModels'));
     }
 
     public function saveLlmKeys(Request $request)
@@ -135,6 +139,22 @@ class SettingsController extends Controller
         }
 
         return redirect()->route('settings.index')->with('success', 'Personnalisation du chat sauvegardee.');
+    }
+
+    public function saveModelRoles(Request $request)
+    {
+        $validModels = array_keys(ModelResolver::AVAILABLE_MODELS);
+
+        foreach (['fast', 'balanced', 'powerful'] as $role) {
+            $model = $request->input("model_role_{$role}");
+            if ($model && in_array($model, $validModels)) {
+                AppSetting::set("model_role_{$role}", $model);
+            }
+        }
+
+        ModelResolver::clearCache();
+
+        return redirect()->route('settings.index')->with('success', 'Roles de modeles mis a jour.');
     }
 
     public function toggleAutoUpdate()

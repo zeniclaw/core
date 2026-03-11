@@ -4,6 +4,7 @@ namespace App\Services\Agents;
 
 use App\Models\Project;
 use App\Services\AgentContext;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 class AnalysisAgent extends BaseAgent
@@ -98,14 +99,14 @@ class AnalysisAgent extends BaseAgent
         $reply = $this->claude->chatWithMessages($messages, $model, $systemPrompt, $maxTokens);
 
         // Fallback to Haiku if the requested model fails
-        if (!$reply && $model !== 'claude-haiku-4-5-20251001') {
+        if (!$reply && $model !== ModelResolver::fast()) {
             $reply = $this->claude->chatWithMessages(
                 $messages,
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 $systemPrompt,
                 min($maxTokens, 2048)
             );
-            $model = 'claude-haiku-4-5-20251001 (fallback)';
+            $model = ModelResolver::fast() . ' (fallback)';
         }
 
         if (!$reply) {
@@ -172,10 +173,10 @@ class AnalysisAgent extends BaseAgent
 
         $reply = $this->claude->chatWithMessages($messages, $model, $systemPrompt, $maxTokens);
 
-        if (!$reply && $model !== 'claude-haiku-4-5-20251001') {
+        if (!$reply && $model !== ModelResolver::fast()) {
             $reply = $this->claude->chatWithMessages(
                 $messages,
-                'claude-haiku-4-5-20251001',
+                ModelResolver::fast(),
                 $systemPrompt,
                 min($maxTokens, 2048)
             );

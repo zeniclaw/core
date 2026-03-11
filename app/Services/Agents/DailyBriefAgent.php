@@ -7,6 +7,7 @@ use App\Models\Todo;
 use App\Models\UserBriefPreference;
 use App\Services\AgentContext;
 use App\Services\ContentCurator\ContentAggregator;
+use App\Services\ModelResolver;
 use App\Services\PreferencesManager;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -658,7 +659,7 @@ class DailyBriefAgent extends BaseAgent
                 . "Contexte utilisateur : {$pendingCount} tache(s) en attente, {$highPriority} haute priorite, {$todayReminders} rappel(s) aujourd'hui.\n"
                 . "Maximum 150 caracteres.";
 
-            $tip = $this->claude->chat($userPrompt, 'claude-haiku-4-5-20251001', $systemPrompt);
+            $tip = $this->claude->chat($userPrompt, ModelResolver::fast(), $systemPrompt);
             $tip = trim(strip_tags($tip ?? ''));
 
             if (!empty($tip) && mb_strlen($tip) <= 300) {

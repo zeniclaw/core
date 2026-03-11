@@ -28,7 +28,7 @@ class MeetingAnalyzer
 
         $response = $this->claude->chat(
             "Reunion: \"{$groupName}\"\n\nMessages captures:\n{$messagesText}",
-            'claude-sonnet-4-20250514',
+            ModelResolver::balanced(),
             $this->buildPrompt()
         );
 

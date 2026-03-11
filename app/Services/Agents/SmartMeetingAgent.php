@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\MeetingSession;
 use App\Services\AgentContext;
 use App\Services\MeetingAnalyzer;
+use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Log;
 
 class SmartMeetingAgent extends BaseAgent
@@ -1992,7 +1993,7 @@ class SmartMeetingAgent extends BaseAgent
                     mimetype: null,
                     media: null,
                     routedAgent: 'todo',
-                    routedModel: 'claude-haiku-4-5-20251001',
+                    routedModel: ModelResolver::fast(),
                 );
                 $todoAgent->handle($todoContext);
             }
@@ -2012,7 +2013,7 @@ class SmartMeetingAgent extends BaseAgent
                     mimetype: null,
                     media: null,
                     routedAgent: 'reminder',
-                    routedModel: 'claude-haiku-4-5-20251001',
+                    routedModel: ModelResolver::fast(),
                 );
                 $reminderAgent->handle($reminderContext);
             }

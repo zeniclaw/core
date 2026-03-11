@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Models\AppSetting;
 use App\Models\MoodLog;
 use App\Services\AgentContext;
+use App\Services\ModelResolver;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -648,7 +649,7 @@ class MoodCheckAgent extends BaseAgent
     {
         $response = $this->claude->chat(
             "Message utilisateur: \"{$body}\"",
-            'claude-haiku-4-5-20251001',
+            ModelResolver::fast(),
             "Tu analyses le niveau d'humeur d'un message en francais ou anglais.\n"
             . "Echelle: 1=tres negatif/en detresse, 2=bas/difficile, 3=neutre/ok, 4=bien/positif, 5=excellent/euphorique.\n"
             . "Reponds UNIQUEMENT en JSON strict (pas de markdown): {\"level\": X, \"label\": \"mot descriptif court en francais\"}\n"

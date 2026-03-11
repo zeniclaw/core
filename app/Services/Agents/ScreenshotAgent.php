@@ -5,6 +5,7 @@ namespace App\Services\Agents;
 use App\Jobs\ProcessScreenshotJob;
 use App\Services\AgentContext;
 use App\Services\ImageProcessor;
+use App\Services\ModelResolver;
 
 class ScreenshotAgent extends BaseAgent
 {
@@ -501,7 +502,7 @@ class ScreenshotAgent extends BaseAgent
         $model = $this->resolveModel($context);
         // Force a Claude model for vision (on-prem may not support multimodal)
         if (!str_starts_with($model, 'claude-')) {
-            $model = 'claude-haiku-4-5-20251001';
+            $model = ModelResolver::fast();
         }
 
         $memoryPrompt = $this->formatContextMemoryForPrompt($context->from);
@@ -1114,7 +1115,7 @@ class ScreenshotAgent extends BaseAgent
 
         $model = $this->resolveModel($context);
         if (!str_starts_with($model, 'claude-')) {
-            $model = 'claude-haiku-4-5-20251001';
+            $model = ModelResolver::fast();
         }
 
         $systemPrompt = "Tu es un expert en detection et decodage de QR codes et codes-barres.\n"

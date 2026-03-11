@@ -4,6 +4,7 @@ namespace App\Services\Agents;
 
 use App\Models\Reminder;
 use App\Services\AgentContext;
+use App\Services\ModelResolver;
 use App\Services\TimeBlockOptimizer;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -304,7 +305,7 @@ Planning a analyser :
 Reponds UNIQUEMENT avec le JSON array, aucun texte autour, aucun commentaire.
 PROMPT;
 
-        $blocksJson = $this->claude->chat($extractPrompt, 'claude-haiku-4-5-20251001', 'Tu extrais des donnees structurees de plannings. Reponds uniquement en JSON valide, sans texte supplementaire.');
+        $blocksJson = $this->claude->chat($extractPrompt, ModelResolver::fast(), 'Tu extrais des donnees structurees de plannings. Reponds uniquement en JSON valide, sans texte supplementaire.');
 
         $blocksJson = $this->extractJson($blocksJson);
         $blocks = json_decode($blocksJson ?? '[]', true);
