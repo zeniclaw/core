@@ -91,6 +91,34 @@ class DevAgent extends BaseAgent
         return $context->routedAgent === 'dev';
     }
 
+    public function intents(): array
+    {
+        return [
+            // GitLab consultation commands
+            ['key' => 'list_projects', 'description' => 'Lister les projets GitLab', 'examples' => ['mes projets', 'liste les repos', 'quels projets tu geres']],
+            ['key' => 'project_info', 'description' => 'Voir info/selectionner/switcher de projet', 'examples' => ['status du projet zeniclaw', 'passe sur invoices', 'bosser sur padel']],
+            ['key' => 'list_branches', 'description' => 'Voir les branches', 'examples' => ['les branches de mon-app', 'branches']],
+            ['key' => 'list_mrs', 'description' => 'Voir les merge requests', 'examples' => ['MRs ouvertes', 'merge requests']],
+            ['key' => 'pipeline_status', 'description' => 'Status CI/CD', 'examples' => ['la CI passe ?', 'status pipeline']],
+            ['key' => 'recent_commits', 'description' => 'Derniers commits', 'examples' => ['derniers commits', 'git log']],
+            ['key' => 'list_issues', 'description' => 'Voir les issues/tickets', 'examples' => ['les issues', 'bugs ouverts']],
+            ['key' => 'create_issue', 'description' => 'Creer un ticket/issue (args: title)', 'examples' => ['creer issue: fix login', 'ouvrir un ticket']],
+            ['key' => 'search_code', 'description' => 'Chercher dans le code (args: query)', 'examples' => ['cherche "sendEmail" dans le code']],
+            ['key' => 'file_tree', 'description' => 'Arborescence/fichiers du projet', 'examples' => ['structure du projet', 'arborescence']],
+            ['key' => 'read_file', 'description' => 'Lire un fichier (args: path)', 'examples' => ['montre moi routes/api.php', 'lire le fichier .env.example']],
+            ['key' => 'compare_branches', 'description' => 'Comparer/diff entre branches (args: from, to)', 'examples' => ['diff main vs develop']],
+            ['key' => 'project_health', 'description' => 'Bilan de sante/diagnostic', 'examples' => ['diagnostic projet', 'health check']],
+            ['key' => 'task_history', 'description' => 'Historique des taches', 'examples' => ['historique des taches']],
+            ['key' => 'rollback', 'description' => 'Annuler la derniere modif', 'examples' => ['rollback', 'annule le dernier deploy']],
+            ['key' => 'deploy_status', 'description' => 'Status deploiement', 'examples' => ['status deploy', 'mise en prod']],
+            // API interaction
+            ['key' => 'api_query', 'description' => 'Interroger/consulter l\'API live du projet (lister donnees, stats, entites). PAS modifier le code.', 'examples' => ['liste les campagnes', 'combien de users', 'donne moi les apis du projet']],
+            ['key' => 'api_credentials', 'description' => 'L\'utilisateur donne/partage des credentials: cle API, token, endpoint, URL d\'API, secret. Il veut les stocker, pas coder.', 'examples' => ['voici la cle pk_xxx et le endpoint https://...', 'utilise cette API key: xxx', 'le token c\'est abc123']],
+            // Dev tasks (code changes)
+            ['key' => 'dev_task', 'description' => 'Tache de developpement: modifier code, fix bug, ajouter feature, refactoring. Necessite modification de code.', 'examples' => ['fix le bug du login', 'ajoute un bouton', 'refactore le controller']],
+        ];
+    }
+
     public function handle(AgentContext $context): AgentResult
     {
         // Check pending context first (list selection, ambiguous project, etc.)
@@ -110,14 +138,29 @@ class DevAgent extends BaseAgent
             return $this->handleTaskValidation($awaitingProject, $context);
         }
 
-        // Check for smart commands before treating as dev request
-        $command = $this->detectSmartCommand($context->body, $context);
-        if ($command) {
-            return $this->handleSmartCommand($command, $context);
+        // Intent classification — replaces detectSmartCommand + handleDevRequest cascade
+        $activeProjectHint = '';
+        if ($context->session->active_project_id) {
+            $ap = Project::find($context->session->active_project_id);
+            if ($ap) {
+                $activeProjectHint = "PROJET ACTIF: {$ap->name}\n";
+            }
         }
 
-        // Process new dev request
-        return $this->handleDevRequest($context);
+        $classified = $this->classifyIntent($context, $activeProjectHint);
+
+        $this->log($context, 'Intent classified', [
+            'intent' => $classified['intent'],
+            'confidence' => $classified['confidence'],
+            'args' => $classified['args'],
+        ]);
+
+        // Try intent dispatch
+        $result = $this->dispatchIntent($classified, $context);
+        if ($result) return $result;
+
+        // Fallback: treat as dev task
+        return $this->handleIntentDevTask($classified['args'], $context);
     }
 
     public function handlePendingContext(AgentContext $context, array $pendingContext): ?AgentResult
@@ -557,124 +600,149 @@ PROMPT;
         return json_decode($clean, true);
     }
 
-    // ── Smart Commands Detection (LLM-based) ─────────────────────────
+    // ── Intent Handlers ──────────────────────────────────────────────
 
-    private function detectSmartCommand(string $body, AgentContext $context): ?array
+    private function requireGitlab(AgentContext $context): ?AgentResult
     {
-        // Inject active project context so Claude defaults to the right project
-        $activeProjectHint = '';
-        if ($context->session->active_project_id) {
-            $ap = Project::find($context->session->active_project_id);
-            if ($ap) {
-                $activeProjectHint = "\nPROJET ACTIF: {$ap->name}";
-            }
-        }
-
-        $response = $this->claude->chat(
-            "Message: \"{$body}\"{$activeProjectHint}",
-            'claude-haiku-4-5-20251001',
-            <<<'PROMPT'
-Tu analyses un message envoye a un agent de developpement. Determine si c'est une SMART COMMAND (consultation/info GitLab) ou une DEV TASK (tache de code a executer).
-
-SMART COMMANDS DISPONIBLES:
-- list_gitlab_projects = lister les projets, repos, "mes projets", "quels projets tu as"
-- project_info = selectionner/ouvrir/travailler sur un projet, ou voir info/status/details d'un projet specifique. Utilise cette commande quand l'utilisateur veut CHANGER de projet, switcher, bosser sur un autre projet, passer sur un autre repo.
-- list_branches = voir les branches d'un projet
-- list_mrs = voir les merge requests ouvertes
-- pipeline_status = status CI/CD, pipelines
-- recent_commits = derniers commits, historique, log
-- list_issues = issues/tickets/bugs ouverts
-- create_issue = creer un ticket/issue/bug (args: title)
-- search_code = chercher dans le code (args: query)
-- file_tree = arborescence, structure, fichiers d'un projet
-- read_file = lire/afficher un fichier du repo (args: path)
-- compare_branches = comparer/diff entre branches (args: from, to)
-- project_health = bilan de sante, diagnostic projet
-- task_history = historique des taches executees
-- rollback = annuler/revert la derniere modification
-- deploy_status = status de deploiement
-- api_query = l'utilisateur veut interroger/interagir avec l'API live du projet (lister des donnees, voir des entites, stats, etc.) — PAS modifier le code, mais CONSULTER les donnees de l'app en production (args: query = ce qu'il veut savoir)
-
-Si c'est une smart command, reponds en JSON:
-{"command": "nom_commande", "args": {"name": "nom_projet_si_mentionne", ...}}
-
-Si c'est une tache de dev (modifier code, fix bug, ajouter feature) ou si tu n'es pas sur:
-{"command": null}
-
-EXEMPLES:
-- "liste moi les projets dev que tu as" → {"command": "list_gitlab_projects", "args": {}}
-- "mes repos" → {"command": "list_gitlab_projects", "args": {}}
-- "quels projets tu geres" → {"command": "list_gitlab_projects", "args": {}}
-- "status du projet zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
-- "je veux travailler sur invoices" → {"command": "project_info", "args": {"name": "invoices"}}
-- "passe sur le projet padel" → {"command": "project_info", "args": {"name": "padel"}}
-- "bosser sur ginette" → {"command": "project_info", "args": {"name": "ginette"}}
-- "switch sur zeniclaw" → {"command": "project_info", "args": {"name": "zeniclaw"}}
-- "les MRs ouvertes sur mon-app" → {"command": "list_mrs", "args": {"name": "mon-app"}}
-- "la CI passe ?" → {"command": "pipeline_status", "args": {}}
-- "liste les campagnes" → {"command": "api_query", "args": {"query": "lister les campagnes"}}
-- "combien de users" → {"command": "api_query", "args": {"query": "compter les utilisateurs"}}
-- "montre moi les commandes recentes" → {"command": "api_query", "args": {"query": "lister les commandes recentes"}}
-- "fix le bug du login" → {"command": null}
-- "ajoute un bouton" → {"command": null}
-
-Reponds UNIQUEMENT en JSON valide.
-PROMPT
-        );
-
-        if (!$response) return null;
-
-        $clean = trim($response);
-        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
-            $clean = $m[1];
-        }
-        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
-            $clean = $m[1];
-        }
-
-        $parsed = json_decode($clean, true);
-        if (!$parsed || empty($parsed['command'])) return null;
-
-        return [
-            'command' => $parsed['command'],
-            'args' => $parsed['args'] ?? [],
-        ];
-    }
-
-    private function handleSmartCommand(array $command, AgentContext $context): AgentResult
-    {
-        $gitlab = $this->getGitlab();
-
-        if (!$gitlab->isConfigured()) {
+        if (!$this->getGitlab()->isConfigured()) {
             $reply = "Le token GitLab n'est pas configure. Ajoute-le dans les settings.";
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
+        return null;
+    }
 
-        $reply = match ($command['command']) {
-            'list_gitlab_projects' => $this->cmdListGitlabProjects($context),
-            'project_info' => $this->cmdProjectInfo($command['args']['name'], $context),
-            'list_branches' => $this->cmdListBranches($command['args']['name'], $context),
-            'list_mrs' => $this->cmdListMRs($command['args']['name'], $context),
-            'pipeline_status' => $this->cmdPipelineStatus($command['args']['name'], $context),
-            'recent_commits' => $this->cmdRecentCommits($command['args']['name'], $context),
-            'list_issues' => $this->cmdListIssues($command['args']['name'], $context),
-            'create_issue' => $this->cmdCreateIssue($command['args']['title'], $context),
-            'search_code' => $this->cmdSearchCode($command['args']['query'], $context),
-            'file_tree' => $this->cmdFileTree($command['args']['name'], $context),
-            'read_file' => $this->cmdReadFile($command['args']['path'], $context),
-            'compare_branches' => $this->cmdCompareBranches($command['args']['from'], $command['args']['to'], $context),
-            'project_health' => $this->cmdProjectHealth($command['args']['name'], $context),
-            'task_history' => $this->cmdTaskHistory($command['args']['name'], $context),
-            'rollback' => $this->cmdRollback($context),
-            'deploy_status' => $this->cmdDeployStatus($command['args']['name'], $context),
-            'api_query' => $this->cmdApiQuery($command['args']['query'] ?? $context->body, $context),
-            default => "Commande non reconnue.",
-        };
-
+    private function gitlabIntent(string $reply, AgentContext $context): AgentResult
+    {
         $this->sendText($context->from, $reply);
-        $this->log($context, "Smart command: {$command['command']}", $command['args']);
         return AgentResult::reply($reply);
+    }
+
+    private function handleIntentListProjects(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdListGitlabProjects($context), $context);
+    }
+
+    private function handleIntentProjectInfo(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdProjectInfo($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentListBranches(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdListBranches($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentListMrs(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdListMRs($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentPipelineStatus(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdPipelineStatus($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentRecentCommits(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdRecentCommits($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentListIssues(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdListIssues($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentCreateIssue(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdCreateIssue($args['title'] ?? '', $context), $context);
+    }
+
+    private function handleIntentSearchCode(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdSearchCode($args['query'] ?? '', $context), $context);
+    }
+
+    private function handleIntentFileTree(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdFileTree($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentReadFile(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdReadFile($args['path'] ?? '', $context), $context);
+    }
+
+    private function handleIntentCompareBranches(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdCompareBranches($args['from'] ?? '', $args['to'] ?? '', $context), $context);
+    }
+
+    private function handleIntentProjectHealth(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdProjectHealth($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentTaskHistory(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdTaskHistory($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentRollback(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdRollback($context), $context);
+    }
+
+    private function handleIntentDeployStatus(array $args, AgentContext $context): AgentResult
+    {
+        if ($err = $this->requireGitlab($context)) return $err;
+        return $this->gitlabIntent($this->cmdDeployStatus($args['name'] ?? '', $context), $context);
+    }
+
+    private function handleIntentApiQuery(array $args, AgentContext $context): AgentResult
+    {
+        $project = $this->findProjectForUser($context);
+        if (!$project) {
+            $reply = "Aucun projet actif. Selectionne d'abord un projet.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+        $reply = $this->runApiAgent($project, $context->body, [], $context);
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, ['action' => 'api_query']);
+    }
+
+    private function handleIntentApiCredentials(array $args, AgentContext $context): AgentResult
+    {
+        $project = $this->findProjectForUser($context);
+        if (!$project) {
+            $reply = "Aucun projet actif. Selectionne d'abord un projet.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+        $reply = $this->runApiAgent($project, $context->body, [], $context);
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, ['action' => 'api_credentials']);
+    }
+
+    private function handleIntentDevTask(array $args, AgentContext $context): AgentResult
+    {
+        return $this->handleDevRequest($context);
     }
 
     // ── Smart Command Implementations ───────────────────────────────
@@ -1305,19 +1373,6 @@ PROMPT
             return $this->createPendingProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
         }
 
-        // Detect credentials in message — store immediately and run API agent
-        // instead of creating a new awaiting_validation project
-        if ($this->containsCredentials($context->body)) {
-            $project = Project::where('name', $repoName)
-                ->whereIn('status', ['approved', 'in_progress', 'completed'])
-                ->first();
-            if ($project) {
-                $reply = $this->runApiAgent($project, $context->body, [], $context);
-                $this->sendText($context->from, $reply);
-                return AgentResult::reply($reply, ['action' => 'api_credentials_stored']);
-            }
-        }
-
         // Autonomy: auto-execute safe read/diagnostic tasks without confirmation
         if ($context->autonomy === 'auto') {
             return $this->createAndLaunchAutoProject($context, $repoName, $gitlabUrl, $description, $gitlabData);
@@ -1588,26 +1643,6 @@ PROMPT
             ->whereNotIn('status', ['rejected'])
             ->orderByDesc('created_at')
             ->first();
-    }
-
-    /**
-     * Detect if message contains API credentials (keys, tokens, endpoints).
-     * Used to skip the "awaiting_validation" flow and go straight to API agent.
-     */
-    private function containsCredentials(string $body): bool
-    {
-        $lower = mb_strtolower($body);
-
-        // Must contain something that looks like a key/token
-        $hasKey = (bool) preg_match('/\b(pk_|sk_|api[_-]?key|token|bearer|secret|key)\S{8,}/i', $body);
-
-        // Or explicit credential-giving language
-        $hasGivingLang = (bool) preg_match('/\b(voici|voila|utilise|prends?|la\s+cl[eé]|le\s+token|l\'?endpoint|l\'?api)\b/iu', $body);
-
-        // Must contain a URL (endpoint)
-        $hasUrl = (bool) preg_match('/https?:\/\/\S+/i', $body);
-
-        return ($hasKey && $hasUrl) || ($hasGivingLang && ($hasKey || $hasUrl));
     }
 
     private function detectGitlabUrl(string $body): ?array

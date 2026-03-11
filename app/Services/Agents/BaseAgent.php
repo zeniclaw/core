@@ -208,6 +208,113 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
         return implode("\n\n", $parts);
     }
 
+    // ── Intent Classifier ──────────────────────────────────────────
+
+    /**
+     * Define supported intents for this agent.
+     * Override in subclasses. Each intent has: key, description, examples.
+     * Return empty array to skip intent classification (legacy behavior).
+     */
+    public function intents(): array
+    {
+        return [];
+    }
+
+    /**
+     * Classify user message intent using Haiku LLM.
+     * Returns ['intent' => string, 'args' => array, 'confidence' => int].
+     */
+    protected function classifyIntent(AgentContext $context, string $extraContext = ''): array
+    {
+        $intents = $this->intents();
+        if (empty($intents)) {
+            return ['intent' => 'default', 'args' => [], 'confidence' => 0];
+        }
+
+        // Build intent descriptions for the prompt
+        $intentList = '';
+        foreach ($intents as $intent) {
+            $intentList .= "- {$intent['key']}: {$intent['description']}\n";
+            if (!empty($intent['examples'])) {
+                foreach ($intent['examples'] as $ex) {
+                    $intentList .= "  ex: \"{$ex}\"\n";
+                }
+            }
+        }
+
+        $prompt = <<<PROMPT
+Tu classes le message d'un utilisateur en une INTENTION parmi celles disponibles.
+
+INTENTIONS DISPONIBLES:
+{$intentList}
+{$extraContext}
+Reponds UNIQUEMENT en JSON valide:
+{"intent": "nom_intent", "args": {}, "confidence": 85}
+
+- "args": parametres extraits du message (nom de projet, query, etc.)
+- "confidence": 0-100, ta certitude
+
+Si aucune intention ne correspond bien, utilise "default" avec confidence basse.
+
+JSON UNIQUEMENT.
+PROMPT;
+
+        $response = $this->claude->chat(
+            "Message: \"{$context->body}\"",
+            'claude-haiku-4-5-20251001',
+            $prompt
+        );
+
+        if (!$response) {
+            return ['intent' => 'default', 'args' => [], 'confidence' => 0];
+        }
+
+        $clean = trim($response);
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+        if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        $parsed = json_decode($clean, true);
+        if (!$parsed || empty($parsed['intent'])) {
+            return ['intent' => 'default', 'args' => [], 'confidence' => 0];
+        }
+
+        return [
+            'intent' => $parsed['intent'],
+            'args' => $parsed['args'] ?? [],
+            'confidence' => (int) ($parsed['confidence'] ?? 50),
+        ];
+    }
+
+    /**
+     * Dispatch to handler based on classified intent.
+     * Convention: intent "api_query" calls handleIntentApiQuery($args, $context).
+     * Returns null if no handler found (falls back to default behavior).
+     */
+    protected function dispatchIntent(array $classified, AgentContext $context): ?AgentResult
+    {
+        $intent = $classified['intent'];
+        if ($intent === 'default') {
+            return null;
+        }
+
+        // Convert snake_case intent to camelCase method name
+        $method = 'handleIntent' . str_replace('_', '', ucwords($intent, '_'));
+
+        if (method_exists($this, $method)) {
+            $this->log($context, "Intent classified: {$intent}", [
+                'confidence' => $classified['confidence'],
+                'args' => $classified['args'],
+            ]);
+            return $this->$method($classified['args'], $context);
+        }
+
+        return null;
+    }
+
     // ── ToolProviderInterface ──────────────────────────────────────
 
     /**
