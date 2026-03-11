@@ -1081,4 +1081,152 @@ HTML;
 
         return null;
     }
+
+    // ── ToolProviderInterface ──────────────────────────────────────
+
+    public function tools(): array
+    {
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'create_document',
+                'description' => 'Create and send a document file (XLSX, CSV, PDF, DOCX) to the user. Use this when the user asks to create a file, spreadsheet, report, or export data. You MUST provide the data — collect it first via web_search or other tools if needed.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'format' => ['type' => 'string', 'enum' => ['xlsx', 'csv', 'pdf', 'docx'], 'description' => 'File format'],
+                        'title' => ['type' => 'string', 'description' => 'Document title (used as filename and header)'],
+                        'headers' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                            'description' => 'Column headers for the table (e.g. ["Ville", "Temperature", "Conditions"])',
+                        ],
+                        'rows' => [
+                            'type' => 'array',
+                            'items' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                            'description' => 'Data rows as arrays of strings (e.g. [["Paris", "18°C", "Ensoleillé"], ["Lyon", "15°C", "Nuageux"]])',
+                        ],
+                    ],
+                    'required' => ['format', 'title', 'headers', 'rows'],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        if ($name !== 'create_document') {
+            return parent::executeTool($name, $input, $context);
+        }
+
+        $format = $input['format'] ?? 'xlsx';
+        $title = $input['title'] ?? 'Document';
+        $headers = $input['headers'] ?? [];
+        $rows = $input['rows'] ?? [];
+
+        if (empty($headers) || empty($rows)) {
+            return json_encode(['error' => 'headers and rows are required']);
+        }
+
+        $slug = preg_replace('/[^a-z0-9]+/', '-', mb_strtolower($title));
+        $filename = $slug . '.' . $format;
+        $storagePath = storage_path('app/public/documents/' . $filename);
+
+        $dir = dirname($storagePath);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+
+        try {
+            if (in_array($format, ['xlsx', 'csv'])) {
+                $spreadsheet = new Spreadsheet();
+                $sheet = $spreadsheet->getActiveSheet();
+                $sheet->setTitle(mb_substr($title, 0, 31));
+
+                foreach ($headers as $col => $header) {
+                    $letter = chr(65 + $col);
+                    $sheet->setCellValue("{$letter}1", $header);
+                    $sheet->getStyle("{$letter}1")->getFont()->setBold(true);
+                }
+
+                foreach ($rows as $rowIdx => $row) {
+                    foreach ($row as $col => $value) {
+                        $letter = chr(65 + $col);
+                        $sheet->setCellValue("{$letter}" . ($rowIdx + 2), $value);
+                    }
+                }
+
+                foreach (range(0, count($headers) - 1) as $col) {
+                    $sheet->getColumnDimension(chr(65 + $col))->setAutoSize(true);
+                }
+
+                if ($format === 'xlsx') {
+                    $writer = new Xlsx($spreadsheet);
+                } else {
+                    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Csv($spreadsheet);
+                }
+                $writer->save($storagePath);
+            } elseif ($format === 'pdf') {
+                // Use dompdf for PDF
+                $html = '<h1>' . e($title) . '</h1><table border="1" cellpadding="5"><tr>';
+                foreach ($headers as $h) {
+                    $html .= '<th>' . e($h) . '</th>';
+                }
+                $html .= '</tr>';
+                foreach ($rows as $row) {
+                    $html .= '<tr>';
+                    foreach ($row as $val) {
+                        $html .= '<td>' . e($val) . '</td>';
+                    }
+                    $html .= '</tr>';
+                }
+                $html .= '</table>';
+
+                $options = new \Dompdf\Options();
+                $options->set('isRemoteEnabled', true);
+                $dompdf = new \Dompdf\Dompdf($options);
+                $dompdf->loadHtml($html);
+                $dompdf->render();
+                file_put_contents($storagePath, $dompdf->output());
+            } elseif ($format === 'docx') {
+                $phpWord = new \PhpOffice\PhpWord\PhpWord();
+                $section = $phpWord->addSection();
+                $section->addTitle($title, 1);
+                $table = $section->addTable();
+                $table->addRow();
+                foreach ($headers as $h) {
+                    $table->addCell(2000)->addText($h, ['bold' => true]);
+                }
+                foreach ($rows as $row) {
+                    $table->addRow();
+                    foreach ($row as $val) {
+                        $table->addCell(2000)->addText($val);
+                    }
+                }
+                $writer = \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007');
+                $writer->save($storagePath);
+            } else {
+                return json_encode(['error' => "Format '{$format}' not supported."]);
+            }
+
+            $url = url("storage/documents/{$filename}");
+            $whatsapp = new \App\Services\WhatsAppService();
+            $whatsapp->sendDocument($context->from, $url, $filename, $title);
+
+            return json_encode([
+                'success' => true,
+                'filename' => $filename,
+                'format' => $format,
+                'rows_count' => count($rows),
+                'columns_count' => count($headers),
+                'url' => $url,
+                'message' => "Document '{$title}' created and sent ({$format}, " . count($rows) . " rows).",
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('[create_document] Error: ' . $e->getMessage());
+            return json_encode(['error' => 'Document creation failed: ' . $e->getMessage()]);
+        }
+    }
 }

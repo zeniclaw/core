@@ -1051,4 +1051,238 @@ PROMPT;
 
         return $this->sendReply($context, $reply);
     }
+
+    // ── ToolProviderInterface ──────────────────────────────────────
+
+    public function tools(): array
+    {
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'web_search',
+                'description' => 'Search the web for real-time information, news, definitions, prices, weather, etc. Use this when the user asks about current events, facts you don\'t know, or anything that requires up-to-date information.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'The search query (e.g. "meteo Paris", "derniere version Laravel", "prix bitcoin")'],
+                        'type' => ['type' => 'string', 'enum' => ['web', 'news'], 'description' => 'Search type: "web" for general, "news" for current events'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+            [
+                'name' => 'web_fetch',
+                'description' => 'Fetch and read the full text content of a web page URL. Use this when you need to read an article, documentation, or any specific page. Returns the extracted text content. For learning/memorizing a site, combine with teach_skill to save what you learn.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'url' => ['type' => 'string', 'description' => 'The full URL to fetch (e.g. "https://example.com/page")'],
+                        'extract_links' => ['type' => 'boolean', 'description' => 'Also extract links from the page (useful to discover sub-pages of a site)'],
+                    ],
+                    'required' => ['url'],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'web_search' => $this->toolWebSearch($input, $context),
+            'web_fetch' => $this->toolWebFetch($input, $context),
+            default => parent::executeTool($name, $input, $context),
+        };
+    }
+
+    private function toolWebSearch(array $input, AgentContext $context): string
+    {
+        $query = $input['query'] ?? '';
+        if (!$query) {
+            return json_encode(['error' => 'Missing query parameter']);
+        }
+
+        $results = self::searchFor(
+            $query,
+            $context->routedAgent ?? 'chat',
+            $context->agent->id,
+            $context->from,
+            5
+        );
+
+        if ($results === null) {
+            return json_encode(['error' => 'Web search failed — API key may not be configured. Go to settings and add brave_search_api_key.']);
+        }
+
+        if (empty($results)) {
+            return json_encode(['results' => [], 'message' => 'No results found']);
+        }
+
+        return json_encode(['results' => $results, 'count' => count($results)]);
+    }
+
+    private function toolWebFetch(array $input, AgentContext $context): string
+    {
+        $url = $input['url'] ?? '';
+        $extractLinks = $input['extract_links'] ?? false;
+
+        if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) {
+            return json_encode(['error' => 'Invalid or missing URL']);
+        }
+
+        try {
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'User-Agent' => 'ZeniClaw/1.0 (WhatsApp AI Assistant)',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language' => 'fr-FR,fr;q=0.9,en;q=0.8',
+                ])
+                ->get($url);
+
+            if (!$response->successful()) {
+                return json_encode(['error' => "HTTP {$response->status()} fetching {$url}"]);
+            }
+
+            $html = $response->body();
+            $contentType = $response->header('Content-Type') ?? '';
+
+            // If not HTML, return raw (truncated)
+            if (!str_contains($contentType, 'html')) {
+                return json_encode([
+                    'url' => $url,
+                    'content_type' => $contentType,
+                    'text' => mb_substr($html, 0, 8000),
+                    'truncated' => mb_strlen($html) > 8000,
+                ]);
+            }
+
+            // Extract text content from HTML
+            $text = $this->extractTextFromHtml($html);
+            $links = $extractLinks ? $this->extractLinksFromHtml($html, $url) : [];
+
+            // Extract page title
+            $title = '';
+            if (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $html, $m)) {
+                $title = trim(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+            }
+
+            // Extract meta description
+            $description = '';
+            if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']|<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']/i', $html, $m)) {
+                $description = trim(html_entity_decode($m[1] ?: $m[2], ENT_QUOTES, 'UTF-8'));
+            }
+
+            // Truncate text to ~8000 chars to fit in context
+            $truncated = mb_strlen($text) > 8000;
+            $text = mb_substr($text, 0, 8000);
+
+            $result = [
+                'url' => $url,
+                'title' => $title,
+                'description' => $description,
+                'text' => $text,
+                'char_count' => mb_strlen($text),
+                'truncated' => $truncated,
+            ];
+
+            if ($extractLinks && !empty($links)) {
+                $result['links'] = array_slice($links, 0, 50);
+                $result['link_count'] = count($links);
+            }
+
+            // Log API usage
+            \App\Models\ApiUsageLog::create([
+                'agent_id' => $context->agent->id,
+                'api_name' => 'web_fetch',
+                'endpoint' => $url,
+                'method' => 'GET',
+                'caller_agent' => $context->routedAgent ?? 'chat',
+                'requester_phone' => $context->from,
+                'response_status' => $response->status(),
+                'result_count' => mb_strlen($text),
+            ]);
+
+            return json_encode($result);
+        } catch (\Exception $e) {
+            Log::warning('[web_fetch] Error fetching URL', ['url' => $url, 'error' => $e->getMessage()]);
+            return json_encode(['error' => 'Failed to fetch URL: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Extract readable text from HTML, removing scripts, styles, nav, etc.
+     */
+    private function extractTextFromHtml(string $html): string
+    {
+        // Remove scripts, styles, nav, footer, header, aside
+        $html = preg_replace('/<(script|style|nav|footer|header|aside|noscript)[^>]*>.*?<\/\1>/si', '', $html);
+
+        // Remove HTML comments
+        $html = preg_replace('/<!--.*?-->/s', '', $html);
+
+        // Convert block elements to newlines
+        $html = preg_replace('/<\/(p|div|li|h[1-6]|tr|blockquote|section|article)>/i', "\n", $html);
+        $html = preg_replace('/<(br|hr)\s*\/?>/i', "\n", $html);
+        $html = preg_replace('/<li[^>]*>/i', "\n- ", $html);
+        $html = preg_replace('/<h([1-6])[^>]*>/i', "\n## ", $html);
+
+        // Strip remaining tags
+        $text = strip_tags($html);
+
+        // Decode HTML entities
+        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+
+        // Clean up whitespace
+        $text = preg_replace('/[ \t]+/', ' ', $text);
+        $text = preg_replace('/\n\s*\n\s*\n+/', "\n\n", $text);
+        $text = trim($text);
+
+        return $text;
+    }
+
+    /**
+     * Extract links from HTML, resolving relative URLs.
+     */
+    private function extractLinksFromHtml(string $html, string $baseUrl): array
+    {
+        $links = [];
+        $baseParts = parse_url($baseUrl);
+        $baseHost = ($baseParts['scheme'] ?? 'https') . '://' . ($baseParts['host'] ?? '');
+
+        if (preg_match_all('/<a[^>]+href=["\']([^"\'#]+)["\'][^>]*>([^<]*)</i', $html, $matches, PREG_SET_ORDER)) {
+            $seen = [];
+            foreach ($matches as $match) {
+                $href = trim($match[1]);
+                $label = trim(strip_tags($match[2]));
+
+                // Skip non-http links
+                if (str_starts_with($href, 'mailto:') || str_starts_with($href, 'tel:') || str_starts_with($href, 'javascript:')) {
+                    continue;
+                }
+
+                // Resolve relative URLs
+                if (str_starts_with($href, '/')) {
+                    $href = $baseHost . $href;
+                } elseif (!str_starts_with($href, 'http')) {
+                    $href = rtrim($baseUrl, '/') . '/' . $href;
+                }
+
+                // Deduplicate
+                if (isset($seen[$href])) continue;
+                $seen[$href] = true;
+
+                // Only keep same-domain links if extracting site structure
+                $linkHost = parse_url($href, PHP_URL_HOST);
+                $sameOrigin = $linkHost === ($baseParts['host'] ?? '');
+
+                if ($label || $sameOrigin) {
+                    $links[] = [
+                        'url' => $href,
+                        'label' => $label ?: null,
+                        'same_origin' => $sameOrigin,
+                    ];
+                }
+            }
+        }
+
+        return $links;
+    }
 }

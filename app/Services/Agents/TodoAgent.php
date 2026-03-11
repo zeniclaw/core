@@ -1913,4 +1913,219 @@ PROMPT;
 
         return $decoded;
     }
+
+    /* ─── ToolProviderInterface ─────────────────────────────────────── */
+
+    public function tools(): array
+    {
+        $tz = \App\Models\AppSetting::timezone();
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'add_todos',
+                'description' => 'Add one or more tasks to the user\'s todo list.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'List of task titles to add'],
+                        'list_name' => ['type' => 'string', 'description' => 'Name of the list (null for default list)'],
+                        'priority' => ['type' => 'string', 'enum' => ['high', 'normal', 'low'], 'description' => 'Priority level'],
+                        'due_at' => ['type' => 'string', 'description' => "Deadline in YYYY-MM-DD HH:MM format ({$tz})"],
+                        'category' => ['type' => 'string', 'description' => 'Category name'],
+                    ],
+                    'required' => ['items'],
+                ],
+            ],
+            [
+                'name' => 'list_todos',
+                'description' => 'List all todos for the user, optionally filtered by list name.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'list_name' => ['type' => 'string', 'description' => 'Filter by list name (null for all)'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'check_todos',
+                'description' => 'Mark one or more todos as done by their position numbers.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to check (1-based)'],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
+                    ],
+                    'required' => ['items'],
+                ],
+            ],
+            [
+                'name' => 'uncheck_todos',
+                'description' => 'Mark one or more todos as not done by their position numbers.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to uncheck (1-based)'],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
+                    ],
+                    'required' => ['items'],
+                ],
+            ],
+            [
+                'name' => 'delete_todos',
+                'description' => 'Delete one or more todos by their position numbers.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Position numbers to delete (1-based)'],
+                        'list_name' => ['type' => 'string', 'description' => 'Scope to a specific list'],
+                    ],
+                    'required' => ['items'],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'add_todos' => $this->toolAddTodos($input, $context),
+            'list_todos' => $this->toolListTodos($input, $context),
+            'check_todos' => $this->toolCheckTodos($input, $context),
+            'uncheck_todos' => $this->toolUncheckTodos($input, $context),
+            'delete_todos' => $this->toolDeleteTodos($input, $context),
+            default => parent::executeTool($name, $input, $context),
+        };
+    }
+
+    private function toolGetTodos(AgentContext $context, ?string $listName = null)
+    {
+        $query = Todo::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderByRaw("CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            ->orderBy('id');
+
+        $todos = $query->get();
+
+        if ($listName !== null) {
+            $todos = $todos->filter(fn($t) => strtolower($t->list_name ?? '') === strtolower($listName))->values();
+        }
+
+        return $todos;
+    }
+
+    private function toolAddTodos(array $input, AgentContext $context): string
+    {
+        $items = $input['items'] ?? [];
+        $listName = $input['list_name'] ?? null;
+        $priority = $input['priority'] ?? 'normal';
+        $dueAt = $input['due_at'] ?? null;
+        $category = $input['category'] ?? null;
+
+        $created = [];
+        foreach ($items as $title) {
+            $data = [
+                'agent_id' => $context->agent->id,
+                'requester_phone' => $context->from,
+                'requester_name' => $context->senderName,
+                'list_name' => $listName,
+                'title' => $title,
+                'category' => $category,
+                'priority' => in_array($priority, ['high', 'normal', 'low']) ? $priority : 'normal',
+            ];
+
+            if ($dueAt) {
+                try {
+                    $data['due_at'] = Carbon::parse($dueAt, AppSetting::timezone())->utc();
+                } catch (\Exception $e) {
+                    // ignore
+                }
+            }
+
+            Todo::create($data);
+            $created[] = $title;
+        }
+
+        return json_encode(['created' => $created, 'list_name' => $listName, 'count' => count($created)]);
+    }
+
+    private function toolListTodos(array $input, AgentContext $context): string
+    {
+        $listName = $input['list_name'] ?? null;
+        $todos = $this->toolGetTodos($context, $listName);
+
+        if ($todos->isEmpty()) {
+            return json_encode(['todos' => [], 'message' => $listName ? "La liste \"{$listName}\" est vide." : 'Aucun todo.']);
+        }
+
+        $list = [];
+        foreach ($todos->values() as $i => $todo) {
+            $list[] = [
+                'number' => $i + 1,
+                'title' => $todo->title,
+                'is_done' => $todo->is_done,
+                'list_name' => $todo->list_name,
+                'priority' => $todo->priority,
+                'category' => $todo->category,
+                'due_at' => $todo->due_at ? $todo->due_at->copy()->timezone(AppSetting::timezone())->format('d/m/Y') : null,
+            ];
+        }
+
+        return json_encode(['todos' => $list, 'list_name' => $listName]);
+    }
+
+    private function toolCheckTodos(array $input, AgentContext $context): string
+    {
+        $listName = $input['list_name'] ?? null;
+        $todos = $this->toolGetTodos($context, $listName);
+        $checked = [];
+
+        foreach ($input['items'] as $num) {
+            $index = (int) $num - 1;
+            $todo = $todos->values()[$index] ?? null;
+            if ($todo) {
+                $todo->update(['is_done' => true]);
+                $checked[] = $todo->title;
+            }
+        }
+
+        return json_encode(['checked' => $checked, 'count' => count($checked)]);
+    }
+
+    private function toolUncheckTodos(array $input, AgentContext $context): string
+    {
+        $listName = $input['list_name'] ?? null;
+        $todos = $this->toolGetTodos($context, $listName);
+        $unchecked = [];
+
+        foreach ($input['items'] as $num) {
+            $index = (int) $num - 1;
+            $todo = $todos->values()[$index] ?? null;
+            if ($todo) {
+                $todo->update(['is_done' => false]);
+                $unchecked[] = $todo->title;
+            }
+        }
+
+        return json_encode(['unchecked' => $unchecked, 'count' => count($unchecked)]);
+    }
+
+    private function toolDeleteTodos(array $input, AgentContext $context): string
+    {
+        $listName = $input['list_name'] ?? null;
+        $todos = $this->toolGetTodos($context, $listName);
+        $deleted = [];
+
+        foreach ($input['items'] as $num) {
+            $index = (int) $num - 1;
+            $todo = $todos->values()[$index] ?? null;
+            if ($todo) {
+                if ($todo->reminder_id && $todo->reminder) {
+                    $todo->reminder->delete();
+                }
+                $deleted[] = $todo->title;
+                $todo->delete();
+            }
+        }
+
+        return json_encode(['deleted' => $deleted, 'count' => count($deleted)]);
+    }
 }

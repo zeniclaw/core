@@ -1395,4 +1395,158 @@ PROMPT;
 
         return json_decode($clean, true);
     }
+
+    // ── ToolProviderInterface ──────────────────────────────────────
+
+    public function tools(): array
+    {
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'switch_project',
+                'description' => 'Switch the active project for the user.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'project_name' => ['type' => 'string', 'description' => 'Name or partial name of the project to switch to'],
+                    ],
+                    'required' => ['project_name'],
+                ],
+            ],
+            [
+                'name' => 'list_projects',
+                'description' => 'List all projects available to the user.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'show_archived' => ['type' => 'boolean', 'description' => 'Include archived projects'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'project_stats',
+                'description' => 'Get statistics for a project (tasks completed, in progress, etc.).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'project_name' => ['type' => 'string', 'description' => 'Project name (null for active project)'],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'switch_project' => $this->toolSwitchProject($input, $context),
+            'list_projects' => $this->toolListProjects($input, $context),
+            'project_stats' => $this->toolProjectStats($input, $context),
+            default => parent::executeTool($name, $input, $context),
+        };
+    }
+
+    private function toolSwitchProject(array $input, AgentContext $context): string
+    {
+        $name = $input['project_name'];
+
+        $projects = Project::whereIn('status', ['approved', 'in_progress', 'completed'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        $match = null;
+
+        foreach ($projects as $project) {
+            if (mb_stripos($project->name, $name) !== false) {
+                $match = $project;
+                break;
+            }
+        }
+
+        if (!$match) {
+            foreach ($projects as $project) {
+                $slug = basename(parse_url($project->gitlab_url, PHP_URL_PATH) ?? '');
+                $slug = str_replace('.git', '', $slug);
+                if ($slug && mb_stripos($slug, $name) !== false) {
+                    $match = $project;
+                    break;
+                }
+            }
+        }
+
+        if (!$match) {
+            $available = $projects->map(fn($p) => $p->name)->implode(', ');
+            return json_encode(['error' => "Project \"{$name}\" not found.", 'available_projects' => $available]);
+        }
+
+        $context->session->update(['active_project_id' => $match->id]);
+
+        return json_encode([
+            'success' => true,
+            'project_name' => $match->name,
+            'project_id' => $match->id,
+            'gitlab_url' => $match->gitlab_url,
+        ]);
+    }
+
+    private function toolListProjects(array $input, AgentContext $context): string
+    {
+        $showArchived = $input['show_archived'] ?? false;
+
+        $statuses = ['approved', 'in_progress', 'completed'];
+        if ($showArchived) {
+            $statuses[] = 'archived';
+        }
+
+        $projects = Project::whereIn('status', $statuses)
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        $activeId = $context->session->active_project_id;
+
+        $list = [];
+        foreach ($projects as $p) {
+            $list[] = [
+                'name' => $p->name,
+                'status' => $p->status,
+                'gitlab_url' => $p->gitlab_url,
+                'is_active' => $p->id === $activeId,
+                'task_count' => $p->subAgents()->where('status', 'completed')->count(),
+            ];
+        }
+
+        return json_encode(['projects' => $list]);
+    }
+
+    private function toolProjectStats(array $input, AgentContext $context): string
+    {
+        $name = $input['project_name'] ?? null;
+        $project = null;
+
+        if ($name) {
+            $project = Project::whereIn('status', ['approved', 'in_progress', 'completed'])
+                ->where('name', 'ilike', "%{$name}%")
+                ->first();
+        }
+
+        if (!$project && $context->session->active_project_id) {
+            $project = Project::find($context->session->active_project_id);
+        }
+
+        if (!$project) {
+            return json_encode(['error' => 'No project found. Specify a project name or switch to one first.']);
+        }
+
+        $subAgents = $project->subAgents()->get();
+
+        return json_encode([
+            'project' => $project->name,
+            'gitlab_url' => $project->gitlab_url,
+            'total_tasks' => $subAgents->count(),
+            'completed' => $subAgents->where('status', 'completed')->count(),
+            'failed' => $subAgents->where('status', 'failed')->count(),
+            'running' => $subAgents->where('status', 'running')->count(),
+            'pending' => $subAgents->whereIn('status', ['queued', 'pending'])->count(),
+        ]);
+    }
 }

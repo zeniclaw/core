@@ -319,6 +319,12 @@ class ChatAgent extends BaseAgent
             $systemPrompt .= "\n\n" . $context->memoryContext;
         }
 
+        // Inject learned skills (persistent agent competences)
+        $skills = $this->getSkillsForPrompt($context);
+        if ($skills) {
+            $systemPrompt .= "\n\n" . $skills;
+        }
+
         return $systemPrompt;
     }
 

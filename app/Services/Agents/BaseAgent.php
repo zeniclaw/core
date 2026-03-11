@@ -11,7 +11,7 @@ use App\Services\ConversationMemoryService;
 use App\Services\PreferencesManager;
 use Illuminate\Support\Facades\Http;
 
-abstract class BaseAgent implements AgentInterface
+abstract class BaseAgent implements AgentInterface, ToolProviderInterface
 {
     protected string $wahaBase = 'http://waha:3000';
     protected string $wahaApiKey = 'zeniclaw-waha-2026';
@@ -206,5 +206,132 @@ abstract class BaseAgent implements AgentInterface
         }
 
         return implode("\n\n", $parts);
+    }
+
+    // ── ToolProviderInterface ──────────────────────────────────────
+
+    /**
+     * Base skill tools available to ALL agents.
+     * Subclasses override and call parent::tools() + their own.
+     */
+    public function tools(): array
+    {
+        return [
+            [
+                'name' => 'teach_skill',
+                'description' => 'Enseigner une nouvelle competence/instruction a cet agent. L\'agent retiendra cette information pour toutes les conversations futures. Utiliser quand l\'utilisateur dit "retiens que...", "apprends que...", "souviens-toi que...", "a l\'avenir...".',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'skill_key' => ['type' => 'string', 'description' => 'Identifiant unique court en snake_case (ex: "format_factures", "langue_reponse", "style_email")'],
+                        'title' => ['type' => 'string', 'description' => 'Titre court de la competence (ex: "Format des factures", "Langue de reponse")'],
+                        'instructions' => ['type' => 'string', 'description' => 'Instructions detaillees que l\'agent doit retenir et appliquer'],
+                        'examples' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Exemples optionnels d\'utilisation'],
+                    ],
+                    'required' => ['skill_key', 'title', 'instructions'],
+                ],
+            ],
+            [
+                'name' => 'list_skills',
+                'description' => 'Lister toutes les competences apprises par cet agent. Utiliser quand l\'utilisateur demande "qu\'est-ce que tu sais ?", "tes competences", "qu\'as-tu retenu ?".',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => (object) [],
+                ],
+            ],
+            [
+                'name' => 'forget_skill',
+                'description' => 'Oublier/supprimer une competence apprise. Utiliser quand l\'utilisateur dit "oublie que...", "supprime la competence...".',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'skill_key' => ['type' => 'string', 'description' => 'Identifiant de la competence a oublier'],
+                    ],
+                    'required' => ['skill_key'],
+                ],
+            ],
+        ];
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'teach_skill' => $this->baseTeachSkill($input, $context),
+            'list_skills' => $this->baseListSkills($context),
+            'forget_skill' => $this->baseForgetSkill($input, $context),
+            default => null,
+        };
+    }
+
+    private function baseTeachSkill(array $input, AgentContext $context): string
+    {
+        $skill = \App\Models\AgentSkill::teach(
+            agentId: $context->agent->id,
+            subAgent: $this->name(),
+            skillKey: $input['skill_key'],
+            title: $input['title'],
+            instructions: $input['instructions'],
+            examples: $input['examples'] ?? null,
+            taughtBy: $context->from,
+        );
+
+        return json_encode([
+            'success' => true,
+            'skill_key' => $skill->skill_key,
+            'title' => $skill->title,
+            'message' => "Competence '{$skill->title}' enregistree. Je m'en souviendrai pour nos prochaines conversations.",
+        ]);
+    }
+
+    private function baseListSkills(AgentContext $context): string
+    {
+        $skills = \App\Models\AgentSkill::forAgent($context->agent->id, $this->name());
+
+        if ($skills->isEmpty()) {
+            // Also check global skills (sub_agent = '*')
+            $skills = \App\Models\AgentSkill::allForAgent($context->agent->id);
+        }
+
+        if ($skills->isEmpty()) {
+            return json_encode(['skills' => [], 'message' => 'Aucune competence apprise pour le moment.']);
+        }
+
+        $list = $skills->map(fn($s) => [
+            'skill_key' => $s->skill_key,
+            'title' => $s->title,
+            'instructions' => $s->instructions,
+            'sub_agent' => $s->sub_agent,
+            'taught_at' => $s->created_at->format('d/m/Y H:i'),
+        ])->toArray();
+
+        return json_encode(['skills' => $list, 'count' => count($list)]);
+    }
+
+    private function baseForgetSkill(array $input, AgentContext $context): string
+    {
+        $skill = \App\Models\AgentSkill::where('agent_id', $context->agent->id)
+            ->where('sub_agent', $this->name())
+            ->where('skill_key', $input['skill_key'])
+            ->first();
+
+        if (!$skill) {
+            return json_encode(['error' => "Competence '{$input['skill_key']}' non trouvee."]);
+        }
+
+        $title = $skill->title;
+        $skill->update(['active' => false]);
+
+        return json_encode([
+            'success' => true,
+            'message' => "Competence '{$title}' oubliee.",
+        ]);
+    }
+
+    /**
+     * Get learned skills formatted for injection into the system prompt.
+     */
+    protected function getSkillsForPrompt(AgentContext $context): string
+    {
+        return \App\Models\AgentSkill::formatForPrompt($context->agent->id, $this->name());
     }
 }

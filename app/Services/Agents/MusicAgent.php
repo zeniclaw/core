@@ -993,4 +993,124 @@ SYSTEM;
 
         return $parsed;
     }
+
+    // ── ToolProviderInterface ──────────────────────────────────────
+
+    public function tools(): array
+    {
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'search_music',
+                'description' => 'Search for a song, artist, or album on Spotify.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Search query (artist name, song title, album)'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+            [
+                'name' => 'music_recommendations',
+                'description' => 'Get music recommendations based on mood, genre, or activity.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'mood' => ['type' => 'string', 'description' => 'Mood, genre, or activity (e.g. "chill", "workout", "jazz", "triste")'],
+                    ],
+                    'required' => ['mood'],
+                ],
+            ],
+            [
+                'name' => 'search_playlist',
+                'description' => 'Search for playlists on Spotify by theme.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Playlist theme or name'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'search_music' => $this->toolSearchMusic($input),
+            'music_recommendations' => $this->toolMusicRecommendations($input),
+            'search_playlist' => $this->toolSearchPlaylist($input),
+            default => parent::executeTool($name, $input, $context),
+        };
+    }
+
+    private function toolSearchMusic(array $input): string
+    {
+        $data = $this->spotify->searchTrack($input['query'], 'track', 5);
+
+        if (!$data || empty($data['tracks']['items'])) {
+            return json_encode(['results' => [], 'message' => "No results for \"{$input['query']}\"."]);
+        }
+
+        $tracks = [];
+        foreach ($data['tracks']['items'] as $track) {
+            $tracks[] = [
+                'name' => $track['name'],
+                'artists' => implode(', ', array_map(fn($a) => $a['name'], $track['artists'])),
+                'album' => $track['album']['name'] ?? '',
+                'url' => $track['external_urls']['spotify'] ?? '',
+                'duration_ms' => $track['duration_ms'] ?? 0,
+            ];
+        }
+
+        return json_encode(['tracks' => $tracks]);
+    }
+
+    private function toolMusicRecommendations(array $input): string
+    {
+        $genres = $this->spotify->moodToGenres($input['mood']);
+        $seedGenres = implode(',', array_slice($genres, 0, 5));
+
+        $data = $this->spotify->getRecommendations([
+            'seed_genres' => $seedGenres,
+            'limit' => 5,
+        ]);
+
+        if (!$data || empty($data['tracks'])) {
+            return json_encode(['results' => [], 'message' => "No recommendations for \"{$input['mood']}\"."]);
+        }
+
+        $tracks = [];
+        foreach ($data['tracks'] as $track) {
+            $tracks[] = [
+                'name' => $track['name'],
+                'artists' => implode(', ', array_map(fn($a) => $a['name'], $track['artists'])),
+                'url' => $track['external_urls']['spotify'] ?? '',
+            ];
+        }
+
+        return json_encode(['tracks' => $tracks, 'genres' => $genres]);
+    }
+
+    private function toolSearchPlaylist(array $input): string
+    {
+        $data = $this->spotify->searchPlaylist($input['query'], 5);
+
+        if (!$data || empty($data['playlists']['items'])) {
+            return json_encode(['results' => [], 'message' => "No playlists for \"{$input['query']}\"."]);
+        }
+
+        $playlists = [];
+        foreach ($data['playlists']['items'] as $pl) {
+            $playlists[] = [
+                'name' => $pl['name'],
+                'owner' => $pl['owner']['display_name'] ?? 'Spotify',
+                'total_tracks' => $pl['tracks']['total'] ?? 0,
+                'url' => $pl['external_urls']['spotify'] ?? '',
+            ];
+        }
+
+        return json_encode(['playlists' => $playlists]);
+    }
 }

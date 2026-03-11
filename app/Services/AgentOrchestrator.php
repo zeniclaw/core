@@ -6,54 +6,20 @@ use App\Models\AgentLog;
 use App\Models\Project;
 use App\Services\Agents\AgentInterface;
 use App\Services\Agents\AgentResult;
-use App\Services\Agents\AnalysisAgent;
-use App\Services\Agents\ChatAgent;
-use App\Services\Agents\DevAgent;
-use App\Services\Agents\ProjectAgent;
-use App\Services\Agents\ReminderAgent;
+use App\Services\Agents\BaseAgent;
 use App\Services\Agents\RouterAgent;
-use App\Services\Agents\TodoAgent;
-use App\Services\Agents\MusicAgent;
-use App\Services\Agents\MoodCheckAgent;
-use App\Services\Agents\FinanceAgent;
-use App\Services\Agents\SmartMeetingAgent;
-use App\Services\Agents\HangmanGameAgent;
-use App\Services\Agents\FlashcardAgent;
-use App\Services\Agents\SmartContextAgent;
-use App\Services\Agents\VoiceCommandAgent;
-use App\Services\Agents\CodeReviewAgent;
-use App\Services\Agents\ScreenshotAgent;
-use App\Services\Agents\ContentSummarizerAgent;
-use App\Services\Agents\EventReminderAgent;
-use App\Services\Agents\HabitAgent;
-use App\Services\Agents\PomodoroAgent;
-use App\Services\Agents\DocumentAgent;
-use App\Services\Agents\WebSearchAgent;
-use App\Services\Agents\UserPreferencesAgent;
-use App\Services\Agents\ConversationMemoryAgent;
-use App\Services\Agents\StreamlineAgent;
-use App\Services\Agents\InteractiveQuizAgent;
-use App\Services\Agents\ContentCuratorAgent;
-use App\Services\Agents\ContextAgent;
-use App\Services\Agents\GameMasterAgent;
-use App\Services\Agents\BudgetTrackerAgent;
-use App\Services\Agents\DailyBriefAgent;
-use App\Services\Agents\CollaborativeTaskAgent;
-use App\Services\Agents\RecipeAgent;
-use App\Services\Agents\TimeBlockerAgent;
-use App\Services\Agents\AIAssistantAgent;
+use App\Services\Agents\ToolProviderInterface;
 use App\Models\CollaborativeVote;
 use App\Models\UserAgentAnalytic;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use Illuminate\Support\Facades\Log;
 
 /**
- * AgentOrchestrator v2 — Agentic architecture
+ * AgentOrchestrator v3 — Dynamic agent discovery
  *
- * The ChatAgent now has access to all tools (reminders, todos, projects, music)
- * via the AgenticLoop. Most messages go through ChatAgent which autonomously
- * decides which tools to use. Only DevAgent (code tasks) bypasses the agentic
- * loop since it needs SubAgent execution.
+ * All agents in app/Services/Agents/ that extend BaseAgent are auto-discovered.
+ * Adding a new *Agent.php file is all it takes — no manual registration needed.
+ * Tools are auto-collected from any agent that overrides tools().
  */
 
 class AgentOrchestrator
@@ -64,17 +30,23 @@ class AgentOrchestrator
     private array $agents = [];
     private int $maxHandoffs = 3;
 
+    /** Agents that should NOT be auto-registered (infrastructure, not user-facing) */
+    private const EXCLUDED_AGENTS = [
+        'BaseAgent',
+        'RouterAgent',
+    ];
+
     public function __construct()
     {
         $this->router = new RouterAgent();
         $this->memory = new ConversationMemoryService();
         $this->toolRegistry = new ToolRegistry();
 
-        $this->registerAgents();
+        $this->discoverAgents();
 
-        // Build tool registry from agents implementing ToolProviderInterface
+        // Build tool registry — every agent with tools() is automatically a provider
         foreach ($this->agents as $agent) {
-            if ($agent instanceof Agents\ToolProviderInterface) {
+            if ($agent instanceof ToolProviderInterface && !empty($agent->tools())) {
                 $this->toolRegistry->register($agent);
             }
         }
@@ -83,48 +55,38 @@ class AgentOrchestrator
         $this->router->registerAgents($this->agents);
     }
 
-    private function registerAgents(): void
+    /**
+     * Auto-discover all agents in app/Services/Agents/*Agent.php
+     */
+    private function discoverAgents(): void
     {
-        $agentClasses = [
-            new ChatAgent(),
-            new DevAgent(),
-            new ReminderAgent(),
-            new ProjectAgent(),
-            new AnalysisAgent(),
-            new TodoAgent(),
-            new MusicAgent(),
-            new MoodCheckAgent(),
-            new FinanceAgent(),
-            new SmartMeetingAgent(),
-            new HangmanGameAgent(),
-            new FlashcardAgent(),
-            new SmartContextAgent(),
-            new VoiceCommandAgent(),
-            new CodeReviewAgent(),
-            new ScreenshotAgent(),
-            new ContentSummarizerAgent(),
-            new EventReminderAgent(),
-            new HabitAgent(),
-            new PomodoroAgent(),
-            new DocumentAgent(),
-            new WebSearchAgent(),
-            new UserPreferencesAgent(),
-            new ConversationMemoryAgent(),
-            new StreamlineAgent(),
-            new InteractiveQuizAgent(),
-            new ContentCuratorAgent(),
-            new ContextAgent(),
-            new GameMasterAgent(),
-            new BudgetTrackerAgent(),
-            new DailyBriefAgent(),
-            new CollaborativeTaskAgent(),
-            new RecipeAgent(),
-            new TimeBlockerAgent(),
-            new AIAssistantAgent(),
-        ];
+        $agentDir = app_path('Services/Agents');
+        $namespace = 'App\\Services\\Agents\\';
 
-        foreach ($agentClasses as $agent) {
-            $this->agents[$agent->name()] = $agent;
+        foreach (glob("{$agentDir}/*Agent.php") as $file) {
+            $className = basename($file, '.php');
+
+            if (in_array($className, self::EXCLUDED_AGENTS)) {
+                continue;
+            }
+
+            $fqcn = $namespace . $className;
+
+            if (!class_exists($fqcn)) {
+                continue;
+            }
+
+            try {
+                $reflection = new \ReflectionClass($fqcn);
+                if ($reflection->isAbstract() || !$reflection->isSubclassOf(BaseAgent::class)) {
+                    continue;
+                }
+
+                $agent = new $fqcn();
+                $this->agents[$agent->name()] = $agent;
+            } catch (\Throwable $e) {
+                Log::warning("AgentOrchestrator: failed to load {$className}", ['error' => $e->getMessage()]);
+            }
         }
     }
 

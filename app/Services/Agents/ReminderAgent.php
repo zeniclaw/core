@@ -129,6 +129,176 @@ class ReminderAgent extends BaseAgent
         };
     }
 
+    // ── ToolProviderInterface ──────────────────────────────────────────
+
+    public function tools(): array
+    {
+        $tz = AppSetting::timezone();
+        return array_merge(parent::tools(), [
+            [
+                'name' => 'create_reminder',
+                'description' => 'Create a reminder/alarm for the user. Use this when the user asks to be reminded of something at a specific time.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'message' => ['type' => 'string', 'description' => 'Short description of what to remind (e.g. "Appeler Jean")'],
+                        'scheduled_at' => ['type' => 'string', 'description' => "When to trigger, format YYYY-MM-DD HH:MM ({$tz} timezone)"],
+                        'recurrence' => ['type' => 'string', 'description' => 'Recurrence rule or null. Formats: "daily:HH:MM", "weekly:DAYNAME:HH:MM", "monthly:DAY:HH:MM", "weekdays:HH:MM"'],
+                    ],
+                    'required' => ['message', 'scheduled_at'],
+                ],
+            ],
+            [
+                'name' => 'list_reminders',
+                'description' => 'List all active/pending reminders for the user.',
+                'input_schema' => ['type' => 'object', 'properties' => (object) []],
+            ],
+            [
+                'name' => 'delete_reminder',
+                'description' => 'Delete/cancel one or more reminders by their position numbers (1-based).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'List of reminder position numbers to delete (1-based)'],
+                    ],
+                    'required' => ['items'],
+                ],
+            ],
+            [
+                'name' => 'postpone_reminder',
+                'description' => 'Postpone/reschedule a reminder to a new time.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'item' => ['type' => 'integer', 'description' => 'Position number of the reminder to postpone (1-based)'],
+                        'new_time' => ['type' => 'string', 'description' => 'New time. Formats: "YYYY-MM-DD HH:MM", "demain HH:MM", "+Xmin", "+Xh", "+Xj"'],
+                    ],
+                    'required' => ['item', 'new_time'],
+                ],
+            ],
+        ]);
+    }
+
+    public function executeTool(string $name, array $input, AgentContext $context): ?string
+    {
+        return match ($name) {
+            'create_reminder' => $this->toolCreateReminder($input, $context),
+            'list_reminders' => $this->toolListReminders($context),
+            'delete_reminder' => $this->toolDeleteReminder($input, $context),
+            'postpone_reminder' => $this->toolPostponeReminder($input, $context),
+            default => parent::executeTool($name, $input, $context),
+        };
+    }
+
+    private function toolCreateReminder(array $input, AgentContext $context): string
+    {
+        $message = $input['message'];
+        $scheduledAt = Carbon::parse($input['scheduled_at'], AppSetting::timezone())->utc();
+        $recurrence = $input['recurrence'] ?? null;
+
+        $reminder = Reminder::create([
+            'agent_id' => $context->agent->id,
+            'requester_phone' => $context->from,
+            'requester_name' => $context->senderName,
+            'message' => $message,
+            'channel' => 'whatsapp',
+            'scheduled_at' => $scheduledAt,
+            'recurrence_rule' => $recurrence,
+            'status' => 'pending',
+        ]);
+
+        $parisTime = $scheduledAt->copy()->setTimezone(AppSetting::timezone());
+
+        return json_encode([
+            'success' => true,
+            'reminder_id' => $reminder->id,
+            'message' => $message,
+            'scheduled_at_paris' => $parisTime->format('d/m/Y H:i'),
+            'recurrence' => $recurrence,
+        ]);
+    }
+
+    private function toolListReminders(AgentContext $context): string
+    {
+        $reminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->get();
+
+        if ($reminders->isEmpty()) {
+            return json_encode(['reminders' => [], 'message' => 'Aucun rappel actif.']);
+        }
+
+        $list = [];
+        foreach ($reminders->values() as $i => $r) {
+            $parisTime = $r->scheduled_at->copy()->setTimezone(AppSetting::timezone());
+            $list[] = [
+                'number' => $i + 1,
+                'message' => $r->message,
+                'scheduled_at' => $parisTime->format('d/m/Y H:i'),
+                'recurrence' => $r->recurrence_rule,
+            ];
+        }
+
+        return json_encode(['reminders' => $list]);
+    }
+
+    private function toolDeleteReminder(array $input, AgentContext $context): string
+    {
+        $reminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->get()
+            ->values();
+
+        $deleted = [];
+        foreach ($input['items'] as $num) {
+            $index = (int) $num - 1;
+            $reminder = $reminders[$index] ?? null;
+            if ($reminder) {
+                $deleted[] = $reminder->message;
+                $reminder->update(['status' => 'cancelled']);
+            }
+        }
+
+        return json_encode(['deleted' => $deleted, 'count' => count($deleted)]);
+    }
+
+    private function toolPostponeReminder(array $input, AgentContext $context): string
+    {
+        $reminders = Reminder::where('requester_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'pending')
+            ->orderBy('scheduled_at')
+            ->get()
+            ->values();
+
+        $index = (int) $input['item'] - 1;
+        $reminder = $reminders[$index] ?? null;
+
+        if (!$reminder) {
+            return json_encode(['error' => "Reminder #{$input['item']} not found."]);
+        }
+
+        $newScheduledAt = $this->parseNewTime($input['new_time'], $reminder->scheduled_at);
+        if (!$newScheduledAt) {
+            return json_encode(['error' => 'Could not parse the new time.']);
+        }
+
+        $reminder->update(['scheduled_at' => $newScheduledAt->utc()]);
+        $parisTime = $newScheduledAt->copy()->setTimezone(AppSetting::timezone());
+
+        return json_encode([
+            'success' => true,
+            'message' => $reminder->message,
+            'new_scheduled_at' => $parisTime->format('d/m/Y H:i'),
+        ]);
+    }
+
+    // ── End ToolProviderInterface ────────────────────────────────────────
+
     private function buildPrompt(string $now): string
     {
         return <<<PROMPT
