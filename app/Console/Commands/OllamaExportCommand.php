@@ -229,10 +229,25 @@ class OllamaExportCommand extends Command
         $this->info("  Packing " . count($digests) . " blob(s)...");
         $tarResult = $this->dockerExec("tar czf {$outputFile} -C /root/.ollama {$fileList}");
 
-        // Copy the tar.gz out via Docker API archive endpoint
-        // The archive API returns a tar stream, so we use docker exec + cat instead
+        // Copy the tar.gz out via Docker archive API.
+        // The API returns a tar stream wrapping the file — we download it then extract.
         $this->info("  Copying out of container...");
-        $catResult = $this->dockerExecBinary("cat {$outputFile}", $destFile);
+        $wrapperTar = $destFile . '.wrapper.tar';
+        $this->dockerArchiveDownload($outputFile, $wrapperTar);
+
+        // Extract our tar.gz from the wrapper tar
+        if (file_exists($wrapperTar) && filesize($wrapperTar) > 512) {
+            $basename = basename($outputFile);
+            $extractDir = sys_get_temp_dir() . '/ollama-extract-' . uniqid();
+            @mkdir($extractDir, 0755, true);
+            exec("tar xf " . escapeshellarg($wrapperTar) . " -C " . escapeshellarg($extractDir) . " 2>&1");
+            $extracted = $extractDir . '/' . $basename;
+            if (file_exists($extracted)) {
+                rename($extracted, $destFile);
+            }
+            @unlink($wrapperTar);
+            @rmdir($extractDir);
+        }
 
         // Cleanup inside container
         $this->dockerExec("rm -f {$outputFile}");
@@ -258,6 +273,30 @@ class OllamaExportCommand extends Command
         ], JSON_PRETTY_PRINT));
 
         return true;
+    }
+
+    /**
+     * Download a file from a container using Docker archive API.
+     * Streams directly to disk — no memory issues with large files.
+     */
+    private function dockerArchiveDownload(string $containerPath, string $hostPath): bool
+    {
+        $fp = fopen($hostPath, 'w');
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_UNIX_SOCKET_PATH => '/var/run/docker.sock',
+            CURLOPT_URL => "http://localhost/v1.45/containers/{$this->ollamaContainer}/archive?path=" . urlencode($containerPath),
+            CURLOPT_TIMEOUT => 1200,
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FILE => $fp,
+        ]);
+
+        $result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+
+        return $result && $httpCode === 200;
     }
 
     /**
