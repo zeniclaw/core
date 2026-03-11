@@ -113,7 +113,7 @@ class DevAgent extends BaseAgent
             ['key' => 'rollback', 'description' => 'Annuler la derniere modif', 'examples' => ['rollback', 'annule le dernier deploy']],
             ['key' => 'deploy_status', 'description' => 'Status deploiement', 'examples' => ['status deploy', 'mise en prod']],
             // API interaction
-            ['key' => 'api_query', 'description' => 'Interroger/consulter l\'API live du projet (lister donnees, stats, entites). PAS modifier le code.', 'examples' => ['liste les campagnes', 'combien de users', 'donne moi les apis du projet']],
+            ['key' => 'api_query', 'description' => 'Utiliser l\'API live du projet: lister, creer, modifier, supprimer des entites (projets, campagnes, prospects, etc.) via les endpoints API. PAS modifier le code source.', 'examples' => ['liste les campagnes', 'combien de users', 'donne moi les apis du projet', 'cree un projet', 'cree une campagne marketing', 'ajoute des prospects']],
             ['key' => 'api_credentials', 'description' => 'L\'utilisateur donne/partage des credentials: cle API, token, endpoint, URL d\'API, secret. Il veut les stocker, pas coder.', 'examples' => ['voici la cle pk_xxx et le endpoint https://...', 'utilise cette API key: xxx', 'le token c\'est abc123']],
             // Dev tasks (code changes)
             ['key' => 'dev_task', 'description' => 'Tache de developpement: modifier code, fix bug, ajouter feature, refactoring. Necessite modification de code.', 'examples' => ['fix le bug du login', 'ajoute un bouton', 'refactore le controller']],
@@ -164,12 +164,20 @@ class DevAgent extends BaseAgent
             return $this->handleTaskValidation($awaitingProject, $context);
         }
 
-        // Intent classification
+        // Intent classification — enrich with project context so classifier knows about API credentials
         $activeProjectHint = '';
+        $activeProject = null;
         if ($context->session->active_project_id) {
-            $ap = Project::find($context->session->active_project_id);
-            if ($ap) {
-                $activeProjectHint = "PROJET ACTIF: {$ap->name}\n";
+            $activeProject = Project::find($context->session->active_project_id);
+            if ($activeProject) {
+                $activeProjectHint = "PROJET ACTIF: {$activeProject->name}\n";
+                $settings = $activeProject->settings ?? [];
+                $hasApiCreds = !empty($settings['api_key']) || !empty($settings['base_url']) || !empty($settings['api_endpoint']);
+                if ($hasApiCreds) {
+                    $credKeys = array_keys(array_filter($settings, fn($v) => !empty($v)));
+                    $activeProjectHint .= "CREDENTIALS API CONFIGUREES: " . implode(', ', $credKeys) . "\n";
+                    $activeProjectHint .= "IMPORTANT: Ce projet a des credentials API. Si l'utilisateur demande de creer/lister/modifier des entites (projets, campagnes, prospects, etc.), utilise 'api_query' PAS 'dev_task'. 'dev_task' = modifier le CODE SOURCE. 'api_query' = utiliser l'API live.\n";
+                }
             }
         }
 
@@ -372,6 +380,13 @@ class DevAgent extends BaseAgent
         $collectedData = [];
         $maxIterations = 10;
 
+        $this->log($context, 'runApiAgent starting', [
+            'project' => $project->name,
+            'project_id' => $project->id,
+            'settings_keys' => array_keys($project->settings ?? []),
+            'query' => mb_substr($query, 0, 200),
+        ]);
+
         for ($i = 0; $i < $maxIterations; $i++) {
             // Refresh settings each iteration (may have been updated by store)
             $project->refresh();
@@ -433,8 +448,8 @@ REGLES CRITIQUES:
 1. EXTRAIRE ET STOCKER IMMEDIATEMENT: Si le message contient URL, cle API, token, endpoint, identifiants → stocke-les dans "store" ET confirme avec "reply". Exemple: si l'utilisateur dit "voici la cle abc123 et le endpoint https://api.example.com", tu reponds:
 {"action": "reply", "store": {"api_key": "abc123", "api_endpoint": "https://api.example.com"}, "message": "[projet] Configuration enregistree ! Cle API et endpoint sauvegardes. Je peux maintenant interroger l'API."}
 NE PROPOSE PAS de code, d'integration, ou de plan technique quand l'utilisateur donne juste des credentials. Stocke et confirme.
-2. AGIR: Ne pose JAMAIS de question si tu peux deduire du code source ou des settings.
-3. UTILISER LES CREDENTIALS: Si des cles/endpoints sont dans la CONFIGURATION STOCKEE, utilise-les directement pour faire des appels API. Ne propose pas de les integrer dans du code.
+2. AGIR: Ne pose JAMAIS de question si tu peux deduire du code source ou des settings. NE REDEMANDE JAMAIS une cle API, un token ou un endpoint si il est DEJA dans la CONFIGURATION STOCKEE ci-dessus.
+3. UTILISER LES CREDENTIALS: Si des cles/endpoints sont dans la CONFIGURATION STOCKEE, utilise-les IMMEDIATEMENT pour faire des appels API. Ne propose pas de les integrer dans du code. Ne demande pas confirmation.
 4. ENCHAINER: Si tu as besoin de plusieurs endpoints (ex: d'abord les projets, puis les factures par projet), fais-les un par un. Tu reverras les resultats a chaque iteration.
 5. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
 6. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
@@ -810,6 +825,21 @@ PROMPT;
 
     protected function handleIntentDevTask(array $args, AgentContext $context): AgentResult
     {
+        // Guard: if project has API credentials and message mentions API entities,
+        // redirect to api_query instead of creating a code-change sub-agent
+        $project = $this->findProjectForUser($context);
+        if ($project) {
+            $settings = $project->settings ?? [];
+            $hasApiCreds = !empty($settings['api_key']) || !empty($settings['base_url']) || !empty($settings['api_endpoint']);
+            if ($hasApiCreds) {
+                $apiEntities = '/\b(campagne|campaign|prospect|client|projet|project|facture|invoice|commande|order|produit|product|booking|email|template|contact|utilisateur|user)\b/iu';
+                if (preg_match($apiEntities, $context->body ?? '')) {
+                    $this->log($context, 'dev_task redirected to api_query: project has API creds + message mentions API entities');
+                    return $this->handleIntentApiQuery($args, $context);
+                }
+            }
+        }
+
         return $this->handleDevRequest($context);
     }
 
