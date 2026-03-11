@@ -122,11 +122,26 @@ class AgentOrchestrator
     public function process(AgentContext $context): AgentResult
     {
         try {
-            $debug = file_exists(storage_path('app/orchestrator_debug'));
+            // 0. Check for debug mode toggle commands
+            $debugToggle = $this->handleDebugToggle($context);
+            if ($debugToggle) {
+                return $debugToggle;
+            }
+
+            $debug = $context->session->debug_mode ?? false;
+            $debugTraces = [];
 
             // 1. Handle pending stateful flows
-            $pendingResult = $this->handlePendingStates($context, $debug);
+            $pendingResult = $this->handlePendingStates($context, $debug, $debugTraces);
             if ($pendingResult) {
+                // Append debug traces to pending result too
+                if ($debug && !empty($debugTraces) && $pendingResult->action === 'reply' && $pendingResult->reply) {
+                    $debugBlock = "\n\n---\n🔍 *DEBUG MODE*\n" . implode("\n\n", $debugTraces);
+                    $pendingResult = AgentResult::reply(
+                        $pendingResult->reply . $debugBlock,
+                        $pendingResult->metadata
+                    );
+                }
                 return $pendingResult;
             }
 
@@ -135,16 +150,16 @@ class AgentOrchestrator
 
             if ($debug) {
                 $confidence = $routing['confidence'] ?? '?';
-                $this->sendDebug($context,
-                    "[DEBUG ROUTER]\n"
+                $routerDebug = "[DEBUG ROUTER]\n"
                     . "Message: " . mb_substr($context->body ?? '', 0, 80) . "\n"
                     . "Agent: {$routing['agent']}\n"
                     . "Confidence: {$confidence}%\n"
                     . "Model: {$routing['model']}\n"
                     . "Complexity: {$routing['complexity']}\n"
                     . "Autonomy: {$routing['autonomy']}\n"
-                    . "Reasoning: {$routing['reasoning']}"
-                );
+                    . "Reasoning: {$routing['reasoning']}";
+                $debugTraces[] = $routerDebug;
+                $this->sendDebug($context, $routerDebug);
             }
 
             // Log routing decision
@@ -184,7 +199,9 @@ class AgentOrchestrator
                 $voiceResult = $voiceAgent->handle($routedContext);
 
                 if ($debug) {
-                    $this->sendDebug($context, "[DEBUG VOICE] Transcription: " . mb_substr($voiceResult->reply ?? '', 0, 100));
+                    $voiceDebug = "[DEBUG VOICE] Transcription: " . mb_substr($voiceResult->reply ?? '', 0, 100);
+                    $debugTraces[] = $voiceDebug;
+                    $this->sendDebug($context, $voiceDebug);
                 }
 
                 // If transcription succeeded and confidence is good, re-route the text
@@ -209,7 +226,9 @@ class AgentOrchestrator
                     $newRouting = $this->router->route($textContext);
 
                     if ($debug) {
-                        $this->sendDebug($context, "[DEBUG VOICE RE-ROUTE] → {$newRouting['agent']} (from transcript)");
+                        $reRouteDebug = "[DEBUG VOICE RE-ROUTE] → {$newRouting['agent']} (from transcript)";
+                        $debugTraces[] = $reRouteDebug;
+                        $this->sendDebug($context, $reRouteDebug);
                     }
 
                     $routedContext = $textContext->withRouting(
@@ -253,7 +272,9 @@ class AgentOrchestrator
             }
 
             if ($debug) {
-                $this->sendDebug($context, "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : ''));
+                $dispatchDebug = "[DEBUG DISPATCH] → {$dispatchAgent} agent" . ($dispatchAgent !== ($routing['agent'] ?? '') ? " (agentic, routed from {$routing['agent']})" : '');
+                $debugTraces[] = $dispatchDebug;
+                $this->sendDebug($context, $dispatchDebug);
             }
 
             $dispatchStart = microtime(true);
@@ -313,6 +334,16 @@ class AgentOrchestrator
                 }
             }
 
+            // Append debug traces to reply if debug mode is on
+            if ($debug && !empty($debugTraces) && $result->action === 'reply' && $result->reply) {
+                $debugBlock = "\n\n---\n🔍 *DEBUG MODE*\n" . implode("\n\n", $debugTraces)
+                    . "\n\n[DEBUG TIMING] Dispatch: {$dispatchDuration}ms";
+                $result = AgentResult::reply(
+                    $result->reply . $debugBlock,
+                    $result->metadata
+                );
+            }
+
             return $result;
         } catch (\Exception $e) {
             Log::error('AgentOrchestrator error: ' . $e->getMessage(), [
@@ -323,7 +354,52 @@ class AgentOrchestrator
         }
     }
 
-    private function handlePendingStates(AgentContext $context, bool $debug = false): ?AgentResult
+    /**
+     * Detect debug mode toggle commands and update session accordingly.
+     */
+    private function handleDebugToggle(AgentContext $context): ?AgentResult
+    {
+        if (!$context->body) return null;
+
+        $clean = mb_strtolower(trim($context->body));
+
+        // Activate debug mode
+        $activatePatterns = [
+            'mode debug', 'debug mode', 'active debug', 'activer debug', 'activer le debug',
+            'active le debug', 'debug on', 'enable debug', '/debug',
+        ];
+        foreach ($activatePatterns as $pattern) {
+            if ($clean === $pattern) {
+                $context->session->update(['debug_mode' => true]);
+                return AgentResult::reply(
+                    "🔍 *Mode debug activé*\n\n"
+                    . "Chaque réponse inclura désormais :\n"
+                    . "• L'agent choisi par le routeur et pourquoi\n"
+                    . "• Le modèle et la complexité\n"
+                    . "• Le temps de traitement\n\n"
+                    . "Pour désactiver : _désactiver debug_ ou _debug off_"
+                );
+            }
+        }
+
+        // Deactivate debug mode
+        $deactivatePatterns = [
+            'désactiver debug', 'desactiver debug', 'désactive debug', 'desactive debug',
+            'debug off', 'disable debug', 'stop debug', 'arrête debug', 'arrete debug',
+            'supprimer debug', 'supprime debug', 'enlever debug', 'enlève debug',
+            'désactiver le debug', 'desactiver le debug', 'supprime le debug', '/nodebug',
+        ];
+        foreach ($deactivatePatterns as $pattern) {
+            if ($clean === $pattern) {
+                $context->session->update(['debug_mode' => false]);
+                return AgentResult::reply("✅ Mode debug désactivé.");
+            }
+        }
+
+        return null;
+    }
+
+    private function handlePendingStates(AgentContext $context, bool $debug = false, array &$debugTraces = []): ?AgentResult
     {
         if (!$context->body) return null;
 
@@ -335,7 +411,9 @@ class AgentOrchestrator
             if ($expiresAt && now()->greaterThan($expiresAt)) {
                 $context->session->update(['pending_agent_context' => null]);
                 if ($debug) {
-                    $this->sendDebug($context, "[DEBUG PENDING] pending_agent_context expired → cleared");
+                    $msg = "[DEBUG PENDING] pending_agent_context expired → cleared";
+                    $debugTraces[] = $msg;
+                    $this->sendDebug($context, $msg);
                 }
             } else {
                 // Skip isNewIntent check when the agent expects raw input (credentials, URLs, etc.)
@@ -343,11 +421,11 @@ class AgentOrchestrator
                 $isNew = $expectRawInput ? false : $this->isNewIntent($context->body);
 
                 if ($debug) {
-                    $this->sendDebug($context,
-                        "[DEBUG PENDING] pending_agent_context: agent={$pendingCtx['agent']}, type={$pendingCtx['type']}\n"
+                    $msg = "[DEBUG PENDING] pending_agent_context: agent={$pendingCtx['agent']}, type={$pendingCtx['type']}\n"
                         . "expectRawInput=" . ($expectRawInput ? 'TRUE' : 'FALSE') . "\n"
-                        . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE')
-                    );
+                        . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE');
+                    $debugTraces[] = $msg;
+                    $this->sendDebug($context, $msg);
                 }
 
                 if ($isNew) {
@@ -369,11 +447,11 @@ class AgentOrchestrator
             $isNew = $this->isNewIntent($context->body);
 
             if ($debug) {
-                $this->sendDebug($context,
-                    "[DEBUG PENDING] pending_switch_project_id={$context->session->pending_switch_project_id}\n"
+                $msg = "[DEBUG PENDING] pending_switch_project_id={$context->session->pending_switch_project_id}\n"
                     . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE') . "\n"
-                    . "Action: " . ($isNew ? 'CLEAR pending, route normally' : 'handle as switch confirmation')
-                );
+                    . "Action: " . ($isNew ? 'CLEAR pending, route normally' : 'handle as switch confirmation');
+                $debugTraces[] = $msg;
+                $this->sendDebug($context, $msg);
             }
 
             if ($isNew) {
@@ -397,11 +475,11 @@ class AgentOrchestrator
             $isNew = $this->isNewIntent($context->body);
 
             if ($debug) {
-                $this->sendDebug($context,
-                    "[DEBUG PENDING] awaiting_validation project={$awaitingProject->name} (id={$awaitingProject->id})\n"
+                $msg = "[DEBUG PENDING] awaiting_validation project={$awaitingProject->name} (id={$awaitingProject->id})\n"
                     . "isNewIntent=" . ($isNew ? 'TRUE' : 'FALSE') . "\n"
-                    . "Action: " . ($isNew ? 'CANCEL awaiting, route normally' : 'handle as task validation')
-                );
+                    . "Action: " . ($isNew ? 'CANCEL awaiting, route normally' : 'handle as task validation');
+                $debugTraces[] = $msg;
+                $this->sendDebug($context, $msg);
             }
 
             if ($isNew) {
@@ -427,7 +505,9 @@ class AgentOrchestrator
         }
 
         if ($debug && !$context->session->pending_switch_project_id && !$awaitingProject) {
-            $this->sendDebug($context, "[DEBUG PENDING] No pending states found → routing normally");
+            $msg = "[DEBUG PENDING] No pending states found → routing normally";
+            $debugTraces[] = $msg;
+            $this->sendDebug($context, $msg);
         }
 
         return null;
@@ -506,6 +586,11 @@ class AgentOrchestrator
 
     private function sendDebug(AgentContext $context, string $text): void
     {
+        // For web chat, debug traces are appended to the reply — no separate message needed
+        if ($context->session->channel === 'web') {
+            return;
+        }
+
         try {
             \Illuminate\Support\Facades\Http::timeout(10)
                 ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])

@@ -7,9 +7,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AgentSession extends Model
 {
-    protected $fillable = ['agent_id', 'session_key', 'channel', 'peer_id', 'display_name', 'last_message_at', 'message_count', 'active_project_id', 'pending_switch_project_id', 'pending_agent_context', 'whitelisted'];
+    protected $fillable = ['agent_id', 'session_key', 'channel', 'peer_id', 'display_name', 'last_message_at', 'message_count', 'active_project_id', 'pending_switch_project_id', 'pending_agent_context', 'whitelisted', 'debug_mode'];
 
-    protected $casts = ['last_message_at' => 'datetime', 'whitelisted' => 'boolean', 'pending_agent_context' => 'array'];
+    protected $casts = ['last_message_at' => 'datetime', 'whitelisted' => 'boolean', 'debug_mode' => 'boolean', 'pending_agent_context' => 'array'];
 
     public function agent(): BelongsTo
     {

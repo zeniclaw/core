@@ -276,6 +276,7 @@ class ChannelController extends Controller
                 'action' => $result->action,
                 'agent' => $agent->name,
                 'sub_agent_id' => $result->metadata['sub_agent_id'] ?? null,
+                'debug_mode' => $session->debug_mode ?? false,
             ];
 
             // Pass generated files (DocumentAgent etc.)

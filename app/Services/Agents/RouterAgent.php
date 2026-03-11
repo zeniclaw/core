@@ -95,6 +95,9 @@ class RouterAgent
         // AI Assistant / coaching / stats → assistant
         '/\b(mes\s+stats?|my\s+stats?|coaching|coach|quels?\s+agents?|tips?\s+hebdo|suggestions?\s+agents?|agents?\s+suggestions?|assistant\s+ia|fonctionnalit[eé]s\s+disponibles?|que\s+puis[\s-]je\s+faire|what\s+can\s+you\s+do|astuces?\s+agents?|progression|adoption\s+score|aide\s+agents?|help\s+agents?|recommandations?|upskilling|dashboard\s+stats?)\b/iu'
             => ['assistant', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
+        // Debug mode toggle → chat (handled by orchestrator before routing, this is just a safety net)
+        '/^(mode\s+debug|debug\s+(mode|on|off)|activ(er|e)\s+(le\s+)?debug|d[eé]sactiv(er|e)\s+(le\s+)?debug|(enable|disable|stop|supprime[r]?|enlève[r]?|arrête[r]?)\s+(le\s+)?debug|\/debug|\/nodebug)$/iu'
+            => ['chat', 'claude-haiku-4-5-20251001', 'simple', 'auto'],
     ];
 
     public function __construct()
