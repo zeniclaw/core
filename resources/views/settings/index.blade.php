@@ -272,7 +272,7 @@
                     <p class="text-xs font-medium text-gray-600 mb-1">Modeles disponibles</p>
 
                     @foreach($ollamaModels as $m)
-                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-{{ Str::slug($m['id']) }}">
+                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-{{ str_replace(['.', ':'], '-', $m['id']) }}">
                         <div class="flex-1 min-w-0">
                             <p class="text-sm font-medium text-gray-900">{{ $m['name'] }}</p>
                             <p class="text-xs text-gray-500">{{ $m['id'] }} — {{ $m['size'] }} <span class="text-gray-400">| Min: {{ $m['specs'] }}</span></p>
