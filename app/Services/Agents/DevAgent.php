@@ -646,103 +646,103 @@ PROMPT;
         return AgentResult::reply($reply);
     }
 
-    private function handleIntentListProjects(array $args, AgentContext $context): AgentResult
+    protected function handleIntentListProjects(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdListGitlabProjects($context), $context);
     }
 
-    private function handleIntentProjectInfo(array $args, AgentContext $context): AgentResult
+    protected function handleIntentProjectInfo(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdProjectInfo($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentListBranches(array $args, AgentContext $context): AgentResult
+    protected function handleIntentListBranches(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdListBranches($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentListMrs(array $args, AgentContext $context): AgentResult
+    protected function handleIntentListMrs(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdListMRs($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentPipelineStatus(array $args, AgentContext $context): AgentResult
+    protected function handleIntentPipelineStatus(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdPipelineStatus($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentRecentCommits(array $args, AgentContext $context): AgentResult
+    protected function handleIntentRecentCommits(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdRecentCommits($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentListIssues(array $args, AgentContext $context): AgentResult
+    protected function handleIntentListIssues(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdListIssues($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentCreateIssue(array $args, AgentContext $context): AgentResult
+    protected function handleIntentCreateIssue(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdCreateIssue($args['title'] ?? '', $context), $context);
     }
 
-    private function handleIntentSearchCode(array $args, AgentContext $context): AgentResult
+    protected function handleIntentSearchCode(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdSearchCode($args['query'] ?? '', $context), $context);
     }
 
-    private function handleIntentFileTree(array $args, AgentContext $context): AgentResult
+    protected function handleIntentFileTree(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdFileTree($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentReadFile(array $args, AgentContext $context): AgentResult
+    protected function handleIntentReadFile(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdReadFile($args['path'] ?? '', $context), $context);
     }
 
-    private function handleIntentCompareBranches(array $args, AgentContext $context): AgentResult
+    protected function handleIntentCompareBranches(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdCompareBranches($args['from'] ?? '', $args['to'] ?? '', $context), $context);
     }
 
-    private function handleIntentProjectHealth(array $args, AgentContext $context): AgentResult
+    protected function handleIntentProjectHealth(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdProjectHealth($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentTaskHistory(array $args, AgentContext $context): AgentResult
+    protected function handleIntentTaskHistory(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdTaskHistory($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentRollback(array $args, AgentContext $context): AgentResult
+    protected function handleIntentRollback(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdRollback($context), $context);
     }
 
-    private function handleIntentDeployStatus(array $args, AgentContext $context): AgentResult
+    protected function handleIntentDeployStatus(array $args, AgentContext $context): AgentResult
     {
         if ($err = $this->requireGitlab($context)) return $err;
         return $this->gitlabIntent($this->cmdDeployStatus($args['name'] ?? '', $context), $context);
     }
 
-    private function handleIntentApiQuery(array $args, AgentContext $context): AgentResult
+    protected function handleIntentApiQuery(array $args, AgentContext $context): AgentResult
     {
         $project = $this->findProjectForUser($context);
         if (!$project) {
@@ -755,7 +755,7 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'api_query']);
     }
 
-    private function handleIntentApiCredentials(array $args, AgentContext $context): AgentResult
+    protected function handleIntentApiCredentials(array $args, AgentContext $context): AgentResult
     {
         $project = $this->findProjectForUser($context);
         if (!$project) {
@@ -768,7 +768,7 @@ PROMPT;
         return AgentResult::reply($reply, ['action' => 'api_credentials']);
     }
 
-    private function handleIntentDevTask(array $args, AgentContext $context): AgentResult
+    protected function handleIntentDevTask(array $args, AgentContext $context): AgentResult
     {
         return $this->handleDevRequest($context);
     }
