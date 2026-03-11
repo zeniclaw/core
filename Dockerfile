@@ -11,10 +11,12 @@ ENV http_proxy=${HTTP_PROXY} \
     no_proxy=${NO_PROXY} \
     NO_PROXY=${NO_PROXY}
 
-# System deps
+# System deps + Docker CLI (for self-update via docker.sock)
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
     libxml2-dev nginx supervisor procps sudo cron \
+    && curl -fsSL https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz \
+       | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
