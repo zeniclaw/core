@@ -32,6 +32,7 @@ class OllamaPullCommand extends Command
         $url = rtrim($baseUrl, '/') . '/api/pull';
         $body = json_encode(['name' => $model, 'stream' => true]);
 
+        $pullFailed = false;
         $ch = curl_init($url);
         $curlOpts = [
             CURLOPT_POST => true,
@@ -39,12 +40,35 @@ class OllamaPullCommand extends Command
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_TIMEOUT => 7200, // 2 hours for large models
-            CURLOPT_WRITEFUNCTION => function ($ch, $data) use ($cacheKey, $model) {
+            CURLOPT_WRITEFUNCTION => function ($ch, $data) use ($cacheKey, $model, &$pullFailed) {
                 $lines = explode("\n", trim($data));
                 foreach ($lines as $line) {
                     if (empty($line)) continue;
                     $json = json_decode($line, true);
                     if (!$json) continue;
+
+                    // Detect error in stream (Ollama returns 200 even on failure)
+                    $error = $json['error'] ?? null;
+                    if ($error) {
+                        $pullFailed = true;
+                        $detail = $error;
+                        // Simplify common errors for display
+                        if (str_contains($error, 'AuthorizedOnly') || str_contains($error, 'authentication required')) {
+                            $detail = "Telechargement bloque (proxy/firewall). Verifiez que HTTPS_PROXY est configure dans le container Ollama.";
+                        } elseif (str_contains($error, 'no such host') || str_contains($error, 'lookup')) {
+                            $detail = "DNS impossible — registry.ollama.ai injoignable. Verifiez le proxy/reseau.";
+                        } elseif (str_contains($error, 'connection refused')) {
+                            $detail = "Connexion refusee vers le registry Ollama.";
+                        }
+                        Cache::put($cacheKey, [
+                            'status' => 'error',
+                            'detail' => $detail,
+                            'raw_error' => $error,
+                            'model' => $model,
+                        ], 3600);
+                        Log::error('ollama:pull stream error', ['model' => $model, 'error' => $error]);
+                        return strlen($data);
+                    }
 
                     $status = $json['status'] ?? '';
                     $total = $json['total'] ?? 0;
@@ -85,6 +109,12 @@ class OllamaPullCommand extends Command
             $detail = $error ?: "HTTP {$httpCode}";
             Cache::put($cacheKey, ['status' => 'error', 'detail' => "Pull failed: {$detail}"], 3600);
             Log::error('ollama:pull failed', ['model' => $model, 'error' => $detail]);
+            return 1;
+        }
+
+        // Stream error was detected (Ollama returns 200 but error in JSON body)
+        if ($pullFailed) {
+            Log::error('ollama:pull stream reported error', ['model' => $model]);
             return 1;
         }
 
