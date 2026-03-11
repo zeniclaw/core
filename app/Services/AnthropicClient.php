@@ -135,7 +135,13 @@ class AnthropicClient
                 'model' => $model,
             ]);
         } catch (\Exception $e) {
-            Log::error('OnPrem chat exception', ['model' => $model, 'error' => $e->getMessage()]);
+            Log::error('OnPrem chat exception', [
+                'model' => $model,
+                'error' => $e->getMessage(),
+                'base_url' => $baseUrl,
+                'prompt_chars' => mb_strlen($systemPrompt),
+                'message_chars' => mb_strlen($content),
+            ]);
         }
 
         return null;

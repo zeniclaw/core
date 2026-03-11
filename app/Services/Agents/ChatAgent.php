@@ -104,6 +104,18 @@ class ChatAgent extends BaseAgent
 
         $debug = $context->session->debug_mode ?? false;
 
+        if ($debug) {
+            $promptLen = mb_strlen($systemPrompt);
+            $msgLen = is_string($claudeMessage) ? mb_strlen($claudeMessage) : strlen(json_encode($claudeMessage));
+            $this->log($context, '[DEBUG CHAT] Pre-dispatch', [
+                'model' => $model,
+                'is_on_prem' => $isOnPrem,
+                'system_prompt_chars' => $promptLen,
+                'message_chars' => $msgLen,
+                'tools_count' => $isOnPrem ? 0 : count(AgentTools::definitions()),
+            ]);
+        }
+
         // Run the agentic loop — the LLM decides which tools to use
         $loop = new AgenticLoop(maxIterations: $isOnPrem ? 1 : 10, debug: $debug);
         $result = $loop->run(
@@ -116,17 +128,36 @@ class ChatAgent extends BaseAgent
 
         $reply = $result->reply;
 
+        if ($debug && !$reply) {
+            Log::warning("[DEBUG CHAT] AgenticLoop returned empty", [
+                'model' => $model, 'iterations' => $result->iterations,
+            ]);
+        }
+
         // Fallback to simple chat if agentic loop fails (use same resolved model)
         if (!$reply) {
             $reply = $this->claude->chat($claudeMessage, $model, $systemPrompt);
         }
 
         if (!$reply) {
-            $fallback = "Desole, je n'ai pas pu generer une reponse. Reessaie dans quelques instants ou contacte le support.";
+            $debugInfo = '';
+            if ($debug) {
+                $debugInfo = "\n\n---\n🔍 *DEBUG CHAT ERROR*\n"
+                    . "Model: {$model}" . ($isOnPrem ? " (on-prem)" : " (cloud)") . "\n"
+                    . "System prompt: " . mb_strlen($systemPrompt) . " chars\n"
+                    . "Message: " . (is_string($claudeMessage) ? mb_strlen($claudeMessage) : strlen(json_encode($claudeMessage))) . " chars\n"
+                    . "AgenticLoop: {$result->iterations} iteration(s), no reply\n"
+                    . "Fallback chat: also failed\n"
+                    . "Check logs: docker logs zeniclaw_app --tail 50 | grep -i error";
+            }
+            $fallback = "Desole, je n'ai pas pu generer une reponse. Reessaie dans quelques instants ou contacte le support." . $debugInfo;
             $this->sendText($context->from, $fallback);
             Log::warning("[chat] Both agentic loop and fallback chat returned empty reply", [
                 'from' => $context->from,
                 'body' => mb_substr($context->body ?? '', 0, 100),
+                'model' => $model,
+                'is_on_prem' => $isOnPrem,
+                'prompt_len' => mb_strlen($systemPrompt),
             ]);
             return AgentResult::reply($fallback);
         }
