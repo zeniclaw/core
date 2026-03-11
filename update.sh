@@ -28,27 +28,57 @@ cd "$REPO_DIR"
 CONTAINER_CMD=""
 COMPOSE=""
 
-if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
-    CONTAINER_CMD="podman"
-    if podman compose version &>/dev/null 2>&1; then
-        COMPOSE="podman compose"
-    elif command -v podman-compose &>/dev/null; then
-        COMPOSE="podman-compose"
+detect_runtime() {
+    export PATH="$PATH:/usr/local/bin:/usr/bin:/usr/libexec/docker/cli-plugins"
+    CONTAINER_CMD=""
+    COMPOSE=""
+
+    if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+        CONTAINER_CMD="podman"
+        # podman-compose (standalone Python package)
+        if command -v podman-compose &>/dev/null; then
+            COMPOSE="podman-compose"
+        # podman compose (built-in since podman 4.7+)
+        elif podman compose version &>/dev/null 2>&1; then
+            COMPOSE="podman compose"
+        fi
+    elif command -v docker &>/dev/null; then
+        CONTAINER_CMD="docker"
+        if docker compose version &>/dev/null 2>&1; then
+            COMPOSE="docker compose"
+        elif command -v docker-compose &>/dev/null; then
+            COMPOSE="docker-compose"
+        elif [ -x /usr/libexec/docker/cli-plugins/docker-compose ]; then
+            COMPOSE="docker compose"
+        fi
     fi
-elif command -v docker &>/dev/null; then
-    CONTAINER_CMD="docker"
-    if docker compose version &>/dev/null 2>&1; then
-        COMPOSE="docker compose"
-    elif command -v docker-compose &>/dev/null; then
-        COMPOSE="docker-compose"
-    fi
-fi
+}
+
+detect_runtime
 
 if [[ -z "$CONTAINER_CMD" ]]; then
-    error "No container runtime found (podman or docker)"
+    error "No container runtime found (podman or docker). Install: https://docs.docker.com/engine/install/"
 fi
 if [[ -z "$COMPOSE" ]]; then
-    error "No compose command found (podman compose / docker compose)"
+    warn "No compose command found. Attempting auto-install..."
+    if [[ "$CONTAINER_CMD" == "podman" ]]; then
+        # Try pip install podman-compose, then apt
+        if command -v pip3 &>/dev/null; then
+            pip3 install podman-compose 2>/dev/null && detect_runtime
+        fi
+        if [[ -z "$COMPOSE" ]]; then
+            apt-get update -qq 2>/dev/null && apt-get install -y -qq podman-compose 2>/dev/null && detect_runtime
+        fi
+    else
+        apt-get update -qq 2>/dev/null && apt-get install -y -qq docker-compose-plugin 2>/dev/null && detect_runtime
+    fi
+    if [[ -z "$COMPOSE" ]]; then
+        if [[ "$CONTAINER_CMD" == "podman" ]]; then
+            error "No compose found. Install: pip3 install podman-compose (or apt install podman-compose)"
+        else
+            error "No compose found. Install: apt install docker-compose-plugin"
+        fi
+    fi
 fi
 
 echo -e "\n${BOLD}${CYAN}=== ZeniClaw Update ===${NC}"
