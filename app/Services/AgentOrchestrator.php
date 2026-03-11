@@ -60,6 +60,7 @@ class AgentOrchestrator
 {
     private RouterAgent $router;
     private ConversationMemoryService $memory;
+    private ToolRegistry $toolRegistry;
     private array $agents = [];
     private int $maxHandoffs = 3;
 
@@ -67,8 +68,16 @@ class AgentOrchestrator
     {
         $this->router = new RouterAgent();
         $this->memory = new ConversationMemoryService();
+        $this->toolRegistry = new ToolRegistry();
 
         $this->registerAgents();
+
+        // Build tool registry from agents implementing ToolProviderInterface
+        foreach ($this->agents as $agent) {
+            if ($agent instanceof Agents\ToolProviderInterface) {
+                $this->toolRegistry->register($agent);
+            }
+        }
 
         // Pass agents to router so it can read their keywords/descriptions
         $this->router->registerAgents($this->agents);
@@ -182,8 +191,8 @@ class AgentOrchestrator
                 $this->sendDebug($context, $routerDebug);
             }
 
-            // Enrich context with routing info
-            $routedContext = $context->withRouting(
+            // Enrich context with routing info and tool registry
+            $routedContext = $context->withToolRegistry($this->toolRegistry)->withRouting(
                 $routing['agent'],
                 $routingModel,
                 $routing['complexity'],

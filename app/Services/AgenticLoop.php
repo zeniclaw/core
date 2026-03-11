@@ -42,7 +42,9 @@ class AgenticLoop
         array $tools = []
     ): AgenticLoopResult {
         if (empty($tools)) {
-            $tools = AgentTools::definitions();
+            $tools = $context->toolRegistry
+                ? $context->toolRegistry->definitions()
+                : AgentTools::definitions();
         }
 
         $messages = [
@@ -113,7 +115,9 @@ class AgenticLoop
 
                 $this->debugLog($context, "Tool call: {$toolName}", $toolInput);
 
-                $result = AgentTools::execute($toolName, $toolInput, $context);
+                $result = $context->toolRegistry
+                    ? $context->toolRegistry->execute($toolName, $toolInput, $context)
+                    : AgentTools::execute($toolName, $toolInput, $context);
                 $totalToolCalls++;
                 $toolsUsed[] = $toolName;
 
@@ -147,7 +151,9 @@ class AgenticLoop
     private function executeToolQuietly(array $toolBlock, AgentContext $context, array &$toolsUsed): void
     {
         try {
-            $result = AgentTools::execute($toolBlock['name'], $toolBlock['input'] ?? [], $context);
+            $result = $context->toolRegistry
+                ? $context->toolRegistry->execute($toolBlock['name'], $toolBlock['input'] ?? [], $context)
+                : AgentTools::execute($toolBlock['name'], $toolBlock['input'] ?? [], $context);
             $toolsUsed[] = $toolBlock['name'];
         } catch (\Exception $e) {
             Log::warning('AgenticLoop: quiet tool execution failed', [

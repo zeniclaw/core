@@ -24,6 +24,7 @@ class AgentContext
         public readonly ?string $autonomy = null,
         public readonly ?string $memoryContext = null,
         public ?array $routingMetadata = null,
+        public ?ToolRegistry $toolRegistry = null,
     ) {}
 
     public function phone(): string
@@ -54,6 +55,7 @@ class AgentContext
             reasoning: $reasoning,
             autonomy: $autonomy,
             memoryContext: $this->memoryContext,
+            toolRegistry: $this->toolRegistry,
         );
     }
 
@@ -75,6 +77,29 @@ class AgentContext
             reasoning: $this->reasoning,
             autonomy: $this->autonomy,
             memoryContext: $memoryContext,
+            toolRegistry: $this->toolRegistry,
+        );
+    }
+
+    public function withToolRegistry(ToolRegistry $toolRegistry): self
+    {
+        return new self(
+            agent: $this->agent,
+            session: $this->session,
+            from: $this->from,
+            senderName: $this->senderName,
+            body: $this->body,
+            hasMedia: $this->hasMedia,
+            mediaUrl: $this->mediaUrl,
+            mimetype: $this->mimetype,
+            media: $this->media,
+            routedAgent: $this->routedAgent,
+            routedModel: $this->routedModel,
+            complexity: $this->complexity,
+            reasoning: $this->reasoning,
+            autonomy: $this->autonomy,
+            memoryContext: $this->memoryContext,
+            toolRegistry: $toolRegistry,
         );
     }
 }
