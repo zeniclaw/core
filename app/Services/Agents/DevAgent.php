@@ -403,8 +403,12 @@ class DevAgent extends BaseAgent
             if (!empty($collectedData)) {
                 $collectedText = "\n\nDONNEES DEJA COLLECTEES (appels precedents):\n";
                 foreach ($collectedData as $j => $cd) {
-                    $collectedText .= "--- Appel " . ($j + 1) . ": {$cd['method']} {$cd['url']} ---\n";
-                    $collectedText .= mb_substr($cd['response'], 0, 2000) . "\n\n";
+                    $action = $cd['action'] ?? 'call';
+                    $method = $cd['method'] ?? $action;
+                    $url = $cd['url'] ?? '';
+                    $body = $cd['response'] ?? $cd['content'] ?? '';
+                    $collectedText .= "--- Appel " . ($j + 1) . ": {$method} {$url} ---\n";
+                    $collectedText .= mb_substr($body, 0, 2000) . "\n\n";
                 }
             }
 
