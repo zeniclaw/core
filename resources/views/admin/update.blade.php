@@ -196,8 +196,18 @@
             <span>Update completed! Container will restart automatically.</span>
             <button @click="window.location.reload()" class="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">Reload page</button>
         </div>
-        <div x-show="phase === 'done' && error" x-cloak class="mt-3 px-4 py-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm">
-            Update failed. Check the log above for details.
+        <div x-show="phase === 'done' && error" x-cloak class="mt-3 px-4 py-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm space-y-2">
+            <p class="font-semibold">Update failed. Check the log above for details.</p>
+            <template x-if="updateLog.includes('No container runtime found')">
+                <div class="bg-red-100 rounded p-3 text-xs font-mono space-y-1">
+                    <p class="font-semibold text-red-900 mb-1">Docker CLI missing in container. Run manually on the server:</p>
+                    <p class="select-all">cd /path/to/zeniclaw</p>
+                    <p class="select-all">git pull origin main</p>
+                    <p class="select-all">docker compose build app --no-cache</p>
+                    <p class="select-all">docker compose up -d app</p>
+                    <p class="mt-1 text-red-700 font-sans">After this one-time fix, UI updates will work normally.</p>
+                </div>
+            </template>
         </div>
     </div>
 
