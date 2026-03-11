@@ -356,20 +356,23 @@ C) QUESTION — DERNIER RECOURS, info impossible a deduire:
 {"action": "ask", "store": {}, "message": "question", "save_as": "setting_name"}
 
 REGLES CRITIQUES:
-1. EXTRAIRE ET STOCKER: Si le message/conversation contient URL, cle API, token → mets dans "store"
-2. AGIR: Ne pose JAMAIS de question si tu peux deduire du code source ou des settings
-3. ENCHAINER: Si tu as besoin de plusieurs endpoints (ex: d'abord les projets, puis les factures par projet), fais-les un par un. Tu reverras les resultats a chaque iteration.
-4. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
-5. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
-6. REPONSE FINALE: Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}].
-7. SAUVEGARDER: Dans "knowledge", inclus les donnees importantes a retenir (listes de clients, factures, totaux) pour ne pas refaire les memes appels.
-8. VERIFIER: Regarde "DONNEES DEJA CONNUES" ci-dessus AVANT de faire un appel API. Ne refais pas un appel si tu as deja l'info.
-9. PAGINER: Si l'API retourne des resultats pagines, fais TOUS les appels necessaires pour avoir TOUTES les pages.
+1. EXTRAIRE ET STOCKER IMMEDIATEMENT: Si le message contient URL, cle API, token, endpoint, identifiants → stocke-les dans "store" ET confirme avec "reply". Exemple: si l'utilisateur dit "voici la cle abc123 et le endpoint https://api.example.com", tu reponds:
+{"action": "reply", "store": {"api_key": "abc123", "api_endpoint": "https://api.example.com"}, "message": "[projet] Configuration enregistree ! Cle API et endpoint sauvegardes. Je peux maintenant interroger l'API."}
+NE PROPOSE PAS de code, d'integration, ou de plan technique quand l'utilisateur donne juste des credentials. Stocke et confirme.
+2. AGIR: Ne pose JAMAIS de question si tu peux deduire du code source ou des settings.
+3. UTILISER LES CREDENTIALS: Si des cles/endpoints sont dans la CONFIGURATION STOCKEE, utilise-les directement pour faire des appels API. Ne propose pas de les integrer dans du code.
+4. ENCHAINER: Si tu as besoin de plusieurs endpoints (ex: d'abord les projets, puis les factures par projet), fais-les un par un. Tu reverras les resultats a chaque iteration.
+5. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
+6. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
+7. REPONSE FINALE: Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}].
+8. SAUVEGARDER: Dans "knowledge", inclus les donnees importantes a retenir (listes de clients, factures, totaux) pour ne pas refaire les memes appels.
+9. VERIFIER: Regarde "DONNEES DEJA CONNUES" ci-dessus AVANT de faire un appel API. Ne refais pas un appel si tu as deja l'info.
+10. PAGINER: Si l'API retourne des resultats pagines, fais TOUS les appels necessaires pour avoir TOUTES les pages.
 
 JSON UNIQUEMENT.
 PROMPT;
 
-            $response = $this->claude->chat($query, 'claude-sonnet-4-20250514', $systemPrompt);
+            $response = $this->claude->chat($query, 'claude-opus-4-20250514', $systemPrompt);
             $parsed = $this->parseJson($response);
 
             if (!$parsed || empty($parsed['action'])) {
