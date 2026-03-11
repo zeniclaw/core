@@ -102,11 +102,17 @@ class OllamaController extends Controller
         }
 
         $cacheKey = "ollama_pull_{$model}";
+        $force = $request->boolean('force', false);
 
-        // Check if already pulling
+        // Check if already pulling (skip if force retry)
         $current = Cache::get($cacheKey);
-        if ($current && ($current['status'] ?? '') === 'pulling') {
+        if (!$force && $current && ($current['status'] ?? '') === 'pulling') {
             return response()->json(['message' => 'Already pulling', 'progress' => $current]);
+        }
+
+        // Clear previous error/status on force retry
+        if ($force) {
+            Cache::forget($cacheKey);
         }
 
         // Mark as started

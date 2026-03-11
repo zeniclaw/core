@@ -292,9 +292,9 @@
                 <script>
                 var OLLAMA_MODELS = @json(array_column($ollamaModels, 'id'));
 
-                // Check installed models on page load
-                document.addEventListener('DOMContentLoaded', function() {
-                    ollamaCheckInstalled();
+                // Check installed models on page load, then check pull status (errors override "installed")
+                document.addEventListener('DOMContentLoaded', async function() {
+                    await ollamaCheckInstalled();
                     OLLAMA_MODELS.forEach(function(m) { ollamaCheckPulling(m); });
                 });
 
@@ -307,7 +307,10 @@
                 function ollamaSetInstalled(model) {
                     var el = ollamaGetStatusEl(model);
                     if (!el) return;
-                    el.innerHTML = '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium whitespace-nowrap">Installe</span>';
+                    el.innerHTML = '<div class="flex items-center gap-2">' +
+                        '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium whitespace-nowrap">Installe</span>' +
+                        '<button type="button" onclick="ollamaForceRepull(\'' + model + '\', this)" ' +
+                        'class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200" title="Retelecharger">↻</button></div>';
                 }
 
                 function ollamaSetProgress(model, percent, detail) {
@@ -363,6 +366,19 @@
                             ollamaSetError(model, data.detail || 'Erreur');
                         }
                     } catch (e) {}
+                }
+
+                async function ollamaForceRepull(model, btn) {
+                    // Clear cached pull status so it doesn't show as "already pulling"
+                    try {
+                        await fetch('{{ route("api.ollama.pull") }}', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                            body: JSON.stringify({ model: model, force: true }),
+                        });
+                    } catch(e) {}
+                    ollamaSetProgress(model, 0, 'Retelecharging...');
+                    ollamaStartPolling(model);
                 }
 
                 async function ollamaPull(model, btn) {
