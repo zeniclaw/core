@@ -277,8 +277,10 @@ class OllamaExportCommand extends Command
         $execId = $createResult['Id'] ?? null;
         if (!$execId) return false;
 
-        // Start exec and stream to file
+        // Start exec and stream to file, properly handling Docker multiplexed
+        // stream frames that may be split across curl callback chunks.
         $fp = fopen($outputPath, 'w');
+        $buffer = '';
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_UNIX_SOCKET_PATH => '/var/run/docker.sock',
@@ -288,33 +290,28 @@ class OllamaExportCommand extends Command
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_TIMEOUT => 600,
             CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_WRITEFUNCTION => function ($ch, $data) use ($fp) {
+            CURLOPT_WRITEFUNCTION => function ($ch, $data) use ($fp, &$buffer) {
                 // Docker multiplexed stream: 8-byte header + payload
-                // Header: [type(1)][0][0][0][size(4)]
-                $offset = 0;
-                $len = strlen($data);
-                while ($offset < $len) {
-                    if ($offset + 8 > $len) {
-                        // Incomplete header — write remaining as-is
-                        fwrite($fp, substr($data, $offset));
-                        break;
-                    }
-                    $header = unpack('Ctype/C3pad/Nsize', substr($data, $offset, 8));
-                    $payloadSize = $header['size'];
-                    $offset += 8;
+                // Header: [type(1)][0][0][0][size(4 big-endian)]
+                $buffer .= $data;
 
-                    if ($payloadSize > 0 && $offset + $payloadSize <= $len) {
-                        if ($header['type'] === 1) { // stdout
-                            fwrite($fp, substr($data, $offset, $payloadSize));
-                        }
-                        $offset += $payloadSize;
-                    } else {
-                        // Payload extends beyond current chunk — write what we have
-                        fwrite($fp, substr($data, $offset));
+                while (strlen($buffer) >= 8) {
+                    $header = unpack('Ctype/C3pad/Nsize', substr($buffer, 0, 8));
+                    $payloadSize = $header['size'];
+                    $frameTotal = 8 + $payloadSize;
+
+                    if (strlen($buffer) < $frameTotal) {
+                        // Incomplete frame — wait for more data
                         break;
                     }
+
+                    if ($header['type'] === 1 && $payloadSize > 0) { // stdout
+                        fwrite($fp, substr($buffer, 8, $payloadSize));
+                    }
+                    $buffer = substr($buffer, $frameTotal);
                 }
-                return $len;
+
+                return strlen($data);
             },
         ]);
 
