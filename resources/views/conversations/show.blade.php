@@ -166,6 +166,35 @@
             </div>
         </div>
 
+        {{-- Errors & Warnings (always show if any) --}}
+        @php
+            $errorLogs = $debugLogs->whereIn('level', ['error', 'warning'])->take(10);
+        @endphp
+        @if($errorLogs->isNotEmpty())
+        <div class="bg-red-50 rounded-xl shadow-sm border border-red-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-red-200 bg-red-100">
+                <h3 class="text-sm font-semibold text-red-800">Errors & Warnings ({{ $errorLogs->count() }})</h3>
+            </div>
+            <div class="divide-y divide-red-100 max-h-[300px] overflow-y-auto">
+                @foreach($errorLogs as $elog)
+                <div class="p-3 text-xs" x-data="{ open: false }">
+                    <div class="flex items-start gap-2 cursor-pointer" @click="open = !open">
+                        <span class="text-red-400 font-mono whitespace-nowrap">{{ $elog->created_at->format('d/m H:i:s') }}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold {{ $elog->level === 'error' ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800' }}">
+                            {{ $elog->level }}
+                        </span>
+                        <span class="text-red-900 font-medium">{{ $elog->message }}</span>
+                        <svg class="w-3.5 h-3.5 text-red-400 flex-shrink-0 ml-auto transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <div x-show="open" x-cloak class="mt-2 p-2 bg-gray-900 text-red-300 rounded-lg font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">{{ json_encode($elog->context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</div>
+                </div>
+                @endforeach
+            </div>
+        </div>
+        @endif
+
         {{-- Agent Skills --}}
         @if($skills->isNotEmpty())
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

@@ -122,9 +122,33 @@ class DevAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        try {
+            return $this->handleInner($context);
+        } catch (\Throwable $e) {
+            Log::error('DevAgent handle() exception', [
+                'from' => $context->from,
+                'body' => mb_substr($context->body ?? '', 0, 300),
+                'error' => $e->getMessage(),
+                'file' => $e->getFile() . ':' . $e->getLine(),
+                'trace' => mb_substr($e->getTraceAsString(), 0, 1500),
+            ]);
+            $this->log($context, 'EXCEPTION: ' . $e->getMessage(), [
+                'error' => $e->getMessage(),
+                'file' => basename($e->getFile()) . ':' . $e->getLine(),
+            ], 'error');
+
+            $reply = "Erreur interne de l'agent dev. Verifie les logs debug.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function handleInner(AgentContext $context): AgentResult
+    {
         // Check pending context first (list selection, ambiguous project, etc.)
         $pendingCtx = $context->session->pending_agent_context;
         if ($pendingCtx && ($pendingCtx['agent'] ?? '') === 'dev') {
+            $this->log($context, 'Pending context found', ['type' => $pendingCtx['type'] ?? '']);
             $result = $this->handlePendingContext($context, $pendingCtx);
             if ($result) return $result;
         }
@@ -136,10 +160,11 @@ class DevAgent extends BaseAgent
             ->first();
 
         if ($awaitingProject) {
+            $this->log($context, 'Awaiting validation', ['project' => $awaitingProject->name]);
             return $this->handleTaskValidation($awaitingProject, $context);
         }
 
-        // Intent classification — replaces detectSmartCommand + handleDevRequest cascade
+        // Intent classification
         $activeProjectHint = '';
         if ($context->session->active_project_id) {
             $ap = Project::find($context->session->active_project_id);
@@ -148,6 +173,7 @@ class DevAgent extends BaseAgent
             }
         }
 
+        $this->log($context, 'Classifying intent...');
         $classified = $this->classifyIntent($context, $activeProjectHint);
 
         $this->log($context, 'Intent classified', [
@@ -160,6 +186,7 @@ class DevAgent extends BaseAgent
         $result = $this->dispatchIntent($classified, $context);
         if ($result) return $result;
 
+        $this->log($context, 'No handler for intent, fallback to dev_task');
         // Fallback: treat as dev task
         return $this->handleIntentDevTask($classified['args'], $context);
     }

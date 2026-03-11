@@ -299,6 +299,7 @@ PROMPT;
     {
         $intent = $classified['intent'];
         if ($intent === 'default') {
+            $this->log($context, 'Intent dispatch: default (no match)');
             return null;
         }
 
@@ -306,13 +307,14 @@ PROMPT;
         $method = 'handleIntent' . str_replace('_', '', ucwords($intent, '_'));
 
         if (method_exists($this, $method)) {
-            $this->log($context, "Intent classified: {$intent}", [
+            $this->log($context, "Intent dispatch: {$intent} → {$method}()", [
                 'confidence' => $classified['confidence'],
                 'args' => $classified['args'],
             ]);
             return $this->$method($classified['args'], $context);
         }
 
+        $this->log($context, "Intent dispatch: no handler for '{$intent}' (method {$method} not found)", [], 'warning');
         return null;
     }
 
