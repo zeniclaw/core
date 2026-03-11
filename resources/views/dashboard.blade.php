@@ -64,6 +64,9 @@
                         @endif
                     @endforeach
                 </select>
+                <button @@click="clearChat()" title="Clear chat" class="text-gray-500 hover:text-gray-300 transition-colors p-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
             </div>
 
             {{-- Messages --}}
@@ -171,13 +174,30 @@
 
 <script>
 function dashboardChat() {
+    const STORAGE_KEY = 'zeniclaw_chat_messages';
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+
     return {
         loading: false,
         input: '',
         agentId: '',
-        messages: [
+        messages: saved && saved.length > 0 ? saved : [
             { role: 'assistant', text: 'Hello! I\'m ZeniClaw AI. How can I help you today?', time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
         ],
+
+        init() {
+            this.$watch('messages', (val) => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+            });
+            this.$nextTick(() => this.scrollBottom());
+        },
+
+        clearChat() {
+            this.messages = [
+                { role: 'assistant', text: 'Hello! I\'m ZeniClaw AI. How can I help you today?', time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
+            ];
+            localStorage.removeItem(STORAGE_KEY);
+        },
 
         async send() {
             const text = this.input.trim();
