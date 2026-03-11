@@ -466,7 +466,7 @@ NE PROPOSE PAS de code, d'integration, ou de plan technique quand l'utilisateur 
 JSON UNIQUEMENT.
 PROMPT;
 
-            $response = $this->claude->chat($query, ModelResolver::powerful(), $systemPrompt);
+            $response = $this->claude->chat($query, ModelResolver::powerful(), $systemPrompt, 8192);
             $parsed = $this->parseJson($response);
 
             // Self-healing: if JSON parse fails, send the raw response back to Claude to fix it

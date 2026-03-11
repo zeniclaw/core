@@ -150,7 +150,7 @@ class AnthropicClient
     /**
      * @param string|array $message Text string or array of content blocks (multimodal)
      */
-    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = ''): ?string
+    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0): ?string
     {
         if ($this->isOnPremModel($model)) {
             return $this->chatOnPrem($message, $model, $systemPrompt);
@@ -183,7 +183,7 @@ class AnthropicClient
 
         $body = [
             'model' => $model,
-            'max_tokens' => $isMultimodal ? 2048 : 1024,
+            'max_tokens' => $maxTokens > 0 ? $maxTokens : ($isMultimodal ? 2048 : 1024),
             'messages' => [
                 ['role' => 'user', 'content' => $content],
             ],
@@ -193,22 +193,56 @@ class AnthropicClient
             $body['system'] = $systemPrompt;
         }
 
-        $response = Http::timeout($isMultimodal ? 60 : 30)
-            ->withHeaders($headers)
-            ->post("{$this->baseUrl}/messages", $body);
+        // Loop to handle truncated responses (stop_reason = max_tokens)
+        $fullText = '';
+        $maxContinuations = 3;
 
-        if ($response->successful()) {
-            $data = $response->json('content');
-            return $data[0]['text'] ?? null;
+        for ($cont = 0; $cont <= $maxContinuations; $cont++) {
+            $response = Http::timeout($isMultimodal ? 60 : 30)
+                ->withHeaders($headers)
+                ->post("{$this->baseUrl}/messages", $body);
+
+            if (!$response->successful()) {
+                Log::error('AnthropicClient::chat failed', [
+                    'status' => $response->status(),
+                    'body' => substr($response->body(), 0, 500),
+                    'model' => $model,
+                ]);
+                return $fullText ?: null;
+            }
+
+            $data = $response->json();
+            $text = $data['content'][0]['text'] ?? '';
+            $fullText .= $text;
+            $stopReason = $data['stop_reason'] ?? 'end_turn';
+
+            // If response completed normally, return
+            if ($stopReason !== 'max_tokens') {
+                return $fullText;
+            }
+
+            // Response truncated — continue by asking for the rest
+            Log::info('AnthropicClient::chat continuation needed', [
+                'continuation' => $cont + 1,
+                'accumulated_length' => mb_strlen($fullText),
+            ]);
+
+            // Switch to multi-turn: send accumulated text as assistant, ask to continue
+            $body = [
+                'model' => $model,
+                'max_tokens' => $body['max_tokens'],
+                'messages' => [
+                    ['role' => 'user', 'content' => is_array($message) ? $message : $message],
+                    ['role' => 'assistant', 'content' => $fullText],
+                    ['role' => 'user', 'content' => 'Continue exactement ou tu t\'es arrete. JSON UNIQUEMENT, pas de texte avant.'],
+                ],
+            ];
+            if ($systemPrompt) {
+                $body['system'] = $systemPrompt;
+            }
         }
 
-        Log::error('AnthropicClient::chat failed', [
-            'status' => $response->status(),
-            'body' => substr($response->body(), 0, 500),
-            'model' => $model,
-        ]);
-
-        return null;
+        return $fullText;
     }
 
     /**
