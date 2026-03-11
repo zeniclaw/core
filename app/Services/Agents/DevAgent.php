@@ -426,6 +426,9 @@ B) REPONSE FINALE — Tu as ASSEZ de donnees pour repondre completement:
 C) QUESTION — DERNIER RECOURS, info impossible a deduire:
 {"action": "ask", "store": {}, "message": "question", "save_as": "setting_name"}
 
+D) FETCH PAGE — Recuperer et analyser une page web (doc API, swagger, etc.):
+{"action": "web_fetch", "url": "https://...", "explanation": "pourquoi cette page"}
+
 REGLES CRITIQUES:
 1. EXTRAIRE ET STOCKER IMMEDIATEMENT: Si le message contient URL, cle API, token, endpoint, identifiants → stocke-les dans "store" ET confirme avec "reply". Exemple: si l'utilisateur dit "voici la cle abc123 et le endpoint https://api.example.com", tu reponds:
 {"action": "reply", "store": {"api_key": "abc123", "api_endpoint": "https://api.example.com"}, "message": "[projet] Configuration enregistree ! Cle API et endpoint sauvegardes. Je peux maintenant interroger l'API."}
@@ -511,6 +514,15 @@ PROMPT;
                 // If auth error, let Claude handle it in next iteration
                 // (it will see the 401 in collected data and decide to ask or fix)
             }
+
+            if ($parsed['action'] === 'web_fetch') {
+                $fetchResult = $this->fetchWebPage($parsed['url'] ?? '');
+                $collectedData[] = [
+                    'action' => 'web_fetch',
+                    'url' => $parsed['url'] ?? '',
+                    'content' => $fetchResult,
+                ];
+            }
         }
 
         // Max iterations reached — ask Claude to summarize what it has
@@ -541,6 +553,32 @@ PROMPT;
             ];
         } catch (\Exception $e) {
             return ['status' => 0, 'body' => 'Error: ' . $e->getMessage()];
+        }
+    }
+
+    private function fetchWebPage(string $url): string
+    {
+        if (!$url) return 'No URL provided';
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::timeout(15)
+                ->withHeaders(['User-Agent' => 'ZeniClaw/1.0'])
+                ->get($url);
+
+            if (!$response->successful()) {
+                return "HTTP {$response->status()} error fetching {$url}";
+            }
+
+            $body = $response->body();
+
+            // Strip HTML tags, keep text content
+            $text = strip_tags($body);
+            // Collapse whitespace
+            $text = preg_replace('/\s+/', ' ', $text);
+            // Limit size
+            return mb_substr(trim($text), 0, 8000);
+        } catch (\Exception $e) {
+            return "Fetch error: " . $e->getMessage();
         }
     }
 
@@ -750,7 +788,8 @@ PROMPT;
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
-        $reply = $this->runApiAgent($project, $context->body, [], $context);
+        $conversation = $this->getRecentConversation($context);
+        $reply = $this->runApiAgent($project, $context->body, $conversation, $context);
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'api_query']);
     }
@@ -763,7 +802,8 @@ PROMPT;
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
-        $reply = $this->runApiAgent($project, $context->body, [], $context);
+        $conversation = $this->getRecentConversation($context);
+        $reply = $this->runApiAgent($project, $context->body, $conversation, $context);
         $this->sendText($context->from, $reply);
         return AgentResult::reply($reply, ['action' => 'api_credentials']);
     }
@@ -1584,6 +1624,31 @@ PROMPT;
         ]);
 
         return AgentResult::reply($reply, ['project_id' => $project->id, 'action' => 'awaiting_validation']);
+    }
+
+    private function getRecentConversation(AgentContext $context, int $maxEntries = 8): array
+    {
+        $history = $this->memory->read($context->agent->id, $context->from);
+        $entries = $history['entries'] ?? [];
+
+        if (empty($entries)) {
+            return [];
+        }
+
+        $recent = array_slice($entries, -$maxEntries);
+        $conversation = [];
+        foreach ($recent as $entry) {
+            $conversation[] = [
+                'role' => 'user',
+                'content' => $entry['sender_message'] ?? '',
+            ];
+            $conversation[] = [
+                'role' => 'assistant',
+                'content' => $entry['agent_reply'] ?? '',
+            ];
+        }
+
+        return $conversation;
     }
 
     private function findProjectForUser(AgentContext $context): ?Project

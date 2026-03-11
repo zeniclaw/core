@@ -222,8 +222,34 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
     }
 
     /**
+     * Get recent conversation history formatted for intent classification.
+     * Override maxEntries for more/less history.
+     */
+    protected function getConversationHistoryForClassifier(AgentContext $context, int $maxEntries = 5): string
+    {
+        $history = $this->memory->read($context->agent->id, $context->from);
+        $entries = $history['entries'] ?? [];
+
+        if (empty($entries)) {
+            return '';
+        }
+
+        $recent = array_slice($entries, -$maxEntries);
+        $lines = ["HISTORIQUE RECENT:"];
+        foreach ($recent as $entry) {
+            $msg = mb_substr($entry['sender_message'] ?? '', 0, 120);
+            $reply = mb_substr($entry['agent_reply'] ?? '', 0, 120);
+            $lines[] = "- User: {$msg}";
+            $lines[] = "  Agent: {$reply}";
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
      * Classify user message intent using Haiku LLM.
      * Returns ['intent' => string, 'args' => array, 'confidence' => int].
+     * Automatically includes recent conversation history for better context.
      */
     protected function classifyIntent(AgentContext $context, string $extraContext = ''): array
     {
@@ -243,17 +269,21 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
             }
         }
 
+        // Automatically include conversation history
+        $historyContext = $this->getConversationHistoryForClassifier($context);
+
         $prompt = <<<PROMPT
 Tu classes le message d'un utilisateur en une INTENTION parmi celles disponibles.
 
 INTENTIONS DISPONIBLES:
 {$intentList}
-{$extraContext}
+{$extraContext}{$historyContext}
 Reponds UNIQUEMENT en JSON valide:
 {"intent": "nom_intent", "args": {}, "confidence": 85}
 
 - "args": parametres extraits du message (nom de projet, query, etc.)
 - "confidence": 0-100, ta certitude
+- Utilise l'HISTORIQUE RECENT pour comprendre le contexte (ex: si l'utilisateur a parle d'un projet API, un message court fait probablement reference a ce contexte)
 
 Si aucune intention ne correspond bien, utilise "default" avec confidence basse.
 
@@ -443,5 +473,13 @@ PROMPT;
     protected function getSkillsForPrompt(AgentContext $context): string
     {
         return \App\Models\AgentSkill::formatForPrompt($context->agent->id, $this->name());
+    }
+
+    /**
+     * Anti-hallucination rule to inject into agent system prompts.
+     */
+    protected function getAntiHallucinationRule(): string
+    {
+        return "REGLE ANTI-HALLUCINATION: Ne pretends JAMAIS avoir effectue une action si tu n'as PAS utilise un outil (tool_use) pour le faire. Si un outil echoue ou n'est pas disponible, dis-le clairement au lieu d'inventer un resultat.";
     }
 }

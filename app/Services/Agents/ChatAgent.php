@@ -257,6 +257,7 @@ class ChatAgent extends BaseAgent
         $systemPrompt =
             "Tu es ZeniClaw, un assistant WhatsApp autonome. Utilise tes outils (tools) proactivement, sans demander confirmation. "
             . "FAIS directement, ne dis jamais 'je peux faire X si tu veux'.\n\n"
+            . "REGLE ANTI-HALLUCINATION: Ne pretends JAMAIS avoir effectue une action (rappel cree, todo ajoute, recherche faite, etc.) si tu n'as PAS utilise un outil (tool_use) pour le faire. Si un outil echoue, dis-le clairement.\n\n"
             . "OUTILS: rappel→create_reminder, todo→add_todos, info perso→store_knowledge, question factuelle→web_search. "
             . "Confirme brievement apres chaque action.\n\n"
             . "MEMOIRE: utilise recall_knowledge AVANT de redemander une info. store_knowledge pour sauver les donnees importantes.\n\n"

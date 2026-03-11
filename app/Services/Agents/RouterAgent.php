@@ -211,7 +211,7 @@ class RouterAgent
 
         // ── Deterministic fast-path patterns (no LLM call) ──
         if ($context->body && !$context->hasMedia) {
-            $fastResult = $this->matchFastPath($context->body);
+            $fastResult = $this->matchFastPath($context->body, $context);
             if ($fastResult) {
                 return $fastResult;
             }
@@ -576,12 +576,32 @@ CATALOG;
     /**
      * Try deterministic fast-path patterns before calling the LLM.
      */
-    private function matchFastPath(string $body): ?array
+    private function matchFastPath(string $body, AgentContext $context): ?array
     {
         $clean = trim($body);
 
+        // API-related keywords that may indicate the user wants the DevAgent
+        $apiKeywords = '/\b(api|endpoint|campagne|prospect|facture|invoice|client|commande|order|produit|product|stat|dashboard|donnees|data|cle|key|token|credential|appel|call|requete|query|users|utilisateurs)\b/iu';
+
         foreach ($this->fastPathPatterns as $pattern => [$agent, $model, $complexity, $autonomy]) {
             if (preg_match($pattern, $clean)) {
+                // If the user has an active API project and the message contains
+                // API-related keywords, skip fast-path so the LLM router can
+                // decide whether the DevAgent should handle it.
+                if (
+                    $agent !== 'dev'
+                    && !empty($context->session->active_project_id)
+                    && preg_match($apiKeywords, $clean)
+                ) {
+                    Log::info('RouterAgent: fast-path skipped (active project + API keywords)', [
+                        'agent' => $agent,
+                        'pattern' => $pattern,
+                        'active_project_id' => $context->session->active_project_id,
+                        'body' => mb_substr($clean, 0, 60),
+                    ]);
+                    return null;
+                }
+
                 Log::info('RouterAgent: fast-path match', ['agent' => $agent, 'pattern' => $pattern, 'body' => mb_substr($clean, 0, 60)]);
                 return [
                     'agent' => $agent,
