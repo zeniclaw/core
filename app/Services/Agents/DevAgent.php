@@ -474,7 +474,7 @@ PROMPT;
                 $parseFailures++;
                 $this->log($context, "runApiAgent parse failed at iteration {$i} (attempt {$parseFailures})", [
                     'raw_response' => mb_substr($response ?? '', 0, 500),
-                ], 'warning');
+                ], 'warn');
 
                 if ($parseFailures >= 3) {
                     return "[{$project->name}] Erreur d'analyse apres plusieurs tentatives. Reformule ta demande.";
@@ -488,7 +488,7 @@ PROMPT;
                 $parsed = $this->parseJson($fixResponse);
 
                 if (!$parsed || empty($parsed['action'])) {
-                    $this->log($context, "Self-heal also failed, continuing to next iteration", [], 'warning');
+                    $this->log($context, "Self-heal also failed, continuing to next iteration", [], 'warn');
                     continue;
                 }
 
@@ -698,7 +698,26 @@ PROMPT;
         if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
             $clean = $m[1];
         }
-        return json_decode($clean, true);
+
+        $result = json_decode($clean, true);
+        if ($result !== null) {
+            return $result;
+        }
+
+        // JSON may be truncated (max_tokens hit with long HTML content)
+        // Try to salvage by closing open strings/objects
+        $salvage = $clean;
+        // Count unmatched quotes — if odd, close the string
+        if (substr_count($salvage, '"') % 2 !== 0) {
+            $salvage .= '"';
+        }
+        // Close open braces/brackets
+        $opens = substr_count($salvage, '{') - substr_count($salvage, '}');
+        $salvage .= str_repeat('}', max(0, $opens));
+        $opens = substr_count($salvage, '[') - substr_count($salvage, ']');
+        $salvage .= str_repeat(']', max(0, $opens));
+
+        return json_decode($salvage, true);
     }
 
     // ── Intent Handlers ──────────────────────────────────────────────

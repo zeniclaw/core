@@ -344,7 +344,7 @@ PROMPT;
             return $this->$method($classified['args'], $context);
         }
 
-        $this->log($context, "Intent dispatch: no handler for '{$intent}' (method {$method} not found)", [], 'warning');
+        $this->log($context, "Intent dispatch: no handler for '{$intent}' (method {$method} not found)", [], 'warn');
         return null;
     }
 

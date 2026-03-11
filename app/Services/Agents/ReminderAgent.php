@@ -1656,7 +1656,7 @@ PROMPT;
     {
         $reply = "Action non reconnue. Tape \"aide\" pour voir les commandes disponibles.";
         $this->sendText($context->from, $reply);
-        $this->log($context, 'Unknown action', ['action' => $action], 'warning');
+        $this->log($context, 'Unknown action', ['action' => $action], 'warn');
         return AgentResult::reply($reply, ['action' => 'reminder_unknown_action']);
     }
 
