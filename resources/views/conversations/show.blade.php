@@ -2,7 +2,7 @@
 @section('title', 'Conversation — ' . $conversation->displayName())
 
 @section('content')
-<div class="space-y-4" x-data="{ tab: 'messages' }">
+<div class="space-y-4" x-data="{ tab: 'debug' }">
 
     {{-- Header --}}
     <div class="flex items-center justify-between">
@@ -140,7 +140,98 @@
     </div>
 
     {{-- Debug tab --}}
-    <div x-show="tab === 'debug'" x-cloak class="space-y-4">
+    <div x-show="tab === 'debug'" class="space-y-4">
+
+        {{-- Quick summary --}}
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-3 text-center">
+                <p class="text-2xl font-bold text-indigo-600">{{ $routingLogs->count() }}</p>
+                <p class="text-xs text-gray-500">Routing decisions</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-3 text-center">
+                <p class="text-2xl font-bold text-purple-600">{{ $toolLogs->count() }}</p>
+                <p class="text-xs text-gray-500">Tool calls</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-3 text-center">
+                <p class="text-2xl font-bold text-amber-600">{{ $skills->count() }}</p>
+                <p class="text-xs text-gray-500">Skills appris</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-3 text-center">
+                <p class="text-2xl font-bold text-emerald-600">{{ $userKnowledge->count() }}</p>
+                <p class="text-xs text-gray-500">Knowledge</p>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-3 text-center">
+                <p class="text-2xl font-bold text-red-600">{{ $debugLogs->where('level', 'error')->count() }}</p>
+                <p class="text-xs text-gray-500">Errors</p>
+            </div>
+        </div>
+
+        {{-- Agent Skills --}}
+        @if($skills->isNotEmpty())
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-amber-50">
+                <h3 class="text-sm font-semibold text-amber-800">Agent Skills ({{ $skills->count() }})</h3>
+            </div>
+            <div class="divide-y divide-gray-50">
+                @foreach($skills as $skill)
+                <div class="p-3 text-xs hover:bg-gray-50">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold text-[10px]">{{ $skill->sub_agent }}</span>
+                        <span class="font-semibold text-gray-800">{{ $skill->title }}</span>
+                        <span class="font-mono text-gray-400">{{ $skill->skill_key }}</span>
+                        <span class="text-gray-400 ml-auto">{{ $skill->created_at->format('d/m H:i') }}</span>
+                    </div>
+                    <p class="text-gray-600">{{ $skill->instructions }}</p>
+                </div>
+                @endforeach
+            </div>
+        </div>
+        @endif
+
+        {{-- Tool Calls --}}
+        @if($toolLogs->isNotEmpty())
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-purple-50">
+                <h3 class="text-sm font-semibold text-purple-800">Tool Calls ({{ $toolLogs->count() }})</h3>
+            </div>
+            <div class="divide-y divide-gray-50 max-h-[300px] overflow-y-auto">
+                @foreach($toolLogs as $tlog)
+                <div class="p-3 text-xs hover:bg-gray-50" x-data="{ open: false }">
+                    <div class="flex items-center gap-2 cursor-pointer" @@click="open = !open">
+                        <span class="text-gray-400 font-mono">{{ $tlog->created_at->format('d/m H:i:s') }}</span>
+                        <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold text-[10px]">tool</span>
+                        <span class="text-gray-800 truncate">{{ str_replace('[AgenticLoop] ', '', $tlog->message) }}</span>
+                        <svg class="w-3 h-3 text-gray-400 flex-shrink-0 ml-auto transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div x-show="open" x-cloak class="mt-2 p-2 bg-gray-900 text-gray-300 rounded-lg font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">{{ json_encode($tlog->context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</div>
+                </div>
+                @endforeach
+            </div>
+        </div>
+        @endif
+
+        {{-- User Knowledge --}}
+        @if($userKnowledge->isNotEmpty())
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 bg-emerald-50">
+                <h3 class="text-sm font-semibold text-emerald-800">User Knowledge ({{ $userKnowledge->count() }})</h3>
+            </div>
+            <div class="divide-y divide-gray-50 max-h-[300px] overflow-y-auto">
+                @foreach($userKnowledge as $uk)
+                <div class="p-3 text-xs hover:bg-gray-50" x-data="{ open: false }">
+                    <div class="flex items-center gap-2 cursor-pointer" @@click="open = !open">
+                        <span class="font-mono font-semibold text-emerald-700">{{ $uk->topic_key }}</span>
+                        @if($uk->label)<span class="text-gray-600">{{ $uk->label }}</span>@endif
+                        @if($uk->source)<span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[10px]">{{ $uk->source }}</span>@endif
+                        <span class="text-gray-400 ml-auto">{{ $uk->updated_at->format('d/m H:i') }}</span>
+                        <svg class="w-3 h-3 text-gray-400 flex-shrink-0 transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div x-show="open" x-cloak class="mt-2 p-2 bg-gray-900 text-gray-300 rounded-lg font-mono text-[11px] overflow-x-auto whitespace-pre-wrap">{{ json_encode($uk->data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</div>
+                </div>
+                @endforeach
+            </div>
+        </div>
+        @endif
 
         {{-- Routing decisions --}}
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

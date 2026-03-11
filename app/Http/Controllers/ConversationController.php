@@ -132,12 +132,38 @@ class ConversationController extends Controller
             ->limit(30)
             ->get();
 
+        // Agent skills for this session
+        $skills = \App\Models\AgentSkill::where('agent_id', $conversation->agent_id)
+            ->where('active', true)
+            ->orderBy('sub_agent')
+            ->orderBy('created_at')
+            ->get();
+
+        // Tool calls (AgenticLoop debug logs)
+        $toolLogs = AgentLog::where('agent_id', $conversation->agent_id)
+            ->where('message', 'like', '%[AgenticLoop]%')
+            ->where('context->from', $conversation->peer_id)
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get();
+
+        // User knowledge for this peer
+        $userKnowledge = \App\Models\UserKnowledge::where('user_phone', $conversation->peer_id)
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderByDesc('updated_at')
+            ->get();
+
         return view('conversations.show', [
             'conversation' => $conversation,
             'messages' => $messages,
             'memoryEntries' => $memoryData['entries'] ?? [],
             'debugLogs' => $debugLogs,
             'routingLogs' => $routingLogs,
+            'skills' => $skills,
+            'toolLogs' => $toolLogs,
+            'userKnowledge' => $userKnowledge,
         ]);
     }
 
