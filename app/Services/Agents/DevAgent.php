@@ -373,6 +373,13 @@ PROMPT;
             $parsed = $this->parseJson($response);
 
             if (!$parsed || empty($parsed['action'])) {
+                Log::warning('DevAgent parse failed', [
+                    'from' => $context->from ?? null,
+                    'project' => $project->name,
+                    'raw_response' => mb_substr($response ?? '', 0, 2000),
+                    'parsed' => $parsed,
+                    'query' => mb_substr($query, 0, 500),
+                ]);
                 return "[{$project->name}] Erreur d'analyse. Reformule ta demande.";
             }
 
