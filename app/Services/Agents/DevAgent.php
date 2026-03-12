@@ -616,22 +616,28 @@ PROMPT;
         $totalPages = 1;
         $currentPage = 1;
 
+        // Flatten: handle nested {"data": {"current_page":..., "data":[...]}} or {"success":true, "data":{...}}
+        $paginator = $firstPageJson;
+        if (isset($paginator['data']) && is_array($paginator['data']) && isset($paginator['data']['current_page'])) {
+            $paginator = $paginator['data']; // unwrap {"success":true, "data": {paginator}}
+        }
+
         // Laravel/standard: { "next_page_url": "...", "last_page": N, "current_page": 1 }
-        if (!empty($firstPageJson['next_page_url'])) {
-            $nextUrl = $firstPageJson['next_page_url'];
-            $totalPages = $firstPageJson['last_page'] ?? 10;
-            $currentPage = $firstPageJson['current_page'] ?? 1;
+        if (!empty($paginator['next_page_url'])) {
+            $nextUrl = $paginator['next_page_url'];
+            $totalPages = $paginator['last_page'] ?? 10;
+            $currentPage = $paginator['current_page'] ?? 1;
         }
         // Alternative: { "meta": { "current_page": 1, "last_page": N }, "links": { "next": "..." } }
-        elseif (!empty($firstPageJson['links']['next'])) {
-            $nextUrl = $firstPageJson['links']['next'];
-            $totalPages = $firstPageJson['meta']['last_page'] ?? $firstPageJson['last_page'] ?? 10;
-            $currentPage = $firstPageJson['meta']['current_page'] ?? 1;
+        elseif (!empty($paginator['links']['next'])) {
+            $nextUrl = $paginator['links']['next'];
+            $totalPages = $paginator['meta']['last_page'] ?? $paginator['last_page'] ?? 10;
+            $currentPage = $paginator['meta']['current_page'] ?? 1;
         }
         // Another: { "pagination": { "next": "...", "pages": N } }
-        elseif (!empty($firstPageJson['pagination']['next'])) {
-            $nextUrl = $firstPageJson['pagination']['next'];
-            $totalPages = $firstPageJson['pagination']['pages'] ?? 10;
+        elseif (!empty($paginator['pagination']['next'])) {
+            $nextUrl = $paginator['pagination']['next'];
+            $totalPages = $paginator['pagination']['pages'] ?? 10;
         }
 
         if (!$nextUrl || $totalPages <= 1) return $collectedData;
@@ -713,18 +719,10 @@ PROMPT;
             $json = json_decode($rawBody, true);
             if (!$json) continue;
 
-            // Handle common API response shapes:
+            // Handle common API response shapes, including nested pagination:
+            // { "data": { "data": [...] } } (Laravel paginate wrapped)
             // { "data": [...] }, { "items": [...] }, { "results": [...] }, or just [...]
-            $records = null;
-            if (isset($json['data']) && is_array($json['data'])) {
-                $records = $json['data'];
-            } elseif (isset($json['items']) && is_array($json['items'])) {
-                $records = $json['items'];
-            } elseif (isset($json['results']) && is_array($json['results'])) {
-                $records = $json['results'];
-            } elseif (is_array($json) && isset($json[0]) && is_array($json[0])) {
-                $records = $json;
-            }
+            $records = $this->extractRecordsFromJson($json);
 
             if ($records) {
                 $allRecords = array_merge($allRecords, $records);
@@ -776,6 +774,44 @@ PROMPT;
      * Format API records into WhatsApp-friendly text without any LLM involvement.
      * Handles any shape of records by auto-detecting fields.
      */
+    /**
+     * Recursively find the array of records in any JSON structure.
+     * Handles: [...], {"data":[...]}, {"data":{"data":[...]}}, {"success":true,"data":{"data":[...]}}
+     */
+    private function extractRecordsFromJson(array $json): ?array
+    {
+        // Direct array of objects: [{...}, {...}]
+        if (isset($json[0]) && is_array($json[0])) {
+            return $json;
+        }
+
+        // Try common wrapper keys
+        foreach (['data', 'items', 'results', 'records', 'rows', 'entries', 'list'] as $key) {
+            if (!isset($json[$key]) || !is_array($json[$key])) continue;
+
+            $inner = $json[$key];
+
+            // Direct array of objects: {"data": [{...}, {...}]}
+            if (isset($inner[0]) && is_array($inner[0])) {
+                return $inner;
+            }
+
+            // Nested pagination: {"data": {"data": [{...}], "current_page": 1, ...}}
+            if (isset($inner['data']) && is_array($inner['data']) && isset($inner['data'][0]) && is_array($inner['data'][0])) {
+                return $inner['data'];
+            }
+
+            // Try one more level: {"data": {"items": [{...}]}}
+            foreach (['data', 'items', 'results', 'records'] as $subKey) {
+                if (isset($inner[$subKey]) && is_array($inner[$subKey]) && !empty($inner[$subKey]) && isset($inner[$subKey][0]) && is_array($inner[$subKey][0])) {
+                    return $inner[$subKey];
+                }
+            }
+        }
+
+        return null;
+    }
+
     private function formatRecordsProgrammatically(array $records): string
     {
         if (empty($records)) return '(aucun resultat)';
