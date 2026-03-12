@@ -816,80 +816,118 @@ PROMPT;
     {
         if (empty($records)) return '(aucun resultat)';
 
-        // Auto-detect which fields are present across all records
-        $fieldFrequency = [];
+        // Step 1: Deduplicate records (by id, or by full content hash)
+        $seen = [];
+        $unique = [];
         foreach ($records as $record) {
             if (!is_array($record)) continue;
-            foreach (array_keys($record) as $key) {
-                $fieldFrequency[$key] = ($fieldFrequency[$key] ?? 0) + 1;
-            }
+            $key = $record['id'] ?? md5(json_encode($record));
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $unique[] = $record;
         }
+        $records = $unique;
 
-        // Prioritize human-readable fields for display
-        $displayPriority = [
-            'name', 'company_name', 'nom', 'label', 'title', 'titre',
-            'reference', 'ref', 'number', 'numero', 'code', 'id',
-            'email', 'mail', 'phone', 'telephone', 'tel',
-            'vat_number', 'tva', 'vat', 'tax_number',
-            'address', 'adresse', 'city', 'ville', 'country', 'pays',
-            'amount', 'total', 'montant', 'price', 'prix',
-            'status', 'statut', 'state', 'etat',
-            'date', 'created_at', 'due_date', 'date_echeance',
-            'description', 'notes', 'comment',
+        if (empty($records)) return '(aucun resultat)';
+
+        // Step 2: Fields to ALWAYS hide (internal/technical, never useful to end user)
+        $hiddenFields = [
+            'id', 'tenant_id', 'created_at', 'updated_at', 'deleted_at',
+            'cegid_customer_id', 'cegid_token', 'cegid_eligible', 'cegid_onboarding_status',
+            'cegid_onboarding_completed_at', 'cegid_contract_status', 'cegid_approved_at',
+            'cegid_rejection_reasons', 'cegid_debtor_id',
+            'currency_id', 'is_primary', 'dunning_segment', 'dunning_excluded',
+            'dunning_level', 'dunning_preferences', 'last_dunning_at',
+            'overdue_invoices_count', 'total_overdue_amount',
+            'vat_number_validated', 'vat_number_validated_at',
+            'customer_number_by_vat', 'shipping_address_line1', 'shipping_address_line2',
+            'shipping_city', 'shipping_state', 'shipping_postal_code', 'shipping_country_code',
+            'contact_first_name', 'contact_last_name', 'contact_person',
+            'billing_address_line2', 'billing_state',
+        ];
+        $hiddenSet = array_flip($hiddenFields);
+
+        // Step 3: Fields to show, in priority order (only show what exists and is useful)
+        $displayOrder = [
+            'customer_number', 'invoice_number', 'reference', 'number', 'code',
+            'email', 'phone', 'telephone',
+            'vat_number', 'company_number',
+            'billing_address_line1', 'billing_city', 'billing_postal_code', 'billing_country_code',
+            'address', 'city', 'postal_code', 'country',
+            'amount', 'total', 'total_amount', 'price', 'balance',
+            'status', 'state', 'is_active',
+            'type', 'company_type',
+            'date', 'due_date', 'issue_date',
+            'language',
+            'description', 'notes',
         ];
 
-        // Select fields to show: prioritized fields that exist, then others
-        $fieldsToShow = [];
-        foreach ($displayPriority as $pf) {
-            foreach ($fieldFrequency as $key => $count) {
-                if (mb_strtolower($key) === $pf || str_contains(mb_strtolower($key), $pf)) {
-                    $fieldsToShow[$key] = true;
-                }
-            }
+        // Build ordered field list from what actually exists in the records
+        $allKeys = [];
+        foreach ($records as $r) {
+            foreach (array_keys($r) as $k) $allKeys[$k] = true;
         }
-        // Add remaining non-nested fields (skip large objects/arrays)
-        foreach ($fieldFrequency as $key => $count) {
-            if (isset($fieldsToShow[$key])) continue;
-            // Only include scalar fields
-            $sample = $records[0][$key] ?? null;
-            if (!is_array($sample) && !is_object($sample)) {
-                $fieldsToShow[$key] = true;
-            }
-        }
-        $fields = array_keys($fieldsToShow);
 
-        // Find the "name" field (first field that looks like a name/title)
+        $fields = [];
+        foreach ($displayOrder as $f) {
+            if (isset($allKeys[$f]) && !isset($hiddenSet[$f])) {
+                $fields[] = $f;
+            }
+        }
+
+        // Find the "name" field for the header
         $nameField = null;
-        foreach (['name', 'company_name', 'nom', 'label', 'title', 'titre', 'reference'] as $candidate) {
-            foreach ($fields as $f) {
-                if (mb_strtolower($f) === $candidate || str_contains(mb_strtolower($f), $candidate)) {
-                    $nameField = $f;
-                    break 2;
-                }
+        foreach (['name', 'company_name', 'nom', 'label', 'title', 'titre'] as $candidate) {
+            if (isset($allKeys[$candidate])) {
+                $nameField = $candidate;
+                break;
             }
         }
 
-        // Format each record
+        // Step 4: Format each record — combine address parts into one line
         $lines = [];
         $num = 0;
         foreach ($records as $record) {
-            if (!is_array($record)) continue;
             $num++;
             $header = $nameField && !empty($record[$nameField])
                 ? "*{$num}. {$record[$nameField]}*"
                 : "*{$num}.*";
 
             $details = [];
+            $addressParts = [];
+            $skipAddress = false;
+
             foreach ($fields as $field) {
-                if ($field === $nameField) continue; // already in header
+                if ($field === $nameField) continue;
                 $value = $record[$field] ?? null;
-                if ($value === null || $value === '') {
-                    continue; // skip empty — cleaner output
-                }
+                if ($value === null || $value === '' || $value === false) continue;
                 if (is_array($value) || is_object($value)) continue;
+
+                // Combine billing address parts into one line
+                if (in_array($field, ['billing_address_line1', 'billing_city', 'billing_postal_code', 'billing_country_code'])) {
+                    $addressParts[$field] = $value;
+                    continue;
+                }
+
+                // Format booleans
+                if ($value === true || $value === 1) $value = 'Oui';
+                if ($value === 0 && $field === 'is_active') $value = 'Non';
 
                 $label = $this->humanizeFieldName($field);
                 $details[] = "  • {$label}: {$value}";
+            }
+
+            // Append combined address if we have parts
+            if (!empty($addressParts)) {
+                $addr = trim(implode(', ', array_filter([
+                    $addressParts['billing_address_line1'] ?? '',
+                    $addressParts['billing_postal_code'] ?? '',
+                    $addressParts['billing_city'] ?? '',
+                    $addressParts['billing_country_code'] ?? '',
+                ])));
+                if ($addr) {
+                    $details[] = "  • Adresse: {$addr}";
+                }
             }
 
             $lines[] = $header . ($details ? "\n" . implode("\n", $details) : '');
