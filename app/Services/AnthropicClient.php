@@ -72,7 +72,7 @@ class AnthropicClient
     /**
      * Route on-prem model calls to Ollama/OpenAI-compatible API.
      */
-    private function chatOnPrem(string|array $message, string $model, string $systemPrompt = ''): ?string
+    private function chatOnPrem(string|array $message, string $model, string $systemPrompt = '', int $maxTokens = 0): ?string
     {
         $baseUrl = $this->getOrDetectOnPremUrl();
         if (!$baseUrl) {
@@ -107,10 +107,16 @@ class AnthropicClient
         $content = is_array($message) ? json_encode($message) : $message;
         $messages[] = ['role' => 'user', 'content' => $content];
 
+        // Small on-prem models on CPU can't generate many tokens fast enough
+        // Default to 512 to avoid Ollama's internal 2-minute timeout
+        if ($maxTokens <= 0) {
+            $maxTokens = 512;
+        }
+
         $body = [
             'model' => $model,
             'messages' => $messages,
-            'max_tokens' => 2048,
+            'max_tokens' => $maxTokens,
             'stream' => false,
         ];
 
@@ -153,7 +159,7 @@ class AnthropicClient
     public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0): ?string
     {
         if ($this->isOnPremModel($model)) {
-            return $this->chatOnPrem($message, $model, $systemPrompt);
+            return $this->chatOnPrem($message, $model, $systemPrompt, $maxTokens);
         }
 
         $apiKey = AppSetting::get('anthropic_api_key');
