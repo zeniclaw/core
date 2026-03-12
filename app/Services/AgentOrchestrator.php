@@ -223,7 +223,7 @@ class AgentOrchestrator
                     // Low confidence or failed — voice agent already replied to user
                     return $voiceResult;
                 }
-            } elseif (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant', 'document'])) {
+            } elseif (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
                 $dispatchAgent = 'chat';
             }
 
