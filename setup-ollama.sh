@@ -5,7 +5,7 @@ set -euo pipefail
 # ZeniClaw — Ollama On-Prem Setup
 # Installe, configure et demarre Ollama avec un premier modele.
 # Gere automatiquement le proxy si configure.
-# Usage: ./setup-ollama.sh
+# Usage: ./setup-ollama.sh   (sans sudo — meme user que les autres containers)
 # ============================================================================
 
 RED='\033[0;31m'
@@ -25,6 +25,25 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 echo -e "\n${BOLD}${CYAN}=== ZeniClaw — Ollama On-Prem Setup ===${NC}\n"
+
+# --- Warn if running as root when containers are rootless --------------------
+if [ "$(id -u)" = "0" ]; then
+    # Check if zeniclaw_app exists in rootless (run by the real user)
+    REAL_USER="${SUDO_USER:-}"
+    if [ -n "$REAL_USER" ]; then
+        # Check if app container exists in the calling user's podman
+        if sudo -u "$REAL_USER" podman inspect zeniclaw_app &>/dev/null 2>&1; then
+            warn "Les containers ZeniClaw tournent en rootless (user: $REAL_USER)."
+            warn "Relancez SANS sudo:  ./setup-ollama.sh"
+            echo ""
+            read -rp "Continuer quand meme en root ? (o/N) : " FORCE_ROOT
+            if [[ ! "$FORCE_ROOT" =~ ^[oOyY]$ ]]; then
+                echo -e "${CYAN}Relancez: ./setup-ollama.sh${NC}"
+                exit 0
+            fi
+        fi
+    fi
+fi
 
 # --- Detect container runtime ------------------------------------------------
 CONTAINER_CMD=""
@@ -47,9 +66,6 @@ elif command -v docker &>/dev/null; then
 fi
 
 [ -z "$CONTAINER_CMD" ] && error "Aucun runtime (podman/docker) detecte."
-if [ -z "$COMPOSE" ]; then
-    warn "Pas de compose detecte — lancement direct avec $CONTAINER_CMD"
-fi
 
 echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: ${COMPOSE:-direct}${NC}\n"
 
@@ -66,7 +82,7 @@ if [ -f .env ]; then
 fi
 
 # Load from app DB
-if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ] && $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ] && $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
     DB_HTTP=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_http') ?? '';" 2>/dev/null || true)
     DB_HTTPS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_https') ?? '';" 2>/dev/null || true)
     DB_NO=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_no_proxy') ?? '';" 2>/dev/null || true)
@@ -109,7 +125,7 @@ fi
 
 # --- Step 1: Pull Ollama image -----------------------------------------------
 info "Telechargement de l'image Ollama..."
-if $CONTAINER_CMD pull ollama/ollama:latest 2>&1; then
+if $CONTAINER_CMD pull docker.io/ollama/ollama:latest 2>&1; then
     success "Image ollama/ollama:latest telechargee"
 else
     error "Impossible de telecharger l'image Ollama. Verifiez votre connexion/proxy."
@@ -118,7 +134,7 @@ fi
 # --- Step 2: Start Ollama container ------------------------------------------
 info "Demarrage du container Ollama..."
 
-# Detect the network name (compose creates zeniclaw_zeniclaw or zeniclaw_default)
+# Detect the network name used by zeniclaw
 NETWORK_NAME=""
 for net in zeniclaw_zeniclaw zeniclaw_default; do
     if $CONTAINER_CMD network inspect "$net" &>/dev/null 2>&1; then
@@ -127,36 +143,51 @@ for net in zeniclaw_zeniclaw zeniclaw_default; do
     fi
 done
 if [ -z "$NETWORK_NAME" ]; then
-    # List networks and find one matching zeniclaw
     NETWORK_NAME=$($CONTAINER_CMD network ls --format '{{.Name}}' 2>/dev/null | grep -i zeniclaw | head -1 || true)
 fi
-[ -z "$NETWORK_NAME" ] && error "Reseau zeniclaw introuvable. Lancez d'abord ./update.sh pour demarrer l'app."
 
-# Use compose if available, otherwise direct run
-if [ -n "$COMPOSE" ] && [[ "$COMPOSE" != "podman-compose" ]]; then
-    COMPOSE_PROFILES=ollama $COMPOSE up -d ollama 2>&1
-else
-    # Stop existing container if present
-    if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
-        $CONTAINER_CMD stop zeniclaw_ollama 2>/dev/null || true
-        $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
-    fi
-    $CONTAINER_CMD run -d \
-        --name zeniclaw_ollama \
-        --restart unless-stopped \
-        --network "$NETWORK_NAME" \
-        -e "HTTP_PROXY=${PROXY_HTTP:-}" \
-        -e "HTTPS_PROXY=${PROXY_HTTPS:-}" \
-        -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
-        -v zeniclaw_ollama_data:/root/.ollama \
-        ollama/ollama:latest 2>&1
+# Create network if it doesn't exist (fresh install)
+if [ -z "$NETWORK_NAME" ]; then
+    warn "Reseau zeniclaw introuvable, creation..."
+    $CONTAINER_CMD network create zeniclaw_zeniclaw 2>/dev/null || true
+    NETWORK_NAME="zeniclaw_zeniclaw"
 fi
 
-# Wait for Ollama API to be ready
+info "Reseau: $NETWORK_NAME"
+
+# Stop existing container if present
+if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
+    info "Arret du container existant..."
+    $CONTAINER_CMD stop zeniclaw_ollama 2>/dev/null || true
+    $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
+fi
+
+# Start Ollama
+$CONTAINER_CMD run -d \
+    --name zeniclaw_ollama \
+    --restart unless-stopped \
+    --network "$NETWORK_NAME" \
+    -e "HTTP_PROXY=${PROXY_HTTP:-}" \
+    -e "HTTPS_PROXY=${PROXY_HTTPS:-}" \
+    -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
+    -v zeniclaw_ollama_data:/root/.ollama \
+    docker.io/ollama/ollama:latest 2>&1
+
+# Verify container is actually running
+sleep 2
+CONTAINER_STATUS=$($CONTAINER_CMD inspect --format '{{.State.Status}}' zeniclaw_ollama 2>/dev/null || echo "not_found")
+if [ "$CONTAINER_STATUS" != "running" ]; then
+    warn "Container status: $CONTAINER_STATUS"
+    echo -e "${DIM}Logs:${NC}"
+    $CONTAINER_CMD logs zeniclaw_ollama 2>&1 | tail -20 || true
+    error "Le container Ollama n'a pas demarre. Voir les logs ci-dessus."
+fi
+
+# Wait for Ollama API to be ready (use ollama list instead of curl — no curl in ollama image)
 info "Attente du demarrage d'Ollama..."
 OLLAMA_READY=false
 for i in $(seq 1 30); do
-    if $CONTAINER_CMD exec zeniclaw_ollama curl -sf http://localhost:11434/api/tags &>/dev/null; then
+    if $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
         OLLAMA_READY=true
         break
     fi
@@ -166,7 +197,9 @@ done
 if [ "$OLLAMA_READY" = true ]; then
     success "Ollama est pret!"
 else
-    error "Ollama n'a pas demarre apres 60s. Verifiez: $CONTAINER_CMD logs zeniclaw_ollama"
+    warn "Ollama API pas encore prete, mais le container tourne. Logs:"
+    $CONTAINER_CMD logs zeniclaw_ollama 2>&1 | tail -10 || true
+    error "Ollama n'a pas demarre apres 60s."
 fi
 
 # --- Step 3: Check existing models ------------------------------------------
@@ -197,7 +230,7 @@ echo ""
 # Check available RAM to suggest
 TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
 if [ "$TOTAL_RAM_MB" -gt 0 ]; then
-    echo -e "${DIM}RAM disponible: ~$((TOTAL_RAM_MB / 1024)) Go${NC}"
+    echo -e "${DIM}RAM totale: ~$((TOTAL_RAM_MB / 1024)) Go${NC}"
     if [ "$TOTAL_RAM_MB" -lt 2048 ]; then
         echo -e "${YELLOW}Recommande: qwen2.5:0.5b (option 1)${NC}"
     elif [ "$TOTAL_RAM_MB" -lt 4096 ]; then
@@ -238,7 +271,7 @@ fi
 
 # --- Step 5: Configure app to use Ollama ------------------------------------
 info "Configuration de ZeniClaw pour utiliser Ollama..."
-if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
     $CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
         \App\Models\AppSetting::set('onprem_api_url', 'http://ollama:11434');
         echo 'Ollama URL configured';
@@ -251,7 +284,16 @@ if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
             echo 'Model ${MODEL_NAME} set as fast role';
         " 2>/dev/null || true
     fi
-    success "App configuree (Ollama URL + modele)"
+
+    # Sync proxy to DB
+    if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
+        $CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+            \App\Models\AppSetting::set('proxy_http', '${PROXY_HTTP}');
+            \App\Models\AppSetting::set('proxy_https', '${PROXY_HTTPS}');
+            \App\Models\AppSetting::set('proxy_no_proxy', '${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}');
+        " 2>/dev/null || true
+    fi
+    success "App configuree"
 else
     warn "Container app non demarre — configurez manuellement dans Settings > Modeles"
 fi
@@ -261,16 +303,16 @@ echo ""
 echo -e "${BOLD}${CYAN}=== Verification ===${NC}\n"
 
 # Check container
-if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
-    OLLAMA_STATUS=$($CONTAINER_CMD inspect --format '{{.State.Status}}' zeniclaw_ollama 2>/dev/null || echo "unknown")
-    success "Container: zeniclaw_ollama ($OLLAMA_STATUS)"
+OLLAMA_STATUS=$($CONTAINER_CMD inspect --format '{{.State.Status}}' zeniclaw_ollama 2>/dev/null || echo "introuvable")
+if [ "$OLLAMA_STATUS" = "running" ]; then
+    success "Container: zeniclaw_ollama (running)"
 else
-    warn "Container zeniclaw_ollama introuvable"
+    warn "Container: zeniclaw_ollama ($OLLAMA_STATUS)"
 fi
 
-# Check API
-if $CONTAINER_CMD exec zeniclaw_ollama curl -sf http://localhost:11434/api/tags &>/dev/null; then
-    success "API Ollama: accessible (port 11434)"
+# Check API via ollama list
+if $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+    success "API Ollama: accessible"
 else
     warn "API Ollama: non accessible"
 fi
@@ -286,17 +328,17 @@ else
     warn "Aucun modele installe"
 fi
 
-# Check app connectivity
-if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+# Check app connectivity (app container has curl)
+if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
     OLLAMA_REACHABLE=$($CONTAINER_CMD exec zeniclaw_app curl -sf http://ollama:11434/api/tags 2>/dev/null && echo "ok" || echo "fail")
     if [ "$OLLAMA_REACHABLE" = "ok" ]; then
         success "Connectivite app -> ollama: OK"
     else
-        warn "Connectivite app -> ollama: ECHEC (verifiez le reseau Docker)"
+        warn "Connectivite app -> ollama: ECHEC (verifiez que les containers sont sur le meme reseau)"
     fi
 fi
 
-# Check proxy
+# Proxy
 if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
     success "Proxy: ${PROXY_HTTP:-$PROXY_HTTPS}"
 else
