@@ -523,15 +523,31 @@ PROMPT;
 
             if ($parsed['action'] === 'call') {
                 $callResult = $this->executeRawApiCall($parsed);
+                $responseBody = $callResult['body'];
+
+                // Smart response validation: detect non-JSON responses (HTML login pages, redirects)
+                $trimmed = trim($responseBody);
+                $isJson = str_starts_with($trimmed, '{') || str_starts_with($trimmed, '[');
+                $isHtml = str_starts_with($trimmed, '<!') || str_starts_with($trimmed, '<html');
+                $isAuthFail = $callResult['status'] === 401 || $callResult['status'] === 403
+                    || ($callResult['status'] === 200 && $isHtml && !$isJson);
+
+                if ($isAuthFail) {
+                    // Token doesn't work — inject clear error so LLM knows
+                    $responseBody = "[ERREUR AUTH] L'appel a retourne du HTML (page de login) au lieu de JSON. "
+                        . "Le token d'authentification est invalide ou expire. "
+                        . "HTTP {$callResult['status']}. Demande a l'utilisateur un nouveau token.";
+                }
+
                 $collectedData[] = [
                     'method' => $parsed['method'] ?? 'GET',
                     'url' => $parsed['url'] ?? '',
                     'status' => $callResult['status'],
-                    'response' => $callResult['body'],
+                    'response' => $responseBody,
                 ];
 
-                // Auto-store base_url on first successful call
-                if ($callResult['status'] >= 200 && $callResult['status'] < 300) {
+                // Auto-store base_url on first successful JSON call
+                if ($callResult['status'] >= 200 && $callResult['status'] < 300 && $isJson) {
                     $parsedUrl = parse_url($parsed['url'] ?? '');
                     $baseUrl = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '');
                     if ($baseUrl && !$project->getSetting('base_url')) {
@@ -539,8 +555,13 @@ PROMPT;
                     }
                 }
 
-                // If auth error, let Claude handle it in next iteration
-                // (it will see the 401 in collected data and decide to ask or fix)
+                // Smart pagination: if JSON response has pagination metadata, auto-fetch all pages
+                if ($isJson && $callResult['status'] >= 200 && $callResult['status'] < 300) {
+                    $json = json_decode($callResult['body'], true);
+                    if ($json) {
+                        $collectedData = $this->autoPaginate($parsed, $json, $callResult, $collectedData);
+                    }
+                }
             }
 
             if ($parsed['action'] === 'web_fetch') {
@@ -582,6 +603,67 @@ PROMPT;
         } catch (\Exception $e) {
             return ['status' => 0, 'body' => 'Error: ' . $e->getMessage()];
         }
+    }
+
+    /**
+     * Auto-paginate: detect pagination metadata and fetch remaining pages.
+     * Supports Laravel-style (next_page_url), offset-based (page param), and link headers.
+     */
+    private function autoPaginate(array $parsedCall, array $firstPageJson, array $firstResult, array $collectedData): array
+    {
+        // Detect pagination patterns
+        $nextUrl = null;
+        $totalPages = 1;
+        $currentPage = 1;
+
+        // Laravel/standard: { "next_page_url": "...", "last_page": N, "current_page": 1 }
+        if (!empty($firstPageJson['next_page_url'])) {
+            $nextUrl = $firstPageJson['next_page_url'];
+            $totalPages = $firstPageJson['last_page'] ?? 10;
+            $currentPage = $firstPageJson['current_page'] ?? 1;
+        }
+        // Alternative: { "meta": { "current_page": 1, "last_page": N }, "links": { "next": "..." } }
+        elseif (!empty($firstPageJson['links']['next'])) {
+            $nextUrl = $firstPageJson['links']['next'];
+            $totalPages = $firstPageJson['meta']['last_page'] ?? $firstPageJson['last_page'] ?? 10;
+            $currentPage = $firstPageJson['meta']['current_page'] ?? 1;
+        }
+        // Another: { "pagination": { "next": "...", "pages": N } }
+        elseif (!empty($firstPageJson['pagination']['next'])) {
+            $nextUrl = $firstPageJson['pagination']['next'];
+            $totalPages = $firstPageJson['pagination']['pages'] ?? 10;
+        }
+
+        if (!$nextUrl || $totalPages <= 1) return $collectedData;
+
+        // Fetch remaining pages (max 20 to avoid runaway loops)
+        $maxPages = min($totalPages, 20);
+        for ($page = $currentPage + 1; $page <= $maxPages; $page++) {
+            $pageCall = $parsedCall;
+            $pageCall['url'] = $nextUrl;
+
+            $pageResult = $this->executeRawApiCall($pageCall);
+            $pageJson = json_decode($pageResult['body'], true);
+
+            if (!$pageJson || $pageResult['status'] < 200 || $pageResult['status'] >= 300) break;
+
+            $collectedData[] = [
+                'method' => $parsedCall['method'] ?? 'GET',
+                'url' => $nextUrl,
+                'status' => $pageResult['status'],
+                'response' => $pageResult['body'],
+            ];
+
+            // Get next page URL
+            $nextUrl = $pageJson['next_page_url']
+                ?? $pageJson['links']['next']
+                ?? $pageJson['pagination']['next']
+                ?? null;
+
+            if (!$nextUrl) break;
+        }
+
+        return $collectedData;
     }
 
     private function fetchWebPage(string $url): string
@@ -1908,31 +1990,57 @@ PROMPT;
     }
 
     /**
-     * Among multiple matching projects, pick the best one:
-     * 1. Has API config (base_url + token) → most useful
-     * 2. Has any settings at all → partially configured
-     * 3. Fallback to most recent
+     * Among multiple matching projects, pick the best one.
+     * Smart scoring: validates API config actually works (quick probe).
      */
     private function pickBestProject(\Illuminate\Support\Collection $candidates): ?Project
     {
         if ($candidates->isEmpty()) return null;
         if ($candidates->count() === 1) return $candidates->first();
 
-        // Prefer project with working API config
-        $withApi = $candidates->first(function ($p) {
+        // Score each candidate
+        $scored = $candidates->map(function ($p) {
             $s = $p->settings ?? [];
+            $score = 0;
+
             $hasBaseUrl = !empty($s['base_url']);
-            $hasToken = collect($s)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
-            return $hasBaseUrl && $hasToken;
+            $hasToken = (bool) collect($s)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
+
+            // Has API config = high value
+            if ($hasBaseUrl && $hasToken) {
+                $score += 10;
+
+                // Quick probe: does the base_url return JSON? (300ms max)
+                try {
+                    $tokenKey = collect($s)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
+                    $token = $s[$tokenKey] ?? '';
+                    $testUrl = rtrim($s['base_url'], '/');
+
+                    $response = \Illuminate\Support\Facades\Http::timeout(2)
+                        ->withHeaders(['Authorization' => "Bearer {$token}", 'Accept' => 'application/json'])
+                        ->get($testUrl);
+
+                    $body = trim($response->body());
+                    $isJson = str_starts_with($body, '{') || str_starts_with($body, '[');
+
+                    if ($response->successful() && $isJson) {
+                        $score += 20; // Token works, returns JSON = best candidate
+                    } elseif ($response->successful() && !$isJson) {
+                        $score -= 5; // Returns HTML = token probably dead
+                    }
+                } catch (\Exception $e) {
+                    // Probe failed — don't penalize, maybe network issue
+                }
+            } elseif ($hasBaseUrl || $hasToken) {
+                $score += 3; // Partial config
+            } elseif (!empty($s)) {
+                $score += 1; // Has some settings
+            }
+
+            return ['project' => $p, 'score' => $score];
         });
-        if ($withApi) return $withApi;
 
-        // Then prefer project with any settings
-        $withSettings = $candidates->first(fn($p) => !empty($p->settings));
-        if ($withSettings) return $withSettings;
-
-        // Fallback: most recent
-        return $candidates->first();
+        return $scored->sortByDesc('score')->first()['project'];
     }
 
     private function findProjectByNameInMessage(string $body, string $phone): ?Project
