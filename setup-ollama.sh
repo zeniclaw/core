@@ -162,28 +162,66 @@ if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
     $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
 fi
 
-# Detect host CA certificates (enterprise proxies do SSL interception)
+# Build a CA bundle for the container (enterprise proxies do SSL interception)
 CA_MOUNTS=""
-for ca_path in \
-    /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
-    /etc/pki/tls/certs/ca-bundle.crt \
-    /etc/ssl/certs/ca-certificates.crt \
-    /usr/local/share/ca-certificates \
-    /etc/ca-certificates/extracted/tls-ca-bundle.pem; do
-    if [ -e "$ca_path" ]; then
+CA_BUNDLE_FILE="$REPO_DIR/.ollama-ca-bundle.pem"
+
+if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
+    info "Detection des certificats CA (proxy SSL)..."
+
+    # Start with system CA bundle
+    SYS_CA=""
+    for ca_path in \
+        /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+        /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/ssl/certs/ca-certificates.crt \
+        /etc/ca-certificates/extracted/tls-ca-bundle.pem; do
         if [ -f "$ca_path" ]; then
-            CA_MOUNTS="-v ${ca_path}:/etc/ssl/certs/ca-certificates.crt:ro"
-            success "Certificats CA trouves: $ca_path"
-        elif [ -d "$ca_path" ]; then
-            CA_MOUNTS="-v ${ca_path}:/etc/ssl/certs:ro"
-            success "Certificats CA trouves: $ca_path"
+            SYS_CA="$ca_path"
+            break
         fi
-        break
+    done
+
+    # Extract proxy's CA certificate automatically via openssl
+    PROXY_CA=""
+    PROXY_URL="${PROXY_HTTP:-$PROXY_HTTPS}"
+    PROXY_HOST=$(echo "$PROXY_URL" | sed 's|https\?://||' | cut -d: -f1)
+    PROXY_PORT=$(echo "$PROXY_URL" | sed 's|https\?://||' | cut -d: -f2)
+
+    if command -v openssl &>/dev/null; then
+        info "Extraction du certificat CA du proxy via ollama.com..."
+        # Connect through proxy to ollama.com and grab the CA chain
+        PROXY_CERTS=$(echo | openssl s_client -proxy "$PROXY_HOST:$PROXY_PORT" \
+            -connect registry.ollama.ai:443 -showcerts 2>/dev/null || true)
+
+        if echo "$PROXY_CERTS" | grep -q "BEGIN CERTIFICATE"; then
+            # Extract all certificates (the last one is usually the root CA)
+            PROXY_CA=$(echo "$PROXY_CERTS" | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{print}')
+            CERT_COUNT=$(echo "$PROXY_CA" | grep -c "BEGIN CERTIFICATE" || echo "0")
+            success "Certificats extraits du proxy: $CERT_COUNT"
+        else
+            warn "Impossible d'extraire les certificats via le proxy"
+        fi
+    else
+        warn "openssl non installe — impossible d'extraire le CA du proxy"
     fi
-done
-if [ -z "$CA_MOUNTS" ] && [ -n "$PROXY_HTTP" ]; then
-    warn "Pas de certificats CA trouves — le proxy SSL risque de bloquer les telechargements"
-    warn "Installez les certificats CA: sudo update-ca-trust (RHEL) ou sudo update-ca-certificates (Debian)"
+
+    # Build combined CA bundle
+    if [ -n "$SYS_CA" ] || [ -n "$PROXY_CA" ]; then
+        rm -f "$CA_BUNDLE_FILE"
+        [ -n "$SYS_CA" ] && cat "$SYS_CA" > "$CA_BUNDLE_FILE"
+        if [ -n "$PROXY_CA" ]; then
+            echo "" >> "$CA_BUNDLE_FILE"
+            echo "# === Proxy CA certificates (auto-extracted) ===" >> "$CA_BUNDLE_FILE"
+            echo "$PROXY_CA" >> "$CA_BUNDLE_FILE"
+        fi
+        CA_MOUNTS="-v ${CA_BUNDLE_FILE}:/etc/ssl/certs/ca-certificates.crt:ro"
+        success "Bundle CA construit: $(wc -l < "$CA_BUNDLE_FILE") lignes"
+    fi
+
+    if [ -z "$CA_MOUNTS" ]; then
+        warn "Pas de certificats CA — les telechargements via proxy SSL risquent d'echouer"
+    fi
 fi
 
 # Start Ollama (--network-alias ollama so app can reach it via http://ollama:11434)
