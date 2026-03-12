@@ -47,9 +47,11 @@ elif command -v docker &>/dev/null; then
 fi
 
 [ -z "$CONTAINER_CMD" ] && error "Aucun runtime (podman/docker) detecte."
-[ -z "$COMPOSE" ] && error "Aucun compose detecte. Installez podman-compose ou docker-compose."
+if [ -z "$COMPOSE" ]; then
+    warn "Pas de compose detecte — lancement direct avec $CONTAINER_CMD"
+fi
 
-echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: $COMPOSE${NC}\n"
+echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: ${COMPOSE:-direct}${NC}\n"
 
 # --- Proxy detection ---------------------------------------------------------
 PROXY_HTTP="${HTTP_PROXY:-}"
@@ -116,9 +118,25 @@ fi
 # --- Step 2: Start Ollama container ------------------------------------------
 info "Demarrage du container Ollama..."
 
-# podman-compose doesn't support --profile, so start ollama explicitly
-if [[ "$COMPOSE" == "podman-compose" ]]; then
-    # Check if already running
+# Detect the network name (compose creates zeniclaw_zeniclaw or zeniclaw_default)
+NETWORK_NAME=""
+for net in zeniclaw_zeniclaw zeniclaw_default; do
+    if $CONTAINER_CMD network inspect "$net" &>/dev/null 2>&1; then
+        NETWORK_NAME="$net"
+        break
+    fi
+done
+if [ -z "$NETWORK_NAME" ]; then
+    # List networks and find one matching zeniclaw
+    NETWORK_NAME=$($CONTAINER_CMD network ls --format '{{.Name}}' 2>/dev/null | grep -i zeniclaw | head -1 || true)
+fi
+[ -z "$NETWORK_NAME" ] && error "Reseau zeniclaw introuvable. Lancez d'abord ./update.sh pour demarrer l'app."
+
+# Use compose if available, otherwise direct run
+if [ -n "$COMPOSE" ] && [[ "$COMPOSE" != "podman-compose" ]]; then
+    COMPOSE_PROFILES=ollama $COMPOSE up -d ollama 2>&1
+else
+    # Stop existing container if present
     if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
         $CONTAINER_CMD stop zeniclaw_ollama 2>/dev/null || true
         $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
@@ -126,14 +144,12 @@ if [[ "$COMPOSE" == "podman-compose" ]]; then
     $CONTAINER_CMD run -d \
         --name zeniclaw_ollama \
         --restart unless-stopped \
-        --network zeniclaw_zeniclaw \
+        --network "$NETWORK_NAME" \
         -e "HTTP_PROXY=${PROXY_HTTP:-}" \
         -e "HTTPS_PROXY=${PROXY_HTTPS:-}" \
         -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
         -v zeniclaw_ollama_data:/root/.ollama \
         ollama/ollama:latest 2>&1
-else
-    COMPOSE_PROFILES=ollama $COMPOSE up -d ollama 2>&1
 fi
 
 # Wait for Ollama API to be ready
