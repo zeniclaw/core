@@ -321,7 +321,49 @@ else
     fi
 fi
 
-# --- Step 3: Check existing models ------------------------------------------
+# --- Step 3: Check for GGUF files to import ---------------------------------
+MODELS_DIR="$REPO_DIR/models"
+GGUF_FILES=""
+if [ -d "$MODELS_DIR" ]; then
+    GGUF_FILES=$(find "$MODELS_DIR" -name "*.gguf" -type f 2>/dev/null || true)
+fi
+
+if [ -n "$GGUF_FILES" ]; then
+    info "Fichiers GGUF trouves dans models/ :"
+    echo "$GGUF_FILES" | while read -r f; do
+        SIZE=$(du -h "$f" 2>/dev/null | awk '{print $1}')
+        echo -e "  ${GREEN}•${NC} $(basename "$f") ($SIZE)"
+    done
+    echo ""
+    echo -e "${YELLOW}Importer ces modeles dans Ollama ?${NC}"
+    read -rp "Importer ? (O/n) : " IMPORT_CHOICE
+    if [[ ! "$IMPORT_CHOICE" =~ ^[nN]$ ]]; then
+        echo "$GGUF_FILES" | while read -r gguf_file; do
+            GGUF_NAME=$(basename "$gguf_file" .gguf)
+            # Sanitize name for ollama
+            GGUF_NAME=$(echo "$GGUF_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+            info "Import de $GGUF_NAME..."
+
+            # Create Modelfile
+            MODELFILE_PATH="/tmp/Modelfile_${GGUF_NAME}"
+            echo "FROM /models/$(basename "$gguf_file")" > "$MODELFILE_PATH"
+
+            # Copy GGUF into container and create model
+            $CONTAINER_CMD cp "$gguf_file" zeniclaw_ollama:/models/ 2>/dev/null || \
+                $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /models && \
+                $CONTAINER_CMD cp "$gguf_file" zeniclaw_ollama:/models/
+            $CONTAINER_CMD cp "$MODELFILE_PATH" zeniclaw_ollama:/tmp/Modelfile
+            if $CONTAINER_CMD exec zeniclaw_ollama ollama create "$GGUF_NAME" -f /tmp/Modelfile 2>&1; then
+                success "Modele $GGUF_NAME importe!"
+            else
+                warn "Echec import de $GGUF_NAME"
+            fi
+            rm -f "$MODELFILE_PATH"
+        done
+    fi
+fi
+
+# --- Step 4: Check existing models ------------------------------------------
 info "Modeles installes :"
 MODELS=$($CONTAINER_CMD exec zeniclaw_ollama ollama list 2>/dev/null || true)
 if [ -n "$MODELS" ] && [ "$(echo "$MODELS" | wc -l)" -gt 1 ]; then
@@ -330,7 +372,7 @@ else
     echo -e "${DIM}  (aucun modele installe)${NC}"
 fi
 
-# --- Step 4: Propose model download -----------------------------------------
+# --- Step 5: Propose model download -----------------------------------------
 echo ""
 echo -e "${BOLD}Quel modele voulez-vous installer ?${NC}"
 echo ""
@@ -348,7 +390,7 @@ echo ""
 
 # Check available RAM to suggest
 TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
-if [ "$TOTAL_RAM_MB" -gt 0 ]; then
+if [ "$TOTAL_RAM_MB" -gt 0 ] 2>/dev/null; then
     echo -e "${DIM}RAM totale: ~$((TOTAL_RAM_MB / 1024)) Go${NC}"
     if [ "$TOTAL_RAM_MB" -lt 2048 ]; then
         echo -e "${YELLOW}Recommande: qwen2.5:0.5b (option 1)${NC}"
@@ -384,7 +426,62 @@ if [ -n "$MODEL_NAME" ]; then
     if $CONTAINER_CMD exec zeniclaw_ollama ollama pull "$MODEL_NAME" 2>&1; then
         success "Modele ${MODEL_NAME} installe!"
     else
-        error "Echec du telechargement de ${MODEL_NAME}. Verifiez proxy/connexion."
+        warn "Echec du telechargement automatique."
+        echo ""
+        echo -e "${BOLD}${YELLOW}=== Telechargement manuel ===${NC}"
+        echo -e "Le proxy bloque probablement le telechargement. Voici comment faire manuellement :"
+        echo ""
+        echo -e "${BOLD}Option A: Telecharger le fichier GGUF depuis un PC sans proxy${NC}"
+
+        # Map model names to HuggingFace GGUF URLs
+        case "$MODEL_NAME" in
+            qwen2.5:0.5b)   HF_URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" ;;
+            qwen2.5:1.5b)   HF_URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf" ;;
+            qwen2.5:3b)     HF_URL="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf" ;;
+            qwen2.5:7b)     HF_URL="https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf" ;;
+            qwen2.5:14b)    HF_URL="https://huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF/resolve/main/qwen2.5-14b-instruct-q4_k_m.gguf" ;;
+            gemma2:2b)      HF_URL="https://huggingface.co/google/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it.Q4_K_M.gguf" ;;
+            llama3.2:3b)    HF_URL="https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf" ;;
+            phi3:mini)      HF_URL="https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf" ;;
+            qwen2.5-coder:7b) HF_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf" ;;
+            *) HF_URL="" ;;
+        esac
+
+        echo ""
+        echo -e "  1. Telechargez le modele depuis un poste sans restriction :"
+        if [ -n "$HF_URL" ]; then
+            echo -e "     ${CYAN}${HF_URL}${NC}"
+        else
+            echo -e "     ${CYAN}https://huggingface.co/models?search=${MODEL_NAME%%:*}+GGUF${NC}"
+        fi
+        echo ""
+        echo -e "  2. Copiez le fichier .gguf sur ce serveur dans le dossier models/ :"
+        echo -e "     ${DIM}mkdir -p $REPO_DIR/models${NC}"
+        echo -e "     ${DIM}scp modele.gguf user@serveur:$REPO_DIR/models/${NC}"
+        echo ""
+        echo -e "  3. Relancez ce script — il detectera et importera le fichier automatiquement :"
+        echo -e "     ${DIM}sudo bash setup-ollama.sh${NC}"
+        echo ""
+        echo -e "${BOLD}Option B: Importer maintenant un fichier GGUF deja present${NC}"
+        echo ""
+        read -rp "Chemin vers un fichier .gguf (vide = passer) : " GGUF_PATH
+        if [ -n "$GGUF_PATH" ] && [ -f "$GGUF_PATH" ]; then
+            IMPORT_NAME=$(basename "$GGUF_PATH" .gguf | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+            info "Import de $IMPORT_NAME depuis $GGUF_PATH..."
+            $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /models 2>/dev/null || true
+            $CONTAINER_CMD cp "$GGUF_PATH" zeniclaw_ollama:/models/
+            echo "FROM /models/$(basename "$GGUF_PATH")" > /tmp/Modelfile_import
+            $CONTAINER_CMD cp /tmp/Modelfile_import zeniclaw_ollama:/tmp/Modelfile
+            if $CONTAINER_CMD exec zeniclaw_ollama ollama create "$IMPORT_NAME" -f /tmp/Modelfile 2>&1; then
+                success "Modele $IMPORT_NAME importe!"
+                MODEL_NAME="$IMPORT_NAME"
+            else
+                warn "Echec de l'import"
+            fi
+            rm -f /tmp/Modelfile_import
+        elif [ -n "$GGUF_PATH" ]; then
+            warn "Fichier introuvable: $GGUF_PATH"
+        fi
     fi
 fi
 
