@@ -630,9 +630,13 @@ PROMPT;
             "Donnees collectees:\n{$dataText}",
             ModelResolver::balanced(),
             "L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n"
-            . "Voici toutes les donnees collectees via API. Fais une analyse complete:\n"
-            . "- Resume, totaux, tendances\n- Alertes ou anomalies\n- Recommandations\n"
-            . "Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}]."
+            . "Voici toutes les donnees collectees via API.\n\n"
+            . "REGLE ABSOLUE: Restitue les donnees EXACTEMENT comme elles apparaissent dans l'API. "
+            . "Ne modifie JAMAIS les noms, adresses, emails, numeros de TVA, montants ou toute autre donnee factuelle. "
+            . "Ne remplace JAMAIS un nom par un autre. Ne complete JAMAIS une donnee manquante en inventant. "
+            . "Si une donnee est absente de l'API, indique 'Non renseigne'.\n\n"
+            . "Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}]. "
+            . "Tu peux ajouter des totaux/statistiques UNIQUEMENT si calcules a partir des donnees reelles."
         );
 
         return $response ?: "[{$project->name}] Donnees collectees mais analyse impossible.";
