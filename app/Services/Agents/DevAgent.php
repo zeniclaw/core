@@ -459,9 +459,10 @@ NE PROPOSE PAS de code, d'integration, ou de plan technique quand l'utilisateur 
 5. ANALYSER: Quand tu as assez de donnees, fais une VRAIE analyse (tendances, totaux, alertes, recommandations). Ne te contente pas de lister.
 6. AUTH: Deduis le mecanisme du code (Bearer, API key header, query param...). Utilise les settings stockes.
 7. REPONSE FINALE: Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}].
-8. SAUVEGARDER: Dans "knowledge", inclus les donnees importantes a retenir (listes de clients, factures, totaux) pour ne pas refaire les memes appels.
-9. VERIFIER: Regarde "DONNEES DEJA CONNUES" ci-dessus AVANT de faire un appel API. Ne refais pas un appel si tu as deja l'info.
-10. PAGINER: Si l'API retourne des resultats pagines, fais TOUS les appels necessaires pour avoir TOUTES les pages.
+8. SAUVEGARDER: Dans "knowledge", inclus les donnees importantes avec ttl_minutes=60 pour les donnees qui changent (clients, factures, totaux).
+9. DONNEES FRAICHES: TOUJOURS refaire l'appel API quand l'utilisateur demande explicitement une liste (clients, factures, etc.) — les donnees en cache peuvent etre obsoletes. N'utilise "DONNEES DEJA CONNUES" que pour les infos de configuration (endpoints, tokens).
+10. ANTI-HALLUCINATION: N'invente JAMAIS de donnees (noms, adresses, TVA, emails, montants). Si tu n'as pas fait d'appel API et que tu n'as pas de donnees fraiches, fais l'appel. Ne restitue JAMAIS des donnees du knowledge sans les verifier via un appel API.
+11. PAGINER: Si l'API retourne des resultats pagines, fais TOUS les appels necessaires pour avoir TOUTES les pages.
 
 JSON UNIQUEMENT.
 PROMPT;
