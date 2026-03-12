@@ -94,6 +94,12 @@ class ChatAgent extends BaseAgent
             return $emptyResult;
         }
 
+        // Detect tasks that should run as background subagent
+        $backgroundTask = $this->detectBackgroundTask($context);
+        if ($backgroundTask) {
+            return $backgroundTask;
+        }
+
         $model = $this->resolveModel($context);
         $isOnPrem = !str_starts_with($model, 'claude-');
         $systemPrompt = $isOnPrem
@@ -1233,5 +1239,57 @@ class ChatAgent extends BaseAgent
 
             return implode("\n", $lines);
         });
+    }
+
+    /**
+     * Detect if a user request should be handled as a background task.
+     * Triggers for: research tasks, data collection, exhaustive lists, exports
+     * that would take too long for a synchronous response.
+     */
+    private function detectBackgroundTask(AgentContext $context): ?AgentResult
+    {
+        $body = mb_strtolower(trim($context->body ?? ''));
+
+        // Patterns that indicate a task needing autonomous background work
+        $researchPatterns = [
+            // Explicit research/collection requests
+            '/\b(recherche|trouve|collecte|recupere|rassemble|compile)\b.{5,}(toute?s?\s+les?|la liste|l\'ensemble|exhausti)/iu',
+            // "all X in Y" patterns
+            '/\b(toute?s?\s+les?|la liste\s+de)\b.{5,}\b(en|dans|de|du|a|au|sur)\b/iu',
+            // Explicit "subagent" or "tache de fond"
+            '/\b(subagent|sub-agent|tache\s+de\s+fond|en\s+arriere.plan|background)\b/iu',
+        ];
+
+        $isResearch = false;
+        foreach ($researchPatterns as $pattern) {
+            if (preg_match($pattern, $context->body)) {
+                $isResearch = true;
+                break;
+            }
+        }
+
+        if (!$isResearch) return null;
+
+        // Create a research SubAgent and dispatch the job
+        $subAgent = \App\Models\SubAgent::create([
+            'type' => 'research',
+            'requester_phone' => $context->from,
+            'status' => 'queued',
+            'task_description' => $context->body,
+            'timeout_minutes' => 5,
+        ]);
+
+        \App\Jobs\RunTaskJob::dispatch($subAgent)->onQueue('default');
+
+        $this->log($context, 'Background task spawned', [
+            'task_id' => $subAgent->id,
+            'description' => mb_substr($context->body, 0, 200),
+        ]);
+
+        $reply = "⏳ Tache lancee en arriere-plan ! Je te notifierai quand j'aurai les resultats.\n"
+            . "_Tache #{$subAgent->id}: " . mb_substr($context->body, 0, 100) . "_";
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, ['background_task_id' => $subAgent->id]);
     }
 }

@@ -11,11 +11,14 @@ class SubAgent extends Model
 
     protected $fillable = [
         'project_id',
+        'type',
+        'requester_phone',
         'status',
         'task_description',
         'branch_name',
         'commit_hash',
         'output_log',
+        'result',
         'error_message',
         'api_calls_count',
         'timeout_minutes',
