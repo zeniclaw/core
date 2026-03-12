@@ -137,6 +137,16 @@ foreach ($improvements as $si) {
 if curl -sf http://ollama:11434/api/tags >/dev/null 2>&1; then
     echo "🖥️ Ollama detected, setting on-prem URL..."
     php artisan tinker --execute="\App\Models\AppSetting::set('onprem_api_url', 'http://ollama:11434');" 2>/dev/null || true
+
+    # Preload first available model into memory (avoids cold start on first chat)
+    FIRST_MODEL=$(curl -sf http://ollama:11434/api/tags 2>/dev/null | grep -oP '"name"\s*:\s*"\K[^"]+' | head -1)
+    if [ -n "$FIRST_MODEL" ]; then
+        echo "🧠 Preloading model $FIRST_MODEL into Ollama RAM..."
+        curl -sf -X POST http://ollama:11434/api/generate \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"$FIRST_MODEL\",\"prompt\":\"\",\"keep_alive\":-1}" >/dev/null 2>&1 &
+        echo "🧠 Preload started in background"
+    fi
 fi
 
 # Auto-start WAHA WhatsApp session in background
