@@ -81,6 +81,62 @@ if [[ -z "$COMPOSE" ]]; then
     fi
 fi
 
+# --- Proxy detection: .env file > environment > ask user ----------------------
+PROXY_HTTP="${HTTP_PROXY:-}"
+PROXY_HTTPS="${HTTPS_PROXY:-}"
+PROXY_NO="${NO_PROXY:-}"
+
+# Load from .env if it exists
+if [ -f .env ]; then
+    PROXY_HTTP="${PROXY_HTTP:-$(grep -oP '^HTTP_PROXY=\K.*' .env 2>/dev/null || true)}"
+    PROXY_HTTPS="${PROXY_HTTPS:-$(grep -oP '^HTTPS_PROXY=\K.*' .env 2>/dev/null || true)}"
+    PROXY_NO="${PROXY_NO:-$(grep -oP '^NO_PROXY=\K.*' .env 2>/dev/null || true)}"
+fi
+
+# Try to load from running app DB (Settings page)
+if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ] && $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+    DB_HTTP=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_http') ?? '';" 2>/dev/null || true)
+    DB_HTTPS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_https') ?? '';" 2>/dev/null || true)
+    DB_NO=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_no_proxy') ?? '';" 2>/dev/null || true)
+    [ -n "$DB_HTTP" ]  && PROXY_HTTP="$DB_HTTP"
+    [ -n "$DB_HTTPS" ] && PROXY_HTTPS="$DB_HTTPS"
+    [ -n "$DB_NO" ]    && PROXY_NO="$DB_NO"
+fi
+
+# If still no proxy detected, ask the user
+if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ]; then
+    echo ""
+    echo -e "${YELLOW}Etes-vous derriere un proxy ? (pour telecharger les images Docker)${NC}"
+    echo -e "${DIM}Exemple: http://proxy.entreprise.com:8080${NC}"
+    read -rp "Proxy HTTP (vide = pas de proxy) : " PROXY_HTTP
+    if [ -n "$PROXY_HTTP" ]; then
+        read -rp "Proxy HTTPS (vide = meme que HTTP) : " PROXY_HTTPS
+        [ -z "$PROXY_HTTPS" ] && PROXY_HTTPS="$PROXY_HTTP"
+        read -rp "No proxy (vide = defaut localhost,127.0.0.1,...) : " PROXY_NO
+        [ -z "$PROXY_NO" ] && PROXY_NO="localhost,127.0.0.1,db,redis,waha,ollama,app"
+    fi
+fi
+
+# Persist proxy to .env and export for this session
+BUILD_ARGS=""
+if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
+    touch .env
+    for VAR_NAME in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+        sed -i "/^${VAR_NAME}=/d" .env
+    done
+    [ -n "$PROXY_HTTP" ]  && echo "HTTP_PROXY=${PROXY_HTTP}" >> .env
+    [ -n "$PROXY_HTTPS" ] && echo "HTTPS_PROXY=${PROXY_HTTPS}" >> .env
+    [ -n "$PROXY_NO" ]    && echo "NO_PROXY=${PROXY_NO}" >> .env
+    [ -z "$PROXY_NO" ]    && echo "NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app" >> .env
+
+    export HTTP_PROXY="$PROXY_HTTP" HTTPS_PROXY="$PROXY_HTTPS" NO_PROXY="${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}"
+    export http_proxy="$PROXY_HTTP" https_proxy="$PROXY_HTTPS" no_proxy="${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}"
+    BUILD_ARGS="--build-arg HTTP_PROXY=$PROXY_HTTP --build-arg HTTPS_PROXY=$PROXY_HTTPS --build-arg NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}"
+    success "Proxy configure: ${PROXY_HTTP}"
+else
+    info "Pas de proxy"
+fi
+
 echo -e "\n${BOLD}${CYAN}=== ZeniClaw Update ===${NC}"
 echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: $COMPOSE${NC}\n"
 
@@ -106,31 +162,21 @@ info "New version: v${VERSION}"
 
 # 3. Rebuild and restart
 info "Rebuilding app container..."
-$COMPOSE build app 2>&1 | tail -5
+$COMPOSE build $BUILD_ARGS app 2>&1 | tail -5
 success "Image built"
 
 info "Restarting app container..."
 $COMPOSE up -d --force-recreate app 2>&1
 success "Container restarted"
 
-# Sync proxy settings from app DB into .env (for Ollama downloads)
-info "Syncing proxy config..."
-PROXY_HTTP=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_http') ?? '';" 2>/dev/null || true)
-PROXY_HTTPS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_https') ?? '';" 2>/dev/null || true)
-PROXY_NO=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_no_proxy') ?? '';" 2>/dev/null || true)
-
+# Sync proxy back to app DB (in case user entered it manually above)
 if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
-    # Update .env file with proxy (create if needed, update if exists)
-    touch .env
-    for VAR_NAME in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
-        sed -i "/^${VAR_NAME}=/d" .env
-    done
-    [ -n "$PROXY_HTTP" ]  && echo "HTTP_PROXY=${PROXY_HTTP}" >> .env
-    [ -n "$PROXY_HTTPS" ] && echo "HTTPS_PROXY=${PROXY_HTTPS}" >> .env
-    [ -n "$PROXY_NO" ]    && echo "NO_PROXY=${PROXY_NO}" >> .env || echo "NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app" >> .env
-    success "Proxy synced to .env (HTTP_PROXY=${PROXY_HTTP:-none}, HTTPS_PROXY=${PROXY_HTTPS:-none})"
-else
-    info "No proxy configured in Settings, skipping"
+    $CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+        App\Models\AppSetting::set('proxy_http', '${PROXY_HTTP}');
+        App\Models\AppSetting::set('proxy_https', '${PROXY_HTTPS}');
+        App\Models\AppSetting::set('proxy_no_proxy', '${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}');
+        echo 'Proxy saved to DB';
+    " 2>/dev/null || true
 fi
 
 # Start any new services added in this update (e.g. ollama)
