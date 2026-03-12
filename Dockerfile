@@ -1,15 +1,11 @@
 FROM php:8.4-fpm
 
 # Proxy support for enterprise environments
+# ARG values are auto-available as env vars in RUN commands during build
+# We do NOT use ENV (which persists and mangles URL-encoded % in credentials)
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
 ARG NO_PROXY="localhost,127.0.0.1,db,redis,waha,ollama,app"
-ENV http_proxy=${HTTP_PROXY} \
-    https_proxy=${HTTPS_PROXY} \
-    HTTP_PROXY=${HTTP_PROXY} \
-    HTTPS_PROXY=${HTTPS_PROXY} \
-    no_proxy=${NO_PROXY} \
-    NO_PROXY=${NO_PROXY}
 
 # System deps + Docker CLI (for self-update via docker.sock)
 RUN apt-get update && apt-get install -y \
@@ -49,18 +45,12 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
 # Install Node.js + npm, build front-end assets, install Claude Code CLI
-# npm chokes on URL-encoded proxy credentials (% in user/pass) — configure npm proxy separately
 RUN apt-get update \
     && apt-get install -y nodejs npm \
-    && if [ -n "$HTTP_PROXY" ]; then \
-         npm config set proxy "$HTTP_PROXY" 2>/dev/null || true; \
-         npm config set https-proxy "${HTTPS_PROXY:-$HTTP_PROXY}" 2>/dev/null || true; \
-         npm config set noproxy "${NO_PROXY:-localhost}" 2>/dev/null || true; \
-       fi \
-    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm ci \
-    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm run build \
+    && npm ci \
+    && npm run build \
     && rm -rf node_modules \
-    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy configs
@@ -81,9 +71,6 @@ RUN echo "2.31.0" > storage/app/version.txt
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 775 storage bootstrap/cache
-
-# Clear proxy env vars at runtime (they're only needed at build time)
-ENV http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY=""
 
 EXPOSE 80 8888
 
