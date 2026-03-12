@@ -224,7 +224,16 @@ class AgentOrchestrator
                     return $voiceResult;
                 }
             } elseif (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
-                $dispatchAgent = 'chat';
+                // If routed to document but context involves a project with API,
+                // redirect to dev — DevAgent fetches fresh data then creates the file
+                if ($dispatchAgent === 'document' && (
+                    $this->messageReferencesApiProject($context->body)
+                    || $this->sessionHasApiProject($context->session)
+                )) {
+                    $dispatchAgent = 'dev';
+                } else {
+                    $dispatchAgent = 'chat';
+                }
             }
 
             // Inject conversation memory context into the routed context
@@ -691,5 +700,42 @@ class AgentOrchestrator
             $reply,
             $summary ?? ''
         );
+    }
+
+    /**
+     * Check if a message references a project that has API credentials configured.
+     * Used to redirect document creation requests to DevAgent for fresh API data.
+     */
+    private function messageReferencesApiProject(string $body): bool
+    {
+        $projects = \App\Models\Project::whereIn('status', ['approved', 'in_progress', 'completed'])->get();
+
+        foreach ($projects as $project) {
+            // Check if project name appears in message
+            if (mb_stripos($body, $project->name) === false) continue;
+
+            // Check if project has API config
+            $settings = $project->settings ?? [];
+            $hasToken = (bool) collect($settings)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
+
+            if ($hasToken) return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the current session's active project has API credentials.
+     */
+    private function sessionHasApiProject($session): bool
+    {
+        $projectId = $session->active_project_id ?? null;
+        if (!$projectId) return false;
+
+        $project = \App\Models\Project::find($projectId);
+        if (!$project) return false;
+
+        $settings = $project->settings ?? [];
+        return (bool) collect($settings)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
     }
 }

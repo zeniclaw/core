@@ -113,7 +113,7 @@ class DevAgent extends BaseAgent
             ['key' => 'rollback', 'description' => 'Annuler la derniere modif', 'examples' => ['rollback', 'annule le dernier deploy']],
             ['key' => 'deploy_status', 'description' => 'Status deploiement', 'examples' => ['status deploy', 'mise en prod']],
             // API interaction
-            ['key' => 'api_query', 'description' => 'Utiliser l\'API live du projet: lister, creer, modifier, supprimer des entites (projets, campagnes, prospects, etc.) via les endpoints API. PAS modifier le code source.', 'examples' => ['liste les campagnes', 'combien de users', 'donne moi les apis du projet', 'cree un projet', 'cree une campagne marketing', 'ajoute des prospects']],
+            ['key' => 'api_query', 'description' => 'Utiliser l\'API live du projet: lister, creer, modifier, supprimer des entites (projets, campagnes, prospects, etc.) via les endpoints API. Aussi: exporter/creer fichier XLS/Excel/CSV/PDF avec des donnees API. PAS modifier le code source.', 'examples' => ['liste les campagnes', 'combien de users', 'donne moi les apis du projet', 'cree un projet', 'cree une campagne marketing', 'ajoute des prospects', 'crée un fichier XLS avec les clients', 'exporte les factures en Excel']],
             ['key' => 'api_credentials', 'description' => 'L\'utilisateur donne/partage des credentials: cle API, token, endpoint, URL d\'API, secret. Il veut les stocker, pas coder.', 'examples' => ['voici la cle pk_xxx et le endpoint https://...', 'utilise cette API key: xxx', 'le token c\'est abc123']],
             // Dev tasks (code changes)
             ['key' => 'dev_task', 'description' => 'Tache de developpement: modifier code, fix bug, ajouter feature, refactoring. Necessite modification de code.', 'examples' => ['fix le bug du login', 'ajoute un bouton', 'refactore le controller']],
@@ -731,8 +731,14 @@ PROMPT;
         }
 
         // Step 2: If we got structured records, format them programmatically
-        // then only ask LLM for a short intro/summary line — not the data itself
         if ($hasStructuredData && !empty($allRecords)) {
+            // Detect if user asked for a file (XLS, Excel, CSV, PDF)
+            $wantsFile = preg_match('/\b(xls|xlsx|excel|csv|pdf|fichier|export|exporte|telecharge)\b/iu', $query);
+
+            if ($wantsFile) {
+                return $this->generateDocumentFromRecords($allRecords, $query, $project, $context);
+            }
+
             $formatted = $this->formatRecordsProgrammatically($allRecords);
             $count = count($allRecords);
 
@@ -768,6 +774,102 @@ PROMPT;
         );
 
         return $response ?: "[{$project->name}] Donnees collectees mais analyse impossible.";
+    }
+
+    /**
+     * Convert API records to headers+rows and delegate to DocumentAgent for file creation.
+     */
+    private function generateDocumentFromRecords(array $records, string $query, Project $project, AgentContext $context): string
+    {
+        // Detect desired format
+        $format = 'xlsx';
+        if (preg_match('/\bcsv\b/i', $query)) $format = 'csv';
+        if (preg_match('/\bpdf\b/i', $query)) $format = 'pdf';
+
+        // Deduplicate
+        $seen = [];
+        $unique = [];
+        foreach ($records as $record) {
+            if (!is_array($record)) continue;
+            $key = $record['id'] ?? md5(json_encode($record));
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $unique[] = $record;
+        }
+        $records = $unique;
+
+        // Determine useful fields (same logic as formatRecordsProgrammatically)
+        $hiddenFields = [
+            'id', 'tenant_id', 'created_at', 'updated_at', 'deleted_at',
+            'cegid_customer_id', 'cegid_token', 'cegid_eligible', 'cegid_onboarding_status',
+            'cegid_onboarding_completed_at', 'cegid_contract_status', 'cegid_approved_at',
+            'cegid_rejection_reasons', 'cegid_debtor_id',
+            'currency_id', 'is_primary', 'dunning_segment', 'dunning_excluded',
+            'dunning_level', 'dunning_preferences', 'last_dunning_at',
+            'vat_number_validated', 'vat_number_validated_at',
+            'customer_number_by_vat',
+            'shipping_address_line1', 'shipping_address_line2',
+            'shipping_city', 'shipping_state', 'shipping_postal_code', 'shipping_country_code',
+            'contact_first_name', 'contact_last_name', 'contact_person',
+            'billing_address_line2', 'billing_state',
+        ];
+        $hiddenSet = array_flip($hiddenFields);
+
+        // Collect all keys across records, filter hidden ones
+        $allKeys = [];
+        foreach ($records as $r) {
+            foreach (array_keys($r) as $k) {
+                if (!isset($hiddenSet[$k])) $allKeys[$k] = true;
+            }
+        }
+        // Remove array/object fields
+        foreach ($allKeys as $k => $_) {
+            $sample = $records[0][$k] ?? null;
+            if (is_array($sample) || is_object($sample)) unset($allKeys[$k]);
+        }
+
+        $fields = array_keys($allKeys);
+        $headers = array_map(fn($f) => $this->humanizeFieldName($f), $fields);
+
+        // Build rows
+        $rows = [];
+        foreach ($records as $record) {
+            $row = [];
+            foreach ($fields as $field) {
+                $value = $record[$field] ?? '';
+                if ($value === null) $value = '';
+                if ($value === true) $value = 'Oui';
+                if ($value === false) $value = 'Non';
+                $row[] = (string) $value;
+            }
+            $rows[] = $row;
+        }
+
+        // Generate title from query
+        $title = $project->name . ' - Export';
+        if (preg_match('/\b(clients?|customers?)\b/i', $query)) $title = $project->name . ' - Clients';
+        elseif (preg_match('/\b(factures?|invoices?)\b/i', $query)) $title = $project->name . ' - Factures';
+        elseif (preg_match('/\b(fournisseurs?|suppliers?)\b/i', $query)) $title = $project->name . ' - Fournisseurs';
+        elseif (preg_match('/\b(produits?|products?)\b/i', $query)) $title = $project->name . ' - Produits';
+
+        // Call DocumentAgent's create_document tool
+        $documentAgent = new \App\Services\Agents\DocumentAgent();
+        $result = $documentAgent->executeTool('create_document', [
+            'format' => $format,
+            'title' => $title,
+            'headers' => $headers,
+            'rows' => $rows,
+        ], $context);
+
+        $resultData = json_decode($result, true);
+        if (!empty($resultData['success'])) {
+            $count = count($rows);
+            $url = $resultData['url'] ?? '';
+            return "[{$project->name}] 📄 Fichier {$format} cree avec {$count} enregistrements.\n{$url}";
+        }
+
+        $error = $resultData['error'] ?? 'Erreur inconnue';
+        return "[{$project->name}] Erreur creation fichier: {$error}";
     }
 
     /**
