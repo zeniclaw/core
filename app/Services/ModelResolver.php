@@ -42,6 +42,60 @@ class ModelResolver
     ];
 
     private static ?array $cache = null;
+    private static ?array $ollamaModelsCache = null;
+
+    /**
+     * Fetch models from Ollama API and merge with static list.
+     */
+    public static function allModels(): array
+    {
+        $models = self::AVAILABLE_MODELS;
+
+        // Add Ollama models dynamically
+        $ollamaModels = self::getOllamaModels();
+        foreach ($ollamaModels as $name) {
+            if (!isset($models[$name])) {
+                $models[$name] = "{$name} (on-prem, importe)";
+            }
+        }
+
+        return $models;
+    }
+
+    /**
+     * Fetch installed model names from Ollama.
+     */
+    public static function getOllamaModels(): array
+    {
+        if (self::$ollamaModelsCache !== null) {
+            return self::$ollamaModelsCache;
+        }
+
+        self::$ollamaModelsCache = [];
+
+        try {
+            $url = AppSetting::get('onprem_api_url');
+            if (!$url) {
+                return self::$ollamaModelsCache;
+            }
+
+            $ctx = stream_context_create(['http' => ['timeout' => 3]]);
+            $response = @file_get_contents("{$url}/api/tags", false, $ctx);
+            if ($response) {
+                $data = json_decode($response, true);
+                foreach ($data['models'] ?? [] as $model) {
+                    $name = $model['name'] ?? '';
+                    if ($name) {
+                        self::$ollamaModelsCache[] = $name;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ollama not available — ignore
+        }
+
+        return self::$ollamaModelsCache;
+    }
 
     public static function fast(): string
     {
@@ -62,9 +116,10 @@ class ModelResolver
     {
         if (self::$cache === null) {
             self::$cache = [];
+            $all = self::allModels();
             foreach (array_keys(self::DEFAULTS) as $r) {
                 $setting = AppSetting::get("model_role_{$r}");
-                self::$cache[$r] = ($setting && isset(self::AVAILABLE_MODELS[$setting]))
+                self::$cache[$r] = ($setting && isset($all[$setting]))
                     ? $setting
                     : self::DEFAULTS[$r];
             }

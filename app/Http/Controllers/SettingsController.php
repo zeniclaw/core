@@ -39,7 +39,7 @@ class SettingsController extends Controller
         ];
 
         $modelRoles = ModelResolver::current();
-        $availableModels = ModelResolver::AVAILABLE_MODELS;
+        $availableModels = ModelResolver::allModels();
         $maxConcurrentSubagents = (int) (AppSetting::get('max_concurrent_subagents') ?? 3);
 
         return view('settings.index', compact('user', 'hasAnthropicKey', 'hasOpenAiKey', 'hasGitlabToken', 'hasOnPremUrl', 'hasOnPremKey', 'onPremUrl', 'hasBraveKey', 'adminWhatsappPhone', 'autoUpdateEnabled', 'appTimezone', 'tokens', 'publicChat', 'proxyConfig', 'modelRoles', 'availableModels', 'maxConcurrentSubagents'));
@@ -144,7 +144,7 @@ class SettingsController extends Controller
 
     public function saveModelRoles(Request $request)
     {
-        $validModels = array_keys(ModelResolver::AVAILABLE_MODELS);
+        $validModels = array_keys(ModelResolver::allModels());
 
         foreach (['fast', 'balanced', 'powerful'] as $role) {
             $model = $request->input("model_role_{$role}");
