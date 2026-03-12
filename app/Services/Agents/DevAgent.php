@@ -610,8 +610,68 @@ PROMPT;
         }
     }
 
+    /**
+     * Smart API response formatter.
+     *
+     * Strategy: extract data programmatically from JSON, then let
+     * the LLM only decide layout/grouping — never touch the actual values.
+     * If JSON parsing fails, fall back to LLM formatting with strict rules.
+     */
     private function finalizeApiResponse(Project $project, string $query, array $collectedData): string
     {
+        // Step 1: Try to extract structured records from all API responses
+        $allRecords = [];
+        $rawTexts = [];
+        $hasStructuredData = false;
+
+        foreach ($collectedData as $cd) {
+            $rawBody = $cd['response'] ?? $cd['body'] ?? '';
+            $rawTexts[] = $rawBody;
+
+            $json = json_decode($rawBody, true);
+            if (!$json) continue;
+
+            // Handle common API response shapes:
+            // { "data": [...] }, { "items": [...] }, { "results": [...] }, or just [...]
+            $records = null;
+            if (isset($json['data']) && is_array($json['data'])) {
+                $records = $json['data'];
+            } elseif (isset($json['items']) && is_array($json['items'])) {
+                $records = $json['items'];
+            } elseif (isset($json['results']) && is_array($json['results'])) {
+                $records = $json['results'];
+            } elseif (is_array($json) && isset($json[0]) && is_array($json[0])) {
+                $records = $json;
+            }
+
+            if ($records) {
+                $allRecords = array_merge($allRecords, $records);
+                $hasStructuredData = true;
+            }
+        }
+
+        // Step 2: If we got structured records, format them programmatically
+        // then only ask LLM for a short intro/summary line — not the data itself
+        if ($hasStructuredData && !empty($allRecords)) {
+            $formatted = $this->formatRecordsProgrammatically($allRecords);
+            $count = count($allRecords);
+
+            // Ask LLM only for a 1-line intro based on the query
+            $intro = $this->claude->chat(
+                "Requete: \"{$query}\"\nNombre de resultats: {$count}",
+                ModelResolver::fast(),
+                "Genere UNE SEULE ligne d'introduction pour une liste de {$count} resultats. "
+                . "Commence par [{$project->name}]. Format WhatsApp. Pas de donnees, juste l'intro. "
+                . "Exemple: '[MonProjet] 📋 Voici vos 13 clients :'",
+                128
+            );
+
+            $intro = $intro ?: "[{$project->name}] {$count} resultats :";
+            return $intro . "\n\n" . $formatted;
+        }
+
+        // Step 3: Fallback — non-structured data (HTML, text, single object)
+        // Let LLM format but with raw data embedded as immutable reference
         $dataText = '';
         foreach ($collectedData as $j => $cd) {
             $dataText .= "=== APPEL " . ($j + 1) . ": {$cd['method']} {$cd['url']} (HTTP {$cd['status']}) ===\n";
@@ -619,21 +679,132 @@ PROMPT;
         }
 
         $response = $this->claude->chat(
-            "DONNEES BRUTES DE L'API (JSON):\n{$dataText}",
+            "DONNEES BRUTES:\n{$dataText}",
             ModelResolver::balanced(),
-            "Tu es un formateur de donnees. L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n\n"
-            . "REGLE ABSOLUE #1: Les donnees ci-dessus viennent DIRECTEMENT de l'API. "
-            . "Tu DOIS restituer EXACTEMENT les noms, adresses, emails, numeros de TVA et montants tels qu'ils apparaissent dans le JSON.\n"
-            . "REGLE ABSOLUE #2: Tu ne dois JAMAIS remplacer un nom par un autre nom. "
-            . "Si le JSON dit \"tilleul\", tu ecris \"tilleul\". Si le JSON dit \"SRL ZENIBIZ\", tu ecris \"SRL ZENIBIZ\".\n"
-            . "REGLE ABSOLUE #3: N'invente AUCUNE donnee. Si un champ est null ou absent, ecris \"Non renseigne\".\n"
-            . "REGLE ABSOLUE #4: N'ajoute AUCUN client, fournisseur ou entite qui n'est PAS dans le JSON ci-dessus.\n\n"
-            . "Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}]. "
-            . "Tu peux ajouter des totaux/statistiques UNIQUEMENT si calcules a partir des donnees reelles.",
+            "Tu es un formateur. Demande: \"{$query}\" pour [{$project->name}].\n"
+            . "REGLE: Restitue EXACTEMENT les donnees du JSON — aucune modification de noms, emails, montants, TVA. "
+            . "Si un champ est null/absent: 'Non renseigne'. N'invente rien. Format WhatsApp.",
             4096
         );
 
         return $response ?: "[{$project->name}] Donnees collectees mais analyse impossible.";
+    }
+
+    /**
+     * Format API records into WhatsApp-friendly text without any LLM involvement.
+     * Handles any shape of records by auto-detecting fields.
+     */
+    private function formatRecordsProgrammatically(array $records): string
+    {
+        if (empty($records)) return '(aucun resultat)';
+
+        // Auto-detect which fields are present across all records
+        $fieldFrequency = [];
+        foreach ($records as $record) {
+            if (!is_array($record)) continue;
+            foreach (array_keys($record) as $key) {
+                $fieldFrequency[$key] = ($fieldFrequency[$key] ?? 0) + 1;
+            }
+        }
+
+        // Prioritize human-readable fields for display
+        $displayPriority = [
+            'name', 'company_name', 'nom', 'label', 'title', 'titre',
+            'reference', 'ref', 'number', 'numero', 'code', 'id',
+            'email', 'mail', 'phone', 'telephone', 'tel',
+            'vat_number', 'tva', 'vat', 'tax_number',
+            'address', 'adresse', 'city', 'ville', 'country', 'pays',
+            'amount', 'total', 'montant', 'price', 'prix',
+            'status', 'statut', 'state', 'etat',
+            'date', 'created_at', 'due_date', 'date_echeance',
+            'description', 'notes', 'comment',
+        ];
+
+        // Select fields to show: prioritized fields that exist, then others
+        $fieldsToShow = [];
+        foreach ($displayPriority as $pf) {
+            foreach ($fieldFrequency as $key => $count) {
+                if (mb_strtolower($key) === $pf || str_contains(mb_strtolower($key), $pf)) {
+                    $fieldsToShow[$key] = true;
+                }
+            }
+        }
+        // Add remaining non-nested fields (skip large objects/arrays)
+        foreach ($fieldFrequency as $key => $count) {
+            if (isset($fieldsToShow[$key])) continue;
+            // Only include scalar fields
+            $sample = $records[0][$key] ?? null;
+            if (!is_array($sample) && !is_object($sample)) {
+                $fieldsToShow[$key] = true;
+            }
+        }
+        $fields = array_keys($fieldsToShow);
+
+        // Find the "name" field (first field that looks like a name/title)
+        $nameField = null;
+        foreach (['name', 'company_name', 'nom', 'label', 'title', 'titre', 'reference'] as $candidate) {
+            foreach ($fields as $f) {
+                if (mb_strtolower($f) === $candidate || str_contains(mb_strtolower($f), $candidate)) {
+                    $nameField = $f;
+                    break 2;
+                }
+            }
+        }
+
+        // Format each record
+        $lines = [];
+        foreach ($records as $i => $record) {
+            if (!is_array($record)) continue;
+
+            $num = $i + 1;
+            $header = $nameField && !empty($record[$nameField])
+                ? "*{$num}. {$record[$nameField]}*"
+                : "*{$num}.*";
+
+            $details = [];
+            foreach ($fields as $field) {
+                if ($field === $nameField) continue; // already in header
+                $value = $record[$field] ?? null;
+                if ($value === null || $value === '') {
+                    continue; // skip empty — cleaner output
+                }
+                if (is_array($value) || is_object($value)) continue;
+
+                $label = $this->humanizeFieldName($field);
+                $details[] = "  • {$label}: {$value}";
+            }
+
+            $lines[] = $header . ($details ? "\n" . implode("\n", $details) : '');
+        }
+
+        return implode("\n\n", $lines);
+    }
+
+    /**
+     * Convert field_name to readable label: "vat_number" → "N° TVA"
+     */
+    private function humanizeFieldName(string $field): string
+    {
+        static $labels = [
+            'id' => 'ID', 'name' => 'Nom', 'company_name' => 'Entreprise',
+            'email' => 'Email', 'phone' => 'Tel', 'telephone' => 'Tel',
+            'vat_number' => 'N° TVA', 'tva' => 'TVA', 'tax_number' => 'N° fiscal',
+            'address' => 'Adresse', 'city' => 'Ville', 'country' => 'Pays',
+            'zip' => 'Code postal', 'postal_code' => 'Code postal',
+            'amount' => 'Montant', 'total' => 'Total', 'price' => 'Prix',
+            'status' => 'Statut', 'state' => 'Etat',
+            'reference' => 'Ref', 'number' => 'N°', 'code' => 'Code',
+            'date' => 'Date', 'created_at' => 'Cree le', 'updated_at' => 'Modifie le',
+            'due_date' => 'Echeance', 'description' => 'Description',
+            'notes' => 'Notes', 'label' => 'Label', 'title' => 'Titre',
+            'customer_number' => 'N° client', 'invoice_number' => 'N° facture',
+        ];
+
+        $lower = mb_strtolower($field);
+        if (isset($labels[$lower])) return $labels[$lower];
+
+        // "some_field_name" → "Some field name"
+        return ucfirst(str_replace(['_', '-'], ' ', $field));
     }
 
     private function handleApiAsk(Project $project, array $parsed, string $query, array $conversation, AgentContext $context): string
