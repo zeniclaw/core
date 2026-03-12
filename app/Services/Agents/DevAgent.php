@@ -506,22 +506,14 @@ PROMPT;
 
             // Handle action
             if ($parsed['action'] === 'reply') {
-                // Auto-store knowledge from the reply
-                $knowledge = $parsed['knowledge'] ?? [];
-                if (!empty($knowledge) && is_array($knowledge)) {
-                    foreach ($knowledge as $item) {
-                        if (!empty($item['key']) && !empty($item['data'])) {
-                            UserKnowledge::store(
-                                $context->from,
-                                $item['key'],
-                                $item['data'],
-                                $item['label'] ?? null,
-                                $project->name,
-                                $item['ttl_minutes'] ?? null
-                            );
-                        }
-                    }
+                // If we collected real API data, ALWAYS use finalizeApiResponse
+                // to format it — never trust the LLM's own formatted message
+                // (it hallucinates/replaces real data with invented names)
+                if (!empty($collectedData)) {
+                    return $this->finalizeApiResponse($project, $query, $collectedData);
                 }
+
+                // No API data collected — this is a config/info reply, trust it
                 return ($parsed['message'] ?? '');
             }
 
@@ -622,21 +614,23 @@ PROMPT;
     {
         $dataText = '';
         foreach ($collectedData as $j => $cd) {
-            $dataText .= "Appel " . ($j + 1) . ": {$cd['method']} {$cd['url']} (HTTP {$cd['status']})\n";
-            $dataText .= mb_substr($cd['response'], 0, 3000) . "\n\n";
+            $dataText .= "=== APPEL " . ($j + 1) . ": {$cd['method']} {$cd['url']} (HTTP {$cd['status']}) ===\n";
+            $dataText .= mb_substr($cd['response'] ?? $cd['body'] ?? '', 0, 5000) . "\n\n";
         }
 
         $response = $this->claude->chat(
-            "Donnees collectees:\n{$dataText}",
+            "DONNEES BRUTES DE L'API (JSON):\n{$dataText}",
             ModelResolver::balanced(),
-            "L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n"
-            . "Voici toutes les donnees collectees via API.\n\n"
-            . "REGLE ABSOLUE: Restitue les donnees EXACTEMENT comme elles apparaissent dans l'API. "
-            . "Ne modifie JAMAIS les noms, adresses, emails, numeros de TVA, montants ou toute autre donnee factuelle. "
-            . "Ne remplace JAMAIS un nom par un autre. Ne complete JAMAIS une donnee manquante en inventant. "
-            . "Si une donnee est absente de l'API, indique 'Non renseigne'.\n\n"
+            "Tu es un formateur de donnees. L'utilisateur a demande: \"{$query}\" pour le projet {$project->name}.\n\n"
+            . "REGLE ABSOLUE #1: Les donnees ci-dessus viennent DIRECTEMENT de l'API. "
+            . "Tu DOIS restituer EXACTEMENT les noms, adresses, emails, numeros de TVA et montants tels qu'ils apparaissent dans le JSON.\n"
+            . "REGLE ABSOLUE #2: Tu ne dois JAMAIS remplacer un nom par un autre nom. "
+            . "Si le JSON dit \"tilleul\", tu ecris \"tilleul\". Si le JSON dit \"SRL ZENIBIZ\", tu ecris \"SRL ZENIBIZ\".\n"
+            . "REGLE ABSOLUE #3: N'invente AUCUNE donnee. Si un champ est null ou absent, ecris \"Non renseigne\".\n"
+            . "REGLE ABSOLUE #4: N'ajoute AUCUN client, fournisseur ou entite qui n'est PAS dans le JSON ci-dessus.\n\n"
             . "Formate pour WhatsApp (*gras*, listes). Commence par [{$project->name}]. "
-            . "Tu peux ajouter des totaux/statistiques UNIQUEMENT si calcules a partir des donnees reelles."
+            . "Tu peux ajouter des totaux/statistiques UNIQUEMENT si calcules a partir des donnees reelles.",
+            4096
         );
 
         return $response ?: "[{$project->name}] Donnees collectees mais analyse impossible.";
