@@ -835,10 +835,10 @@ PROMPT;
 
         // Format each record
         $lines = [];
-        foreach ($records as $i => $record) {
+        $num = 0;
+        foreach ($records as $record) {
             if (!is_array($record)) continue;
-
-            $num = $i + 1;
+            $num++;
             $header = $nameField && !empty($record[$nameField])
                 ? "*{$num}. {$record[$nameField]}*"
                 : "*{$num}.*";
