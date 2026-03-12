@@ -473,14 +473,14 @@ if [ -n "$CONTAINER_CMD" ] && $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null
             OLLAMA_API_OK=true
         elif $CONTAINER_CMD exec zeniclaw_ollama wget -qO /dev/null http://localhost:11434/api/tags &>/dev/null; then
             OLLAMA_API_OK=true
-        elif $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+        elif $CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama list &>/dev/null; then
             OLLAMA_API_OK=true
         fi
 
         if [ "$OLLAMA_API_OK" = true ]; then
             pass "API: accessible"
 
-            MODELS=$($CONTAINER_CMD exec zeniclaw_ollama ollama list 2>/dev/null | tail -n +2 || true)
+            MODELS=$($CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama list 2>/dev/null | tail -n +2 || true)
             if [ -n "$MODELS" ]; then
                 MODEL_COUNT=$(echo "$MODELS" | wc -l)
                 pass "Modeles installes: $MODEL_COUNT"

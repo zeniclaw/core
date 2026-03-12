@@ -360,25 +360,16 @@ if [ -n "$GGUF_FILES" ]; then
                 continue
             fi
 
-            # Create Modelfile inside the container directly
+            # Create Modelfile inside the container
             $CONTAINER_CMD exec zeniclaw_ollama sh -c "printf 'FROM /models/$GGUF_BASENAME\n' > /tmp/Modelfile" 2>&1
-            info "Modelfile:"
-            $CONTAINER_CMD exec zeniclaw_ollama cat /tmp/Modelfile 2>&1
 
-            # Create the model with debug output
-            info "Creation du modele $GGUF_NAME (avec debug)..."
-            CREATE_OUTPUT=$($CONTAINER_CMD exec -e OLLAMA_DEBUG=1 zeniclaw_ollama ollama create "$GGUF_NAME" -f /tmp/Modelfile 2>&1 || true)
-            echo "$CREATE_OUTPUT"
-
-            # Check if it worked
-            if $CONTAINER_CMD exec zeniclaw_ollama ollama show "$GGUF_NAME" --modelfile &>/dev/null; then
+            # Create the model
+            info "Creation du modele $GGUF_NAME..."
+            if $CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama create "$GGUF_NAME" -f /tmp/Modelfile 2>&1; then
                 success "Modele $GGUF_NAME importe!"
             else
                 warn "Echec import de $GGUF_NAME"
-                echo -e "${DIM}Debug output:${NC}"
-                echo "$CREATE_OUTPUT" | tail -10
-                echo -e "${DIM}Server logs:${NC}"
-                $CONTAINER_CMD logs --tail 15 zeniclaw_ollama 2>&1 | grep -i "error\|warn\|fail\|creat" | tail -5
+                $CONTAINER_CMD logs --tail 5 zeniclaw_ollama 2>&1 | grep -i "error\|warn\|fail" | tail -3
             fi
         done
     fi
@@ -386,7 +377,7 @@ fi
 
 # --- Step 4: Check existing models ------------------------------------------
 info "Modeles installes :"
-MODELS=$($CONTAINER_CMD exec zeniclaw_ollama ollama list 2>/dev/null || true)
+MODELS=$($CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama list 2>/dev/null || true)
 if [ -n "$MODELS" ] && [ "$(echo "$MODELS" | wc -l)" -gt 1 ]; then
     echo "$MODELS"
 else
@@ -444,7 +435,7 @@ esac
 
 if [ -n "$MODEL_NAME" ]; then
     info "Telechargement de ${MODEL_NAME}... (peut prendre plusieurs minutes)"
-    if $CONTAINER_CMD exec zeniclaw_ollama ollama pull "$MODEL_NAME" 2>&1; then
+    if $CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama pull "$MODEL_NAME" 2>&1; then
         success "Modele ${MODEL_NAME} installe!"
     else
         warn "Echec du telechargement automatique."
@@ -493,7 +484,7 @@ if [ -n "$MODEL_NAME" ]; then
             $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /models 2>&1 || true
             $CONTAINER_CMD cp "$GGUF_PATH" "zeniclaw_ollama:/models/$IMPORT_BASENAME" 2>&1
             $CONTAINER_CMD exec zeniclaw_ollama bash -c "echo 'FROM /models/$IMPORT_BASENAME' > /tmp/Modelfile" 2>&1
-            if $CONTAINER_CMD exec zeniclaw_ollama ollama create "$IMPORT_NAME" -f /tmp/Modelfile 2>&1; then
+            if $CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama create "$IMPORT_NAME" -f /tmp/Modelfile 2>&1; then
                 success "Modele $IMPORT_NAME importe!"
                 MODEL_NAME="$IMPORT_NAME"
             else
@@ -549,14 +540,14 @@ else
 fi
 
 # Check API via ollama list
-if $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+if $CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama list &>/dev/null; then
     success "API Ollama: accessible"
 else
     warn "API Ollama: non accessible"
 fi
 
 # Check models
-INSTALLED=$($CONTAINER_CMD exec zeniclaw_ollama ollama list 2>/dev/null | tail -n +2 || true)
+INSTALLED=$($CONTAINER_CMD exec -e OLLAMA_HOST=http://127.0.0.1:11434 zeniclaw_ollama ollama list 2>/dev/null | tail -n +2 || true)
 if [ -n "$INSTALLED" ]; then
     success "Modeles installes:"
     echo "$INSTALLED" | while read -r line; do
