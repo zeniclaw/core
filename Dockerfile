@@ -49,12 +49,18 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
 
 # Install Node.js + npm, build front-end assets, install Claude Code CLI
+# npm chokes on URL-encoded proxy credentials (% in user/pass) — configure npm proxy separately
 RUN apt-get update \
     && apt-get install -y nodejs npm \
-    && npm ci \
-    && npm run build \
+    && if [ -n "$HTTP_PROXY" ]; then \
+         npm config set proxy "$HTTP_PROXY" 2>/dev/null || true; \
+         npm config set https-proxy "${HTTPS_PROXY:-$HTTP_PROXY}" 2>/dev/null || true; \
+         npm config set noproxy "${NO_PROXY:-localhost}" 2>/dev/null || true; \
+       fi \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm ci \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm run build \
     && rm -rf node_modules \
-    && npm install -g @anthropic-ai/claude-code \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy configs
