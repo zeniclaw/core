@@ -201,7 +201,14 @@ success "Code updated"
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
 info "New version: v${VERSION}"
 
-# 3. Rebuild and restart
+# 3. Clean up old images/build cache to free disk space
+info "Cleaning up old images and build cache..."
+$CONTAINER_CMD image prune -f 2>/dev/null || true
+$CONTAINER_CMD builder prune -f 2>/dev/null || true
+DISK_FREE=$(df -h / | awk 'NR==2 {print $4}')
+info "Disk free: ${DISK_FREE}"
+
+# 4. Rebuild and restart
 info "Rebuilding app container..."
 $COMPOSE build $BUILD_ARGS app 2>&1 | tail -5
 success "Image built"
@@ -225,12 +232,12 @@ info "Starting all services (including new ones)..."
 $COMPOSE up -d 2>&1
 success "All services up"
 
-# 4. Run migrations
+# 5. Run migrations
 info "Running migrations..."
 sleep 3  # wait for container to be ready
 $CONTAINER_CMD exec zeniclaw_app php artisan migrate --force --no-interaction 2>&1 || warn "Migrations skipped"
 
-# 5. Clear caches
+# 6. Clear caches
 info "Clearing caches..."
 $CONTAINER_CMD exec zeniclaw_app php artisan config:cache 2>/dev/null || true
 $CONTAINER_CMD exec zeniclaw_app php artisan route:cache 2>/dev/null || true

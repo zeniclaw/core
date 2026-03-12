@@ -5,3 +5,10 @@ node_modules
 README.md
 *.log
 storage/logs/*.log
+
+# Large files — never copy into image
+*.tar.gz
+*.gguf
+models/
+*.tar
+*.zip
