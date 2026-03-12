@@ -564,7 +564,141 @@ else
     skip "App non disponible"
 fi
 
-# ── 12. Proxy ──────────────────────────────────────────────────────────────
+# ── 12. Test Chat LLM ─────────────────────────────────────────────────────
+header "Test Chat LLM"
+
+if [ "$APP_OK" = true ]; then
+    # Get configured models for each role
+    FAST_MODEL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Services\ModelResolver::fast();" 2>/dev/null || echo "?")
+    BALANCED_MODEL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Services\ModelResolver::balanced();" 2>/dev/null || echo "?")
+    POWERFUL_MODEL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Services\ModelResolver::powerful();" 2>/dev/null || echo "?")
+
+    detail "Modeles configures: fast=$FAST_MODEL | balanced=$BALANCED_MODEL | powerful=$POWERFUL_MODEL"
+
+    # Collect unique models to test (avoid testing same model twice)
+    MODELS_TO_TEST=""
+    TESTED=""
+    for ROLE_INFO in "fast:$FAST_MODEL" "balanced:$BALANCED_MODEL" "powerful:$POWERFUL_MODEL"; do
+        ROLE="${ROLE_INFO%%:*}"
+        MODEL="${ROLE_INFO#*:}"
+        if [ "$MODEL" = "?" ]; then continue; fi
+        # Skip if already tested this model
+        if echo "$TESTED" | grep -qF "|$MODEL|"; then
+            detail "$ROLE ($MODEL) — deja teste ci-dessus"
+            continue
+        fi
+        TESTED="${TESTED}|${MODEL}|"
+
+        detail ""
+        detail "--- Test: $ROLE -> $MODEL ---"
+
+        # Run the actual chat test with full debug
+        CHAT_RESULT=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+            \$model = '$MODEL';
+            \$client = new \App\Services\AnthropicClient();
+            \$start = microtime(true);
+            try {
+                \$response = \$client->chat('Reponds juste OK en un mot.', \$model, 'Tu es un assistant de test. Reponds en un seul mot.');
+                \$elapsed = round((microtime(true) - \$start) * 1000);
+                if (\$response) {
+                    echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$response), 0, 100);
+                } else {
+                    echo \"NULL|{\$elapsed}ms|reponse vide (null)\";
+                }
+            } catch (\Throwable \$e) {
+                \$elapsed = round((microtime(true) - \$start) * 1000);
+                echo \"ERROR|{\$elapsed}ms|\" . substr(\$e->getMessage(), 0, 200);
+            }
+        " 2>/dev/null || echo "ERROR|0ms|impossible d'executer le tinker")
+
+        CHAT_STATUS="${CHAT_RESULT%%|*}"
+        CHAT_REST="${CHAT_RESULT#*|}"
+        CHAT_TIME="${CHAT_REST%%|*}"
+        CHAT_MSG="${CHAT_REST#*|}"
+
+        if [ "$CHAT_STATUS" = "SUCCESS" ]; then
+            pass "Chat $ROLE ($MODEL): OK ($CHAT_TIME)"
+            detail "Reponse: $CHAT_MSG"
+        else
+            fail "Chat $ROLE ($MODEL): ECHEC ($CHAT_TIME)"
+            detail "Erreur: $CHAT_MSG"
+
+            # Extra debug for on-prem models
+            if ! echo "$MODEL" | grep -q "^claude-"; then
+                OLLAMA_URL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('onprem_api_url') ?? 'non configure';" 2>/dev/null || echo "?")
+                detail "URL Ollama: $OLLAMA_URL"
+
+                # Test raw API call to Ollama
+                if [ "$OLLAMA_URL" != "non configure" ] && [ "$OLLAMA_URL" != "?" ]; then
+                    RAW_TAGS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL}/api/tags" 2>/dev/null || echo "fail")
+                    if [ "$RAW_TAGS" = "fail" ]; then
+                        detail "curl ${OLLAMA_URL}/api/tags: ECHEC (Ollama injoignable)"
+                    else
+                        INSTALLED=$(echo "$RAW_TAGS" | grep -oP '"name"\s*:\s*"\K[^"]+' | tr '\n' ', ')
+                        detail "Modeles Ollama installes: ${INSTALLED:-aucun}"
+                        if ! echo "$RAW_TAGS" | grep -q "$MODEL"; then
+                            detail "!! Le modele '$MODEL' n'est PAS dans la liste Ollama !"
+                            detail "Fix: ollama pull $MODEL ou importez-le via setup-ollama.sh"
+                        fi
+                    fi
+
+                    # Test raw generate call
+                    detail "Test raw API generate..."
+                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 30 -X POST "${OLLAMA_URL}/api/generate" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"model\":\"$MODEL\",\"prompt\":\"Say OK\",\"stream\":false}" 2>/dev/null || echo "fail")
+                    if [ "$RAW_RESP" = "fail" ]; then
+                        detail "raw generate: ECHEC"
+                    else
+                        RAW_ANSWER=$(echo "$RAW_RESP" | grep -oP '"response"\s*:\s*"\K[^"]*' | head -1)
+                        RAW_ERROR=$(echo "$RAW_RESP" | grep -oP '"error"\s*:\s*"\K[^"]*' | head -1)
+                        if [ -n "$RAW_ERROR" ]; then
+                            detail "raw generate erreur: $RAW_ERROR"
+                        elif [ -n "$RAW_ANSWER" ]; then
+                            detail "raw generate OK: $RAW_ANSWER"
+                            detail "Le modele repond en direct mais pas via AnthropicClient — bug applicatif ?"
+                        else
+                            detail "raw generate reponse brute: $(echo "$RAW_RESP" | head -c 200)"
+                        fi
+                    fi
+                fi
+            else
+                # Cloud model debug
+                HAS_KEY=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('anthropic_api_key') ? 'oui' : 'non';" 2>/dev/null || echo "?")
+                detail "Cle API Anthropic: $HAS_KEY"
+                if [ "$HAS_KEY" = "non" ]; then
+                    detail "Fix: configurez la cle API dans Settings > API"
+                fi
+
+                # Test raw API call to Anthropic
+                API_KEY=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('anthropic_api_key');" 2>/dev/null || echo "")
+                if [ -n "$API_KEY" ]; then
+                    detail "Test raw API Anthropic..."
+                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 15 -X POST "https://api.anthropic.com/v1/messages" \
+                        -H "Content-Type: application/json" \
+                        -H "x-api-key: $API_KEY" \
+                        -H "anthropic-version: 2023-06-01" \
+                        -d "{\"model\":\"$MODEL\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"Say OK\"}]}" 2>/dev/null || echo "fail")
+                    if [ "$RAW_RESP" = "fail" ]; then
+                        detail "raw API: ECHEC (timeout/reseau)"
+                    else
+                        RAW_TYPE=$(echo "$RAW_RESP" | grep -oP '"type"\s*:\s*"\K[^"]*' | head -1)
+                        if [ "$RAW_TYPE" = "message" ]; then
+                            detail "raw API: OK — le modele repond"
+                        else
+                            RAW_ERR=$(echo "$RAW_RESP" | grep -oP '"message"\s*:\s*"\K[^"]*' | head -1)
+                            detail "raw API erreur: ${RAW_ERR:-$(echo "$RAW_RESP" | head -c 200)}"
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    done
+else
+    skip "App non disponible — test chat ignore"
+fi
+
+# ── 13. Proxy ──────────────────────────────────────────────────────────────
 header "Proxy"
 
 PROXY_HTTP=""
@@ -615,7 +749,7 @@ else
     skip "Pas de proxy configure (.env)"
 fi
 
-# ── 13. Internet / External Connectivity ───────────────────────────────────
+# ── 14. Internet / External Connectivity ───────────────────────────────────
 header "Connectivite Externe"
 
 check_url() {
@@ -645,7 +779,7 @@ check_url "api.anthropic.com" "https://api.anthropic.com" "true"
 check_url "gitlab.com" "https://gitlab.com" "true"
 check_url "Docker Hub" "https://registry-1.docker.io/v2/" "false"
 
-# ── 14. Git ────────────────────────────────────────────────────────────────
+# ── 15. Git ────────────────────────────────────────────────────────────────
 header "Git"
 
 GIT_BRANCH=$(git -C "$REPO_DIR" branch --show-current 2>/dev/null || echo "?")
