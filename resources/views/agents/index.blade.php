@@ -71,20 +71,10 @@
     @endphp
 
     @php
-        $availableModels = [
-            'default' => 'Par defaut (agent)',
-            'claude-haiku-4-5' => 'Haiku 4.5 (rapide)',
-            'claude-sonnet-4-5' => 'Sonnet 4.5 (equilibre)',
-            'claude-opus-4-5' => 'Opus 4.5 (puissant)',
-            'qwen2.5:3b' => 'Qwen 2.5 3B (on-prem — 4 Go, 2 CPU)',
-            'qwen2.5:7b' => 'Qwen 2.5 7B (on-prem — 8 Go, 4 CPU)',
-            'qwen2.5:14b' => 'Qwen 2.5 14B (on-prem — 16 Go, 4 CPU)',
-            'qwen2.5-coder:7b' => 'Qwen Coder 7B (on-prem — 8 Go, 4 CPU)',
-            'llama3.2:3b' => 'Llama 3.2 3B (on-prem — 4 Go, 2 CPU)',
-            'gemma2:2b' => 'Gemma 2 2B (on-prem — 4 Go, 2 CPU)',
-            'phi3:mini' => 'Phi-3 Mini (on-prem — 4 Go, 2 CPU)',
-            'deepseek-coder-v2:16b' => 'DeepSeek Coder V2 (on-prem — 16 Go, 4 CPU)',
-        ];
+        $availableModels = array_merge(
+            ['default' => 'Par defaut (agent)'],
+            \App\Services\ModelResolver::allModels()
+        );
     @endphp
 
     @foreach($agents as $agent)
