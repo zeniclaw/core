@@ -162,11 +162,13 @@ if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
     $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
 fi
 
-# Start Ollama
+# Start Ollama (--network-alias ollama so app can reach it via http://ollama:11434)
 $CONTAINER_CMD run -d \
     --name zeniclaw_ollama \
-    --restart unless-stopped \
+    --hostname ollama \
     --network "$NETWORK_NAME" \
+    --network-alias ollama \
+    --restart unless-stopped \
     -e "HTTP_PROXY=${PROXY_HTTP:-}" \
     -e "HTTPS_PROXY=${PROXY_HTTPS:-}" \
     -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \

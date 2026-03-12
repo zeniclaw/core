@@ -112,8 +112,9 @@ if [ -n "$CONTAINER_CMD" ]; then
         skip "Execution en ROOT — les containers rootless ne seront pas visibles"
         # Check if there's a SUDO_USER whose containers we should see
         if [ -n "${SUDO_USER:-}" ]; then
-            ROOTLESS_CONTAINERS=$(sudo -u "$SUDO_USER" $CONTAINER_CMD ps -a --format '{{.Names}}' 2>/dev/null | grep -c zeniclaw || echo "0")
-            if [ "$ROOTLESS_CONTAINERS" -gt 0 ]; then
+            ROOTLESS_CONTAINERS=$(sudo -u "$SUDO_USER" $CONTAINER_CMD ps -a --format '{{.Names}}' 2>/dev/null | grep -c zeniclaw 2>/dev/null || echo "0")
+            ROOTLESS_CONTAINERS=$(echo "$ROOTLESS_CONTAINERS" | tr -d '[:space:]')
+            if [ "$ROOTLESS_CONTAINERS" -gt 0 ] 2>/dev/null; then
                 fail "Il y a $ROOTLESS_CONTAINERS containers zeniclaw chez l'user $SUDO_USER — relancez SANS sudo"
                 detail "Faites: exit puis ./check.sh (sans sudo)"
             fi
@@ -328,7 +329,8 @@ if [ "$APP_OK" = true ]; then
     pass "Taille DB: $DB_SIZE"
 
     # Migrations
-    PENDING=$($CONTAINER_CMD exec zeniclaw_app php artisan migrate:status --no-ansi 2>/dev/null | grep -c "Pending" || echo "0")
+    PENDING=$($CONTAINER_CMD exec zeniclaw_app php artisan migrate:status --no-ansi 2>/dev/null | grep -c "Pending" 2>/dev/null || echo "0")
+    PENDING=$(echo "$PENDING" | tr -d '[:space:]')
     if [ "$PENDING" = "0" ]; then
         pass "Migrations: toutes appliquees"
     else
@@ -606,48 +608,32 @@ fi
 # ── 13. Internet / External Connectivity ───────────────────────────────────
 header "Connectivite Externe"
 
-if [ "$APP_OK" = true ]; then
-    # Test outbound from app container
-    GOOGLE_OK=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 10 -o /dev/null -w '%{http_code}' https://www.google.com 2>/dev/null || echo "fail")
-    if [ "$GOOGLE_OK" = "200" ] || [ "$GOOGLE_OK" = "301" ]; then
-        pass "Internet (HTTPS): OK"
+check_url() {
+    local label="$1" url="$2" required="${3:-true}"
+    local http_code
+    if [ "$APP_OK" = true ]; then
+        http_code=$($CONTAINER_CMD exec zeniclaw_app curl -s -m 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
     else
-        fail "Internet (HTTPS): echec ($GOOGLE_OK) — proxy mal configure ?"
+        http_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+        # Retry with proxy if direct fails
+        if [ "$http_code" = "000" ] && [ -n "$PROXY_HTTP" ]; then
+            http_code=$(curl -s -m 10 -x "$PROXY_HTTP" -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+        fi
     fi
+    http_code=$(echo "$http_code" | tr -d '[:space:]')
+    if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
+        pass "$label (HTTP $http_code)"
+    elif [ "$required" = "true" ]; then
+        fail "$label: injoignable"
+    else
+        skip "$label: injoignable"
+    fi
+}
 
-    # Test Anthropic API
-    ANTHROPIC_OK=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 10 -o /dev/null -w '%{http_code}' https://api.anthropic.com 2>/dev/null || echo "fail")
-    if [ "$ANTHROPIC_OK" != "fail" ]; then
-        pass "api.anthropic.com: joignable (HTTP $ANTHROPIC_OK)"
-    else
-        fail "api.anthropic.com: injoignable"
-    fi
-
-    # Test GitLab
-    GITLAB_OK=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 10 -o /dev/null -w '%{http_code}' https://gitlab.com 2>/dev/null || echo "fail")
-    if [ "$GITLAB_OK" != "fail" ]; then
-        pass "gitlab.com: joignable (HTTP $GITLAB_OK)"
-    else
-        fail "gitlab.com: injoignable"
-    fi
-
-    # Test Docker Hub (for image pulls)
-    DOCKER_HUB_OK=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 10 -o /dev/null -w '%{http_code}' https://registry-1.docker.io/v2/ 2>/dev/null || echo "fail")
-    if [ "$DOCKER_HUB_OK" != "fail" ]; then
-        pass "Docker Hub: joignable (HTTP $DOCKER_HUB_OK)"
-    else
-        skip "Docker Hub: injoignable (normal derriere proxy strict)"
-    fi
-else
-    # Test from host
-    if curl -sf -m 10 -o /dev/null https://www.google.com 2>/dev/null; then
-        pass "Internet depuis l'hote: OK"
-    elif [ -n "$PROXY_HTTP" ] && curl -sf -m 10 -x "$PROXY_HTTP" -o /dev/null https://www.google.com 2>/dev/null; then
-        pass "Internet via proxy: OK"
-    else
-        fail "Pas d'acces internet"
-    fi
-fi
+check_url "Internet (google.com)" "https://www.google.com" "true"
+check_url "api.anthropic.com" "https://api.anthropic.com" "true"
+check_url "gitlab.com" "https://gitlab.com" "true"
+check_url "Docker Hub" "https://registry-1.docker.io/v2/" "false"
 
 # ── 14. Git ────────────────────────────────────────────────────────────────
 header "Git"
