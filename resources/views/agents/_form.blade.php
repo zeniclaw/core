@@ -1,17 +1,5 @@
 @php
-$models = [
-    'claude-sonnet-4-5' => 'Claude Sonnet 4.5 (Claude Max)',
-    'claude-opus-4-5'   => 'Claude Opus 4.5 (Claude Max)',
-    'claude-haiku-4-5'  => 'Claude Haiku 4.5 (Claude Max)',
-    'qwen2.5:3b'        => 'Qwen 2.5 3B (On-Prem — 4 Go RAM, 2 CPU)',
-    'qwen2.5:7b'        => 'Qwen 2.5 7B (On-Prem — 8 Go RAM, 4 CPU)',
-    'qwen2.5:14b'       => 'Qwen 2.5 14B (On-Prem — 16 Go RAM, 4 CPU)',
-    'qwen2.5-coder:7b'  => 'Qwen 2.5 Coder 7B (On-Prem — 8 Go RAM, 4 CPU)',
-    'llama3.2:3b'       => 'Llama 3.2 3B (On-Prem — 4 Go RAM, 2 CPU)',
-    'gemma2:2b'         => 'Gemma 2 2B (On-Prem — 4 Go RAM, 2 CPU)',
-    'phi3:mini'         => 'Phi-3 Mini (On-Prem — 4 Go RAM, 2 CPU)',
-    'deepseek-coder-v2:16b' => 'DeepSeek Coder V2 (On-Prem — 16 Go RAM, 4 CPU)',
-];
+$models = \App\Services\ModelResolver::allModels();
 @endphp
 
 <div class="space-y-5">
