@@ -598,7 +598,7 @@ PROMPT;
 
             return [
                 'status' => $httpResponse->status(),
-                'body' => mb_substr($httpResponse->body(), 0, 5000),
+                'body' => mb_substr($httpResponse->body(), 0, 50000),
             ];
         } catch (\Exception $e) {
             return ['status' => 0, 'body' => 'Error: ' . $e->getMessage()];
@@ -757,7 +757,7 @@ PROMPT;
         $dataText = '';
         foreach ($collectedData as $j => $cd) {
             $dataText .= "=== APPEL " . ($j + 1) . ": {$cd['method']} {$cd['url']} (HTTP {$cd['status']}) ===\n";
-            $dataText .= mb_substr($cd['response'] ?? $cd['body'] ?? '', 0, 5000) . "\n\n";
+            $dataText .= mb_substr($cd['response'] ?? $cd['body'] ?? '', 0, 30000) . "\n\n";
         }
 
         $response = $this->claude->chat(
