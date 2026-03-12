@@ -15,9 +15,13 @@
             <div>
                 <h2 class="text-lg font-semibold text-gray-900">SubAgent #{{ $subAgent->id }}</h2>
                 <p class="text-sm text-gray-500 mt-1">
-                    Projet:
-                    <a href="{{ route('projects.show', $subAgent->project_id) }}"
-                       class="text-indigo-600 hover:text-indigo-800">{{ $subAgent->project->name }}</a>
+                    @if($subAgent->project_id && $subAgent->project)
+                        Projet:
+                        <a href="{{ route('projects.show', $subAgent->project_id) }}"
+                           class="text-indigo-600 hover:text-indigo-800">{{ $subAgent->project->name }}</a>
+                    @else
+                        <span class="text-purple-600">{{ $subAgent->type === 'research' ? '🔍 Recherche autonome' : 'Tache autonome' }}</span>
+                    @endif
                 </p>
             </div>
             @php

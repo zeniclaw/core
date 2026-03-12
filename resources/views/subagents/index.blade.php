@@ -34,10 +34,14 @@
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
                             <span class="text-sm font-mono font-medium text-gray-900">#{{ $sa->id }}</span>
-                            <a href="{{ route('projects.show', $sa->project_id) }}"
-                               class="text-sm text-indigo-600 hover:text-indigo-800 font-medium truncate">
-                                {{ $sa->project->name ?? 'Projet #' . $sa->project_id }}
-                            </a>
+                            @if($sa->project_id && $sa->project)
+                                <a href="{{ route('projects.show', $sa->project_id) }}"
+                                   class="text-sm text-indigo-600 hover:text-indigo-800 font-medium truncate">
+                                    {{ $sa->project->name }}
+                                </a>
+                            @else
+                                <span class="text-sm text-purple-600 font-medium">{{ $sa->type === 'research' ? '🔍 Recherche' : 'Tache' }}</span>
+                            @endif
                         </div>
                         <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ $sa->task_description }}</p>
                     </div>
