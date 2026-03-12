@@ -185,11 +185,15 @@ if [ "$CONTAINER_STATUS" != "running" ]; then
     error "Le container Ollama n'a pas demarre. Voir les logs ci-dessus."
 fi
 
-# Wait for Ollama API to be ready (use ollama list instead of curl — no curl in ollama image)
+# Wait for Ollama API to be ready
 info "Attente du demarrage d'Ollama..."
 OLLAMA_READY=false
 for i in $(seq 1 30); do
-    if $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+    # Try multiple methods: bash tcp check, then wget, then ollama list
+    if $CONTAINER_CMD exec zeniclaw_ollama bash -c 'echo > /dev/tcp/localhost/11434' &>/dev/null; then
+        OLLAMA_READY=true
+        break
+    elif $CONTAINER_CMD exec zeniclaw_ollama wget -qO- http://localhost:11434/api/tags &>/dev/null; then
         OLLAMA_READY=true
         break
     fi
@@ -199,9 +203,14 @@ done
 if [ "$OLLAMA_READY" = true ]; then
     success "Ollama est pret!"
 else
-    warn "Ollama API pas encore prete, mais le container tourne. Logs:"
-    $CONTAINER_CMD logs zeniclaw_ollama 2>&1 | tail -10 || true
-    error "Ollama n'a pas demarre apres 60s."
+    # Check if container is at least running
+    CSTATUS=$($CONTAINER_CMD inspect --format '{{.State.Status}}' zeniclaw_ollama 2>/dev/null || echo "?")
+    if [ "$CSTATUS" = "running" ]; then
+        warn "Ollama tourne mais API lente au demarrage — on continue quand meme"
+    else
+        $CONTAINER_CMD logs zeniclaw_ollama 2>&1 | tail -10 || true
+        error "Ollama n'a pas demarre (status: $CSTATUS)"
+    fi
 fi
 
 # --- Step 3: Check existing models ------------------------------------------

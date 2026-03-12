@@ -467,7 +467,17 @@ if [ -n "$CONTAINER_CMD" ] && $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null
         OLLAMA_RUNNING=true
         pass "Container: running"
 
-        if $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+        # Check API via tcp then ollama list
+        OLLAMA_API_OK=false
+        if $CONTAINER_CMD exec zeniclaw_ollama bash -c 'echo > /dev/tcp/localhost/11434' &>/dev/null; then
+            OLLAMA_API_OK=true
+        elif $CONTAINER_CMD exec zeniclaw_ollama wget -qO /dev/null http://localhost:11434/api/tags &>/dev/null; then
+            OLLAMA_API_OK=true
+        elif $CONTAINER_CMD exec zeniclaw_ollama ollama list &>/dev/null; then
+            OLLAMA_API_OK=true
+        fi
+
+        if [ "$OLLAMA_API_OK" = true ]; then
             pass "API: accessible"
 
             MODELS=$($CONTAINER_CMD exec zeniclaw_ollama ollama list 2>/dev/null | tail -n +2 || true)
