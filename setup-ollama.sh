@@ -70,70 +70,97 @@ fi
 echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: ${COMPOSE:-direct}${NC}\n"
 
 # --- Proxy detection ---------------------------------------------------------
-PROXY_HTTP="${HTTP_PROXY:-}"
-PROXY_HTTPS="${HTTPS_PROXY:-}"
-PROXY_NO="${NO_PROXY:-}"
 
-# Load from .env
+# URL-encode a string (for proxy user/pass with special chars)
+urlencode() {
+    local string="$1"
+    local length=${#string}
+    local encoded=""
+    for (( i = 0; i < length; i++ )); do
+        local c="${string:$i:1}"
+        case "$c" in
+            [a-zA-Z0-9.~_-]) encoded+="$c" ;;
+            *) encoded+=$(printf '%%%02X' "'$c") ;;
+        esac
+    done
+    echo "$encoded"
+}
+
+# Strip credentials from proxy URL to get base URL
+proxy_base_url() {
+    echo "$1" | sed 's|://[^@]*@|://|'
+}
+
+PROXY_HTTP=""
+PROXY_HTTPS=""
+PROXY_NO=""
+PROXY_BASE=""
+
+# Load base URL from .env (stored WITHOUT credentials)
 if [ -f .env ]; then
-    [ -z "$PROXY_HTTP" ]  && PROXY_HTTP=$(grep -oP '^HTTP_PROXY=\K.*' .env 2>/dev/null || true)
-    [ -z "$PROXY_HTTPS" ] && PROXY_HTTPS=$(grep -oP '^HTTPS_PROXY=\K.*' .env 2>/dev/null || true)
-    [ -z "$PROXY_NO" ]    && PROXY_NO=$(grep -oP '^NO_PROXY=\K.*' .env 2>/dev/null || true)
+    PROXY_BASE=$(grep -oP '^PROXY_BASE_URL=\K.*' .env 2>/dev/null || true)
+    PROXY_NO=$(grep -oP '^NO_PROXY=\K.*' .env 2>/dev/null || true)
 fi
 
 # Load from app DB
-if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ] && $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
+if [ -z "$PROXY_BASE" ] && $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
     DB_HTTP=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_http') ?? '';" 2>/dev/null || true)
-    DB_HTTPS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_https') ?? '';" 2>/dev/null || true)
+    [ -n "$DB_HTTP" ] && PROXY_BASE=$(proxy_base_url "$DB_HTTP")
     DB_NO=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_no_proxy') ?? '';" 2>/dev/null || true)
-    [ -n "$DB_HTTP" ]  && PROXY_HTTP="$DB_HTTP"
-    [ -n "$DB_HTTPS" ] && PROXY_HTTPS="$DB_HTTPS"
-    [ -n "$DB_NO" ]    && PROXY_NO="$DB_NO"
+    [ -n "$DB_NO" ] && PROXY_NO="$DB_NO"
 fi
 
-# Ask user if no proxy found
-if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ]; then
+# Load from environment (strip creds)
+if [ -z "$PROXY_BASE" ] && [ -n "${HTTP_PROXY:-}" ]; then
+    PROXY_BASE=$(proxy_base_url "$HTTP_PROXY")
+fi
+
+# Ask user for proxy URL if not found
+if [ -z "$PROXY_BASE" ]; then
     echo -e "${YELLOW}Etes-vous derriere un proxy ?${NC}"
     echo -e "${DIM}Necessaire pour telecharger l'image Ollama et les modeles.${NC}"
     echo -e "${DIM}Exemple: http://proxy.entreprise.com:8080${NC}"
-    read -rp "Proxy HTTP (vide = pas de proxy) : " PROXY_HTTP
-    if [ -n "$PROXY_HTTP" ]; then
-        read -rp "Proxy HTTPS (vide = meme que HTTP) : " PROXY_HTTPS
-        [ -z "$PROXY_HTTPS" ] && PROXY_HTTPS="$PROXY_HTTP"
-        read -rp "No proxy (vide = defaut) : " PROXY_NO
-        [ -z "$PROXY_NO" ] && PROXY_NO="localhost,127.0.0.1,db,redis,waha,ollama,app"
-    fi
+    read -rp "Proxy URL (vide = pas de proxy) : " PROXY_BASE
 fi
 
-# Ask for proxy authentication if proxy is set but no credentials in URL
-if [ -n "$PROXY_HTTP" ] && ! echo "$PROXY_HTTP" | grep -q '@'; then
+# Always ask for credentials (never stored in .env)
+if [ -n "$PROXY_BASE" ]; then
     echo ""
-    echo -e "${YELLOW}Le proxy necessite-t-il un login/mot de passe ?${NC}"
-    read -rp "Login proxy (vide = pas d'auth) : " PROXY_USER
+    echo -e "${CYAN}Proxy: $PROXY_BASE${NC}"
+    echo -e "${YELLOW}Login proxy (vide = pas d'authentification) :${NC}"
+    read -rp "Login : " PROXY_USER
     if [ -n "$PROXY_USER" ]; then
-        read -rsp "Mot de passe proxy : " PROXY_PASS
+        read -rsp "Mot de passe : " PROXY_PASS
         echo ""
-        # Inject user:pass into proxy URLs — http://user:pass@host:port
-        PROXY_HTTP=$(echo "$PROXY_HTTP" | sed "s|://|://${PROXY_USER}:${PROXY_PASS}@|")
-        PROXY_HTTPS=$(echo "$PROXY_HTTPS" | sed "s|://|://${PROXY_USER}:${PROXY_PASS}@|")
+        # URL-encode user and password to handle special chars (@, :, #, etc.)
+        ENC_USER=$(urlencode "$PROXY_USER")
+        ENC_PASS=$(urlencode "$PROXY_PASS")
+        PROXY_HTTP=$(echo "$PROXY_BASE" | sed "s|://|://${ENC_USER}:${ENC_PASS}@|")
+        PROXY_HTTPS="$PROXY_HTTP"
         success "Proxy avec authentification configure"
+    else
+        PROXY_HTTP="$PROXY_BASE"
+        PROXY_HTTPS="$PROXY_BASE"
+        info "Proxy sans authentification"
     fi
+
+    [ -z "$PROXY_NO" ] && PROXY_NO="localhost,127.0.0.1,db,redis,waha,ollama,app"
 fi
 
-# Persist proxy to .env
-if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
+# Persist proxy to .env (base URL without creds + full URLs for containers)
+if [ -n "$PROXY_BASE" ]; then
     touch .env
-    for VAR_NAME in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+    for VAR_NAME in HTTP_PROXY HTTPS_PROXY NO_PROXY PROXY_BASE_URL; do
         sed -i "/^${VAR_NAME}=/d" .env
     done
-    [ -n "$PROXY_HTTP" ]  && echo "HTTP_PROXY=${PROXY_HTTP}" >> .env
-    [ -n "$PROXY_HTTPS" ] && echo "HTTPS_PROXY=${PROXY_HTTPS}" >> .env
-    [ -n "$PROXY_NO" ]    && echo "NO_PROXY=${PROXY_NO}" >> .env
-    [ -z "$PROXY_NO" ]    && echo "NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app" >> .env
+    echo "PROXY_BASE_URL=${PROXY_BASE}" >> .env
+    echo "HTTP_PROXY=${PROXY_HTTP}" >> .env
+    echo "HTTPS_PROXY=${PROXY_HTTPS}" >> .env
+    echo "NO_PROXY=${PROXY_NO}" >> .env
 
     export HTTP_PROXY="$PROXY_HTTP" HTTPS_PROXY="$PROXY_HTTPS"
     export http_proxy="$PROXY_HTTP" https_proxy="$PROXY_HTTPS"
-    success "Proxy: ${PROXY_HTTP}"
+    success "Proxy: $PROXY_BASE"
 else
     info "Pas de proxy"
 fi
