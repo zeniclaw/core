@@ -255,16 +255,31 @@
                     </div>
                 </div>
 
+                {{-- Proxy warning for Ollama downloads --}}
+                @if(!empty($proxyConfig['http']) || !empty($proxyConfig['https']))
+                <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                    <strong>Proxy detecte</strong> — Pour que Ollama telecharge les modeles via votre proxy, ajoutez dans votre fichier <code class="bg-amber-100 px-1 rounded">.env</code> :
+                    <pre class="mt-1 text-xs bg-amber-100 p-2 rounded">HTTP_PROXY={{ $proxyConfig['http'] }}
+HTTPS_PROXY={{ $proxyConfig['https'] }}
+NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
+                    Puis relancez : <code class="bg-amber-100 px-1 rounded">docker compose up -d ollama</code>
+                </div>
+                @endif
+
                 {{-- Model download manager --}}
                 @php
                     $ollamaModels = [
-                        ['id' => 'qwen2.5:3b',        'name' => 'Qwen 2.5 3B (leger)',     'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
+                        // Ultra-light (petites machines)
+                        ['id' => 'qwen2.5:0.5b',      'name' => 'Qwen 2.5 0.5B (ultra-rapide)', 'size' => '~0.4 Go', 'specs' => '1 Go RAM, 1 CPU'],
+                        ['id' => 'qwen2.5:1.5b',      'name' => 'Qwen 2.5 1.5B (rapide)',    'size' => '~1 Go',  'specs' => '2 Go RAM, 1 CPU'],
+                        ['id' => 'gemma2:2b',         'name' => 'Gemma 2 2B (Google)',       'size' => '~1.6 Go', 'specs' => '4 Go RAM, 2 CPU'],
+                        // Standard
+                        ['id' => 'qwen2.5:3b',        'name' => 'Qwen 2.5 3B (leger)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'phi3:mini',         'name' => 'Phi-3 Mini 3.8B (Microsoft)', 'size' => '~2.3 Go', 'specs' => '4 Go RAM, 2 CPU'],
+                        ['id' => 'llama3.2:3b',       'name' => 'Llama 3.2 3B (Meta)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
                         ['id' => 'qwen2.5:7b',        'name' => 'Qwen 2.5 7B (intelligent)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
                         ['id' => 'qwen2.5-coder:7b',  'name' => 'Qwen 2.5 Coder 7B (code)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
                         ['id' => 'qwen2.5:14b',       'name' => 'Qwen 2.5 14B (puissant)',  'size' => '~9 Go',  'specs' => '16 Go RAM, 4 CPU'],
-                        ['id' => 'llama3.2:3b',       'name' => 'Llama 3.2 3B (Meta)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
-                        ['id' => 'gemma2:2b',         'name' => 'Gemma 2 2B (Google)',      'size' => '~1.6 Go', 'specs' => '4 Go RAM, 2 CPU'],
-                        ['id' => 'phi3:mini',         'name' => 'Phi-3 Mini (Microsoft)',   'size' => '~2.3 Go', 'specs' => '4 Go RAM, 2 CPU'],
                         ['id' => 'deepseek-coder-v2:16b', 'name' => 'DeepSeek Coder V2 (code)', 'size' => '~9 Go', 'specs' => '16 Go RAM, 4 CPU'],
                     ];
                 @endphp
