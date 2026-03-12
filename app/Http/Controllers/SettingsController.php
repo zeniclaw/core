@@ -71,7 +71,11 @@ class SettingsController extends Controller
             AppSetting::set('brave_search_api_key', $request->brave_search_api_key);
         }
 
-        return redirect()->route('settings.index')->with('success', 'Clés API sauvegardées.');
+        // Restart queue workers so they pick up new API keys/URLs
+        ModelResolver::clearCache();
+        \Illuminate\Support\Facades\Artisan::call('queue:restart');
+
+        return redirect()->route('settings.index')->with('success', 'Clés API sauvegardées. Workers redemarres.');
     }
 
     public function saveGitlabSettings(Request $request)
@@ -155,7 +159,10 @@ class SettingsController extends Controller
 
         ModelResolver::clearCache();
 
-        return redirect()->route('settings.index')->with('success', 'Roles de modeles mis a jour.');
+        // Restart queue workers so they pick up the new model config
+        \Illuminate\Support\Facades\Artisan::call('queue:restart');
+
+        return redirect()->route('settings.index')->with('success', 'Roles de modeles mis a jour. Workers redemarres.');
     }
 
     public function saveSubagents(Request $request)
