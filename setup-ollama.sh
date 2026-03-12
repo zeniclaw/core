@@ -105,6 +105,21 @@ if [ -z "$PROXY_HTTP" ] && [ -z "$PROXY_HTTPS" ]; then
     fi
 fi
 
+# Ask for proxy authentication if proxy is set but no credentials in URL
+if [ -n "$PROXY_HTTP" ] && ! echo "$PROXY_HTTP" | grep -q '@'; then
+    echo ""
+    echo -e "${YELLOW}Le proxy necessite-t-il un login/mot de passe ?${NC}"
+    read -rp "Login proxy (vide = pas d'auth) : " PROXY_USER
+    if [ -n "$PROXY_USER" ]; then
+        read -rsp "Mot de passe proxy : " PROXY_PASS
+        echo ""
+        # Inject user:pass into proxy URLs — http://user:pass@host:port
+        PROXY_HTTP=$(echo "$PROXY_HTTP" | sed "s|://|://${PROXY_USER}:${PROXY_PASS}@|")
+        PROXY_HTTPS=$(echo "$PROXY_HTTPS" | sed "s|://|://${PROXY_USER}:${PROXY_PASS}@|")
+        success "Proxy avec authentification configure"
+    fi
+fi
+
 # Persist proxy to .env
 if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
     touch .env
