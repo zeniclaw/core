@@ -162,6 +162,30 @@ if $CONTAINER_CMD inspect zeniclaw_ollama &>/dev/null 2>&1; then
     $CONTAINER_CMD rm zeniclaw_ollama 2>/dev/null || true
 fi
 
+# Detect host CA certificates (enterprise proxies do SSL interception)
+CA_MOUNTS=""
+for ca_path in \
+    /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+    /etc/pki/tls/certs/ca-bundle.crt \
+    /etc/ssl/certs/ca-certificates.crt \
+    /usr/local/share/ca-certificates \
+    /etc/ca-certificates/extracted/tls-ca-bundle.pem; do
+    if [ -e "$ca_path" ]; then
+        if [ -f "$ca_path" ]; then
+            CA_MOUNTS="-v ${ca_path}:/etc/ssl/certs/ca-certificates.crt:ro"
+            success "Certificats CA trouves: $ca_path"
+        elif [ -d "$ca_path" ]; then
+            CA_MOUNTS="-v ${ca_path}:/etc/ssl/certs:ro"
+            success "Certificats CA trouves: $ca_path"
+        fi
+        break
+    fi
+done
+if [ -z "$CA_MOUNTS" ] && [ -n "$PROXY_HTTP" ]; then
+    warn "Pas de certificats CA trouves — le proxy SSL risque de bloquer les telechargements"
+    warn "Installez les certificats CA: sudo update-ca-trust (RHEL) ou sudo update-ca-certificates (Debian)"
+fi
+
 # Start Ollama (--network-alias ollama so app can reach it via http://ollama:11434)
 $CONTAINER_CMD run -d \
     --name zeniclaw_ollama \
@@ -171,7 +195,11 @@ $CONTAINER_CMD run -d \
     --restart unless-stopped \
     -e "HTTP_PROXY=${PROXY_HTTP:-}" \
     -e "HTTPS_PROXY=${PROXY_HTTPS:-}" \
+    -e "http_proxy=${PROXY_HTTP:-}" \
+    -e "https_proxy=${PROXY_HTTPS:-}" \
     -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
+    -e "no_proxy=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
+    $CA_MOUNTS \
     -v zeniclaw_ollama_data:/root/.ollama \
     docker.io/ollama/ollama:latest 2>&1
 
