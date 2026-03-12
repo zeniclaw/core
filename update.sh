@@ -113,6 +113,26 @@ info "Restarting app container..."
 $COMPOSE up -d --force-recreate app 2>&1
 success "Container restarted"
 
+# Sync proxy settings from app DB into .env (for Ollama downloads)
+info "Syncing proxy config..."
+PROXY_HTTP=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_http') ?? '';" 2>/dev/null || true)
+PROXY_HTTPS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_https') ?? '';" 2>/dev/null || true)
+PROXY_NO=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('proxy_no_proxy') ?? '';" 2>/dev/null || true)
+
+if [ -n "$PROXY_HTTP" ] || [ -n "$PROXY_HTTPS" ]; then
+    # Update .env file with proxy (create if needed, update if exists)
+    touch .env
+    for VAR_NAME in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+        sed -i "/^${VAR_NAME}=/d" .env
+    done
+    [ -n "$PROXY_HTTP" ]  && echo "HTTP_PROXY=${PROXY_HTTP}" >> .env
+    [ -n "$PROXY_HTTPS" ] && echo "HTTPS_PROXY=${PROXY_HTTPS}" >> .env
+    [ -n "$PROXY_NO" ]    && echo "NO_PROXY=${PROXY_NO}" >> .env || echo "NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app" >> .env
+    success "Proxy synced to .env (HTTP_PROXY=${PROXY_HTTP:-none}, HTTPS_PROXY=${PROXY_HTTPS:-none})"
+else
+    info "No proxy configured in Settings, skipping"
+fi
+
 # Start any new services added in this update (e.g. ollama)
 info "Starting all services (including new ones)..."
 $COMPOSE up -d 2>&1
