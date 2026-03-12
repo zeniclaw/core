@@ -598,7 +598,7 @@ PROMPT;
 
             return [
                 'status' => $httpResponse->status(),
-                'body' => mb_substr($httpResponse->body(), 0, 50000),
+                'body' => $httpResponse->body(),
             ];
         } catch (\Exception $e) {
             return ['status' => 0, 'body' => 'Error: ' . $e->getMessage()];
