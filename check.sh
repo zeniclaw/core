@@ -623,8 +623,28 @@ if [ "$APP_OK" = true ]; then
             fail "Chat $ROLE ($MODEL): ECHEC ($CHAT_TIME)"
             detail "Erreur: $CHAT_MSG"
 
+            # Show recent Laravel logs related to OnPrem
+            detail ""
+            detail "--- Derniers logs Laravel (OnPrem/chat) ---"
+            RECENT_LOGS=$($CONTAINER_CMD exec zeniclaw_app tail -50 /var/www/html/storage/logs/laravel.log 2>/dev/null | grep -i "onprem\|ollama\|chat.*fail\|chat.*exception\|timeout" | tail -5 || echo "aucun log pertinent")
+            if [ -n "$RECENT_LOGS" ] && [ "$RECENT_LOGS" != "aucun log pertinent" ]; then
+                echo "$RECENT_LOGS" | while read -r line; do detail "$line"; done
+            else
+                detail "Aucun log pertinent (verifiez manuellement: $CONTAINER_CMD exec zeniclaw_app tail -30 /var/www/html/storage/logs/laravel.log)"
+            fi
+
             # Extra debug for on-prem models
             if ! echo "$MODEL" | grep -q "^claude-"; then
+                # Ollama container stats
+                detail ""
+                detail "--- Debug Ollama container ---"
+                OLLAMA_MEM=$($CONTAINER_CMD stats --no-stream --format '{{.MemUsage}} | CPU: {{.CPUPerc}}' zeniclaw_ollama 2>/dev/null || echo "?")
+                detail "Ressources Ollama: $OLLAMA_MEM"
+
+                OLLAMA_LOGS=$($CONTAINER_CMD logs --tail 10 zeniclaw_ollama 2>&1 | tail -10 || echo "pas de logs")
+                detail "Derniers logs Ollama:"
+                echo "$OLLAMA_LOGS" | while read -r line; do detail "  $line"; done
+
                 OLLAMA_URL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('onprem_api_url') ?? 'non configure';" 2>/dev/null || echo "?")
                 detail "URL Ollama: $OLLAMA_URL"
 
@@ -642,23 +662,28 @@ if [ "$APP_OK" = true ]; then
                         fi
                     fi
 
-                    # Test raw generate call
-                    detail "Test raw API generate..."
-                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 30 -X POST "${OLLAMA_URL}/api/generate" \
+                    # Test raw chat/completions (same endpoint as AnthropicClient)
+                    detail "Test raw API /v1/chat/completions (timeout 120s, cold start possible)..."
+                    RAW_START=$(date +%s)
+                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 120 -X POST "${OLLAMA_URL}/v1/chat/completions" \
                         -H "Content-Type: application/json" \
-                        -d "{\"model\":\"$MODEL\",\"prompt\":\"Say OK\",\"stream\":false}" 2>/dev/null || echo "fail")
+                        -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Say OK\"}],\"max_tokens\":10,\"stream\":false}" 2>/dev/null || echo "fail")
+                    RAW_END=$(date +%s)
+                    RAW_ELAPSED=$(( RAW_END - RAW_START ))
                     if [ "$RAW_RESP" = "fail" ]; then
-                        detail "raw generate: ECHEC"
+                        detail "raw chat: ECHEC apres ${RAW_ELAPSED}s"
+                        detail "Cause probable: cold start trop long ou modele trop gros pour la RAM"
+                        detail "Test: $CONTAINER_CMD exec zeniclaw_app curl -m 120 -X POST ${OLLAMA_URL}/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false}'"
                     else
-                        RAW_ANSWER=$(echo "$RAW_RESP" | grep -oP '"response"\s*:\s*"\K[^"]*' | head -1)
+                        RAW_CONTENT=$(echo "$RAW_RESP" | grep -oP '"content"\s*:\s*"\K[^"]*' | head -1)
                         RAW_ERROR=$(echo "$RAW_RESP" | grep -oP '"error"\s*:\s*"\K[^"]*' | head -1)
                         if [ -n "$RAW_ERROR" ]; then
-                            detail "raw generate erreur: $RAW_ERROR"
-                        elif [ -n "$RAW_ANSWER" ]; then
-                            detail "raw generate OK: $RAW_ANSWER"
-                            detail "Le modele repond en direct mais pas via AnthropicClient — bug applicatif ?"
+                            detail "raw chat erreur: $RAW_ERROR (${RAW_ELAPSED}s)"
+                        elif [ -n "$RAW_CONTENT" ]; then
+                            pass "raw chat OK (${RAW_ELAPSED}s): $RAW_CONTENT"
+                            detail "Le modele repond en direct mais pas via PHP — verifiez le timeout PHP (60s) ou logs Laravel"
                         else
-                            detail "raw generate reponse brute: $(echo "$RAW_RESP" | head -c 200)"
+                            detail "raw chat reponse brute (${RAW_ELAPSED}s): $(echo "$RAW_RESP" | head -c 300)"
                         fi
                     fi
                 fi
