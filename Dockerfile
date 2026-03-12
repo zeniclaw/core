@@ -15,8 +15,11 @@ ENV http_proxy=${HTTP_PROXY} \
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
     libxml2-dev nginx supervisor procps sudo cron \
-    && curl -fsSL https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz \
-       | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
+    && ARCH=$(uname -m) \
+    && curl -fsSL --retry 3 --retry-delay 5 -o /tmp/docker.tgz \
+       https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz \
+    && tar xzf /tmp/docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
+    && rm -f /tmp/docker.tgz \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
