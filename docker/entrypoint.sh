@@ -86,6 +86,13 @@ php artisan zeniclaw:health || echo "⚠️  Health check warnings (continuing)"
 echo "📦 Running migrations..."
 php artisan migrate --force --no-interaction
 
+# Seed on first install (empty DB = no users)
+USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null || echo "0")
+if [ "$USER_COUNT" = "0" ]; then
+    echo "🌱 First install detected — seeding database..."
+    php artisan db:seed --force --no-interaction
+fi
+
 # Optimize (clear first — volume persists old caches across rebuilds)
 echo "⚡ Optimizing..."
 php artisan view:clear --no-interaction   || true
