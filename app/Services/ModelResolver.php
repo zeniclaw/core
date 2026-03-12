@@ -49,10 +49,24 @@ class ModelResolver
      */
     public static function allModels(): array
     {
-        $models = self::AVAILABLE_MODELS;
-
-        // Add Ollama models dynamically
         $ollamaModels = self::getOllamaModels();
+        $models = [];
+
+        // Cloud models — always shown
+        foreach (self::AVAILABLE_MODELS as $key => $label) {
+            if (str_starts_with($key, 'claude-')) {
+                $models[$key] = $label;
+            } else {
+                // On-prem static model — mark as installed or not
+                if (in_array($key, $ollamaModels)) {
+                    $models[$key] = $label;
+                } else {
+                    $models[$key] = $label . ' (non installe)';
+                }
+            }
+        }
+
+        // Add Ollama models not in static list (manually imported)
         foreach ($ollamaModels as $name) {
             if (!isset($models[$name])) {
                 $models[$name] = "{$name} (on-prem, importe)";
