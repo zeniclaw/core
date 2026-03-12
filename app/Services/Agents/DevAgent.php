@@ -1736,6 +1736,34 @@ PROMPT;
             ?? $this->findLastProjectForUser($from);
     }
 
+    /**
+     * Among multiple matching projects, pick the best one:
+     * 1. Has API config (base_url + token) → most useful
+     * 2. Has any settings at all → partially configured
+     * 3. Fallback to most recent
+     */
+    private function pickBestProject(\Illuminate\Support\Collection $candidates): ?Project
+    {
+        if ($candidates->isEmpty()) return null;
+        if ($candidates->count() === 1) return $candidates->first();
+
+        // Prefer project with working API config
+        $withApi = $candidates->first(function ($p) {
+            $s = $p->settings ?? [];
+            $hasBaseUrl = !empty($s['base_url']);
+            $hasToken = collect($s)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
+            return $hasBaseUrl && $hasToken;
+        });
+        if ($withApi) return $withApi;
+
+        // Then prefer project with any settings
+        $withSettings = $candidates->first(fn($p) => !empty($p->settings));
+        if ($withSettings) return $withSettings;
+
+        // Fallback: most recent
+        return $candidates->first();
+    }
+
     private function findProjectByNameInMessage(string $body, string $phone): ?Project
     {
         $projects = Project::whereIn('status', ['approved', 'in_progress', 'completed'])
@@ -1745,46 +1773,45 @@ PROMPT;
         if ($projects->isEmpty()) return null;
 
         // Highest priority: explicit "projet X" / "le projet X" / "ds le projet X" mentions
-        // Catches corrections like "c'est ds le projet prospections" or "sur le projet X"
         if (preg_match('/(?:le\s+projet|ds\s+le\s+projet|dans\s+le\s+projet|sur\s+le\s+projet|bosser\s+sur|passe\s+sur|projet\s+)(["\']?)(\S+)\1/iu', $body, $m)) {
             $explicit = rtrim($m[2], '.,;:!?)');
-            foreach ($projects as $project) {
-                if (mb_stripos($project->name, $explicit) !== false || mb_stripos($explicit, $project->name) !== false) {
-                    return $project;
-                }
-                if (strlen($explicit) >= 4 && levenshtein(mb_strtolower($explicit), mb_strtolower($project->name)) <= 2) {
-                    return $project;
-                }
-            }
+            $matches = $projects->filter(fn($p) =>
+                mb_stripos($p->name, $explicit) !== false
+                || mb_stripos($explicit, $p->name) !== false
+                || (strlen($explicit) >= 4 && levenshtein(mb_strtolower($explicit), mb_strtolower($p->name)) <= 2)
+            );
+            $best = $this->pickBestProject($matches);
+            if ($best) return $best;
         }
 
-        // Exact name match
-        foreach ($projects as $project) {
-            if (mb_stripos($body, $project->name) !== false) {
-                return $project;
-            }
-        }
+        // Exact name match — collect all matches, pick best
+        $nameMatches = $projects->filter(fn($p) => mb_stripos($body, $p->name) !== false);
+        $best = $this->pickBestProject($nameMatches);
+        if ($best) return $best;
 
         // Slug match
-        foreach ($projects as $project) {
-            $slug = basename(parse_url($project->gitlab_url, PHP_URL_PATH) ?? '');
+        $slugMatches = $projects->filter(function ($p) use ($body) {
+            $slug = basename(parse_url($p->gitlab_url, PHP_URL_PATH) ?? '');
             $slug = str_replace('.git', '', $slug);
-            if ($slug && mb_stripos($body, $slug) !== false) {
-                return $project;
-            }
-        }
+            return $slug && mb_stripos($body, $slug) !== false;
+        });
+        $best = $this->pickBestProject($slugMatches);
+        if ($best) return $best;
 
-        // Fuzzy match (Levenshtein) — only for long enough words/names to avoid false positives
+        // Fuzzy match (Levenshtein)
         $words = preg_split('/\s+/', mb_strtolower($body));
-        foreach ($projects as $project) {
-            $projectNameLower = mb_strtolower($project->name);
-            if (strlen($projectNameLower) < 5) continue; // skip short project names
+        $fuzzyMatches = $projects->filter(function ($p) use ($words) {
+            $projectNameLower = mb_strtolower($p->name);
+            if (strlen($projectNameLower) < 5) return false;
             foreach ($words as $word) {
                 if (strlen($word) >= 5 && levenshtein($word, $projectNameLower) <= 2) {
-                    return $project;
+                    return true;
                 }
             }
-        }
+            return false;
+        });
+        $best = $this->pickBestProject($fuzzyMatches);
+        if ($best) return $best;
 
         return null;
     }
