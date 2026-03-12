@@ -340,7 +340,8 @@ if [ -n "$GGUF_FILES" ]; then
     if [[ ! "$IMPORT_CHOICE" =~ ^[nN]$ ]]; then
         echo "$GGUF_FILES" | while read -r gguf_file; do
             GGUF_BASENAME=$(basename "$gguf_file")
-            GGUF_NAME=$(echo "${GGUF_BASENAME%.gguf}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
+            # Ollama model names: only lowercase letters, numbers and hyphens
+            GGUF_NAME=$(echo "${GGUF_BASENAME%.gguf}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
             info "Import de $GGUF_NAME..."
 
             # Create /models dir in container
@@ -348,22 +349,11 @@ if [ -n "$GGUF_FILES" ]; then
 
             # Copy GGUF into container
             info "Copie de $GGUF_BASENAME dans le container..."
-            if ! $CONTAINER_CMD cp "$gguf_file" "zeniclaw_ollama:/models/$GGUF_BASENAME" 2>&1; then
-                warn "Echec de la copie — essai via volume..."
-                # Fallback: copy to ollama data volume
-                $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /root/.ollama/imports 2>&1 || true
-                $CONTAINER_CMD cp "$gguf_file" "zeniclaw_ollama:/root/.ollama/imports/$GGUF_BASENAME" 2>&1 || true
-            fi
+            $CONTAINER_CMD cp "$gguf_file" "zeniclaw_ollama:/models/$GGUF_BASENAME" 2>&1 || true
 
             # Verify file is in container
             FILE_SIZE=$($CONTAINER_CMD exec zeniclaw_ollama ls -lh "/models/$GGUF_BASENAME" 2>/dev/null | awk '{print $5}' || echo "absent")
-            if [ "$FILE_SIZE" = "absent" ]; then
-                FILE_SIZE=$($CONTAINER_CMD exec zeniclaw_ollama ls -lh "/root/.ollama/imports/$GGUF_BASENAME" 2>/dev/null | awk '{print $5}' || echo "absent")
-                GGUF_CONTAINER_PATH="/root/.ollama/imports/$GGUF_BASENAME"
-            else
-                GGUF_CONTAINER_PATH="/models/$GGUF_BASENAME"
-            fi
-            info "Fichier dans container: $GGUF_CONTAINER_PATH ($FILE_SIZE)"
+            info "Fichier dans container: /models/$GGUF_BASENAME ($FILE_SIZE)"
 
             if [ "$FILE_SIZE" = "absent" ]; then
                 warn "Le fichier n'a pas ete copie dans le container"
@@ -371,17 +361,24 @@ if [ -n "$GGUF_FILES" ]; then
             fi
 
             # Create Modelfile inside the container directly
-            $CONTAINER_CMD exec zeniclaw_ollama bash -c "echo 'FROM $GGUF_CONTAINER_PATH' > /tmp/Modelfile" 2>&1
+            $CONTAINER_CMD exec zeniclaw_ollama sh -c "printf 'FROM /models/$GGUF_BASENAME\n' > /tmp/Modelfile" 2>&1
+            info "Modelfile:"
+            $CONTAINER_CMD exec zeniclaw_ollama cat /tmp/Modelfile 2>&1
 
-            # Create the model
-            info "Creation du modele $GGUF_NAME..."
-            if $CONTAINER_CMD exec zeniclaw_ollama ollama create "$GGUF_NAME" -f /tmp/Modelfile 2>&1; then
+            # Create the model with debug output
+            info "Creation du modele $GGUF_NAME (avec debug)..."
+            CREATE_OUTPUT=$($CONTAINER_CMD exec -e OLLAMA_DEBUG=1 zeniclaw_ollama ollama create "$GGUF_NAME" -f /tmp/Modelfile 2>&1 || true)
+            echo "$CREATE_OUTPUT"
+
+            # Check if it worked
+            if $CONTAINER_CMD exec zeniclaw_ollama ollama show "$GGUF_NAME" --modelfile &>/dev/null; then
                 success "Modele $GGUF_NAME importe!"
             else
                 warn "Echec import de $GGUF_NAME"
-                # Show logs for debug
-                echo -e "${DIM}Logs Ollama:${NC}"
-                $CONTAINER_CMD logs --tail 10 zeniclaw_ollama 2>&1 | tail -5
+                echo -e "${DIM}Debug output:${NC}"
+                echo "$CREATE_OUTPUT" | tail -10
+                echo -e "${DIM}Server logs:${NC}"
+                $CONTAINER_CMD logs --tail 15 zeniclaw_ollama 2>&1 | grep -i "error\|warn\|fail\|creat" | tail -5
             fi
         done
     fi
