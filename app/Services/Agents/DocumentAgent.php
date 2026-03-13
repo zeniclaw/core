@@ -69,6 +69,99 @@ class DocumentAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        // If the request likely needs external data, use the agentic loop
+        // so we get access to web_search, send_agent_message, etc.
+        if ($this->needsExternalData($context->body ?? '')) {
+            return $this->handleWithTools($context);
+        }
+
+        return $this->handleDirect($context);
+    }
+
+    /**
+     * Detect if the document request needs external data (web search, API, etc.).
+     * Returns true when the user asks for real-world data the LLM doesn't have.
+     */
+    private function needsExternalData(string $body): bool
+    {
+        $lower = mb_strtolower($body);
+
+        // Patterns indicating the user wants real data from the web
+        $needsDataPatterns = [
+            'liste des ', 'list of ', 'toutes les ', 'tous les ',
+            'brasseries', 'restaurants', 'hotels', 'entreprises', 'societes',
+            'en wallonie', 'en belgique', 'en france', 'a bruxelles', 'a paris',
+            'trouve', 'cherche', 'recherche', 'find',
+            'actuelles', 'actuel', 'recentes', 'a jour',
+            'comparatif', 'classement', 'top ', 'meilleur',
+        ];
+
+        foreach ($needsDataPatterns as $pattern) {
+            if (str_contains($lower, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Handle document creation WITH tools (agentic loop).
+     * Used when external data is needed (web search, agent collaboration, etc.).
+     */
+    private function handleWithTools(AgentContext $context): AgentResult
+    {
+        $model = $this->resolveModel($context);
+
+        $userContext         = $this->formatContextMemoryForPrompt($context->from);
+        $knowledgeData       = $this->getStoredKnowledge($context);
+
+        $systemPrompt = <<<PROMPT
+Tu es un agent expert en creation de documents professionnels.
+Tu as acces a des outils pour collecter des donnees REELLES avant de creer le document.
+
+WORKFLOW OBLIGATOIRE:
+1. D'abord, utilise web_search (plusieurs recherches si necessaire) pour collecter les donnees reelles
+2. Optionnellement, utilise web_fetch pour lire les pages les plus pertinentes en detail
+3. Enfin, utilise create_document pour generer le fichier avec les VRAIES donnees collectees
+
+{$userContext}
+{$knowledgeData}
+
+REGLES:
+- Ne genere JAMAIS de donnees inventees quand tu peux chercher les vraies
+- Fais PLUSIEURS recherches web pour etre exhaustif
+- Le document final doit contenir des donnees REELLES, pas des exemples
+- Utilise le format le plus adapte (xlsx pour des listes/tableaux, pdf pour des rapports)
+PROMPT;
+
+        $result = $this->runWithTools(
+            userMessage: $context->body ?? '',
+            systemPrompt: $systemPrompt,
+            context: $context,
+            model: $model,
+            maxIterations: 12,
+        );
+
+        $reply = $result->reply;
+
+        if (!$reply) {
+            $reply = "Le document a ete genere avec les outils utilises: " . implode(', ', array_unique($result->toolsUsed));
+        }
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply, [
+            'tools_used' => $result->toolsUsed,
+            'iterations' => $result->iterations,
+        ]);
+    }
+
+    /**
+     * Handle document creation directly (one-shot JSON generation).
+     * Used when the user provides all data or the request is self-contained.
+     */
+    private function handleDirect(AgentContext $context): AgentResult
+    {
         $model = $this->resolveModel($context);
 
         $systemPrompt = <<<'PROMPT'
@@ -1212,8 +1305,7 @@ HTML;
             }
 
             $url = url("storage/documents/{$filename}");
-            $whatsapp = new \App\Services\WhatsAppService();
-            $whatsapp->sendDocument($context->from, $url, $filename, $title);
+            $this->sendFile($context->from, $storagePath, $filename, $title);
 
             return json_encode([
                 'success' => true,

@@ -720,4 +720,65 @@ PROMPT;
     {
         return "REGLE ANTI-HALLUCINATION: Ne pretends JAMAIS avoir effectue une action si tu n'as PAS utilise un outil (tool_use) pour le faire. Si un outil echoue ou n'est pas disponible, dis-le clairement au lieu d'inventer un resultat.";
     }
+
+    // ── Agentic Loop Helper ──────────────────────────────────────
+
+    /**
+     * Run the agentic loop with all registered tools.
+     * Any agent can call this to get full tool access (web_search, create_document,
+     * send_agent_message, spawn_subagent, memory, etc.).
+     *
+     * Use this instead of $this->claude->chat() when the task may require
+     * external data, collaboration with other agents, or tool usage.
+     */
+    protected function runWithTools(
+        string|array $userMessage,
+        string $systemPrompt,
+        AgentContext $context,
+        ?string $model = null,
+        int $maxIterations = 10,
+    ): \App\Services\AgenticLoopResult {
+        $model = $model ?? $this->resolveModel($context);
+
+        // Append collaboration instructions to system prompt
+        $systemPrompt .= "\n\n" . $this->getCollaborationPrompt();
+        $systemPrompt .= "\n" . $this->getAntiHallucinationRule();
+
+        $loop = new \App\Services\AgenticLoop(maxIterations: $maxIterations, debug: $context->session->debug_mode ?? false);
+
+        return $loop->run(
+            userMessage: $userMessage,
+            systemPrompt: $systemPrompt,
+            model: $model,
+            context: $context,
+        );
+    }
+
+    /**
+     * Collaboration instructions injected into every agent that uses runWithTools().
+     * Tells the LLM about the tools available and how to use inter-agent communication.
+     */
+    protected function getCollaborationPrompt(): string
+    {
+        return <<<'COLLAB'
+COLLABORATION INTER-AGENTS:
+Tu fais partie d'un ecosysteme d'agents specialises. Tu as acces a ces outils de collaboration:
+
+- web_search: Chercher des informations sur le web en temps reel
+- web_fetch: Lire le contenu complet d'une page web
+- create_document: Creer un fichier Excel, PDF, Word ou CSV
+- send_agent_message: Envoyer un message a un autre agent et recevoir sa reponse
+  Agents disponibles: todo, reminder, web_search, document, finance, dev, chat, daily_brief, recipe, music, pomodoro, flashcard, event_reminder, habit
+- spawn_subagent: Lancer une tache autonome en arriere-plan (recherches longues, collecte de donnees)
+- memory_store / memory_search: Sauvegarder/chercher des infos sur l'utilisateur
+- teach_skill / list_skills / forget_skill: Gerer les competences apprises
+
+REGLES DE COLLABORATION:
+1. Si tu as besoin de donnees que tu n'as pas, utilise web_search ou web_fetch AVANT de repondre
+2. Si une tache necessite l'expertise d'un autre agent, utilise send_agent_message
+3. Pour les taches longues (>30s), utilise spawn_subagent
+4. Ne refuse JAMAIS une demande en disant "je n'ai pas acces" — utilise les outils disponibles
+5. Combine plusieurs outils si necessaire (ex: web_search → create_document)
+COLLAB;
+    }
 }

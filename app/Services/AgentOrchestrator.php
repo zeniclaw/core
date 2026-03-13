@@ -263,12 +263,10 @@ class AgentOrchestrator
                 // Agent not found in registry — fallback to chat
                 $dispatchAgent = 'chat';
             }
-            // If routed to document but context involves a project with API,
-            // redirect to dev — DevAgent fetches fresh data then creates the file
-            if ($dispatchAgent === 'document' && (
-                $this->messageReferencesApiProject($context->body)
-                || $this->sessionHasApiProject($context->session)
-            )) {
+            // If routed to document and the message explicitly references an API project,
+            // redirect to dev — DevAgent fetches fresh data then creates the file.
+            // Only redirect when the message itself mentions the project (not just session).
+            if ($dispatchAgent === 'document' && $this->messageReferencesApiProject($context->body ?? '')) {
                 $dispatchAgent = 'dev';
             }
 
