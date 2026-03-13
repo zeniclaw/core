@@ -279,6 +279,7 @@ $CONTAINER_CMD run -d \
     -e "https_proxy=${PROXY_HTTPS:-}" \
     -e "NO_PROXY=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
     -e "no_proxy=${PROXY_NO:-localhost,127.0.0.1,db,redis,waha,ollama,app}" \
+    -e "OLLAMA_KEEP_ALIVE=-1" \
     $CA_MOUNTS \
     -v zeniclaw_ollama_data:/root/.ollama \
     docker.io/ollama/ollama:latest 2>&1
@@ -630,6 +631,22 @@ if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null 2>&1; then
     success "App configuree"
 else
     warn "Container app non demarre — configurez manuellement dans Settings > Modeles"
+fi
+
+# --- Step 5b: Warm-up model (pre-load in memory) ---------------------------
+if [ -n "$MODEL_NAME" ]; then
+    info "Pre-chargement du modele en memoire (OLLAMA_KEEP_ALIVE=-1)..."
+    $CONTAINER_CMD exec zeniclaw_ollama curl -sf http://localhost:11434/api/generate \
+        -d "{\"model\": \"${MODEL_NAME}\", \"keep_alive\": -1, \"prompt\": \"hi\"}" \
+        > /dev/null 2>&1 &
+    WARMUP_PID=$!
+    # Wait up to 30s for warm-up
+    for i in $(seq 1 15); do
+        if ! kill -0 $WARMUP_PID 2>/dev/null; then break; fi
+        sleep 2
+    done
+    kill $WARMUP_PID 2>/dev/null || true
+    success "Modele pre-charge — plus de cold start"
 fi
 
 # --- Step 6: Verification ---------------------------------------------------
