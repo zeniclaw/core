@@ -58,9 +58,29 @@ class AgenticLoop
             $response = $this->claude->chatWithToolUse($messages, $model, $systemPrompt, $tools);
 
             if (!$response) {
-                Log::warning('AgenticLoop: null response from Claude', ['iteration' => $iteration]);
+                Log::warning('AgenticLoop: null response from Claude, forcing final summary', ['iteration' => $iteration]);
+                $this->debugLog($context, "NULL RESPONSE at iteration {$iteration} - forcing summary", []);
+
+                // API failed (likely context too large or invalid input) — try one last call without tools
+                // Strip tool_use/tool_result from messages to reduce size and avoid invalid input errors
+                $summaryMessages = [
+                    ['role' => 'user', 'content' => $userMessage],
+                    ['role' => 'assistant', 'content' => 'J\'ai effectue des recherches sur le sujet. Voici les outils que j\'ai utilises : ' . implode(', ', array_unique($toolsUsed))],
+                    ['role' => 'user', 'content' => 'Donne ta reponse finale avec TOUTES les informations que tu as collectees. Structure ta reponse avec des listes.'],
+                ];
+
+                $finalResponse = $this->claude->chatWithToolUse($summaryMessages, $model, $systemPrompt, []);
+                $finalText = '';
+                if ($finalResponse) {
+                    foreach (($finalResponse['content'] ?? []) as $block) {
+                        if ($block['type'] === 'text') {
+                            $finalText .= $block['text'];
+                        }
+                    }
+                }
+
                 return new AgenticLoopResult(
-                    reply: null,
+                    reply: $finalText ?: 'Recherche terminee (' . count($toolsUsed) . ' appels). Le contexte est devenu trop volumineux pour generer un resume.',
                     toolsUsed: $toolsUsed,
                     iterations: $iteration + 1,
                     model: $model,
@@ -83,16 +103,13 @@ class AgenticLoop
             }
 
             // If no tool_use → we're done, return the text reply
-            if (empty($toolUseBlocks) || $stopReason === 'end_turn') {
+            if (empty($toolUseBlocks)) {
                 $finalReply = implode("\n", $textParts);
 
-                // If we got tool_use with end_turn, still execute them but return text
-                if (!empty($toolUseBlocks) && $stopReason === 'end_turn') {
-                    foreach ($toolUseBlocks as $toolBlock) {
-                        $this->executeToolQuietly($toolBlock, $context, $toolsUsed);
-                        $totalToolCalls++;
-                    }
-                }
+                $this->debugLog($context, "EXIT no_tool_use iter={$iteration} stop={$stopReason} text_parts=" . count($textParts) . " reply_len=" . strlen($finalReply), [
+                    'reply_preview' => mb_substr($finalReply, 0, 500),
+                    'content_blocks_raw' => json_encode($contentBlocks, JSON_UNESCAPED_UNICODE),
+                ]);
 
                 return new AgenticLoopResult(
                     reply: $finalReply ?: null,
@@ -102,9 +119,37 @@ class AgenticLoop
                 );
             }
 
+            // If end_turn with tool_use but also text → execute tools and return text
+            if ($stopReason === 'end_turn' && !empty($textParts)) {
+                $finalReply = implode("\n", $textParts);
+
+                foreach ($toolUseBlocks as $toolBlock) {
+                    $this->executeToolQuietly($toolBlock, $context, $toolsUsed);
+                    $totalToolCalls++;
+                }
+
+                return new AgenticLoopResult(
+                    reply: $finalReply,
+                    toolsUsed: $toolsUsed,
+                    iterations: $iteration + 1,
+                    model: $model,
+                );
+            }
+
+            // end_turn with tool_use but NO text → execute tools and continue loop
+            // so Claude can produce a final text response
+
             // We have tool_use blocks → execute them and loop
-            // Add the assistant's response to messages
-            $messages[] = ['role' => 'assistant', 'content' => $contentBlocks];
+            // Sanitize content blocks: ensure tool_use.input is always an object (not null or array)
+            $sanitizedBlocks = array_map(function ($block) {
+                if ($block['type'] === 'tool_use') {
+                    $block['input'] = !empty($block['input']) && is_array($block['input'])
+                        ? (object) $block['input']
+                        : (object) [];
+                }
+                return $block;
+            }, $contentBlocks);
+            $messages[] = ['role' => 'assistant', 'content' => $sanitizedBlocks];
 
             // Execute each tool and build tool_result blocks
             $toolResults = [];
@@ -134,16 +179,28 @@ class AgenticLoop
             $messages[] = ['role' => 'user', 'content' => $toolResults];
         }
 
-        // Max iterations reached — get whatever text we have
-        Log::warning('AgenticLoop: max iterations reached', [
+        // Max iterations reached — make one final call WITHOUT tools to force a text summary
+        Log::warning('AgenticLoop: max iterations reached, forcing final summary', [
             'max' => $this->maxIterations,
             'tools_used' => $toolsUsed,
         ]);
 
+        $messages[] = ['role' => 'user', 'content' => 'Tu as atteint la limite d\'iterations. Donne maintenant ta reponse finale avec TOUTES les informations que tu as collectees. Ne demande pas d\'outils supplementaires.'];
+
+        $finalResponse = $this->claude->chatWithToolUse($messages, $model, $systemPrompt, []);
+        $finalText = '';
+        if ($finalResponse) {
+            foreach (($finalResponse['content'] ?? []) as $block) {
+                if ($block['type'] === 'text') {
+                    $finalText .= $block['text'];
+                }
+            }
+        }
+
         return new AgenticLoopResult(
-            reply: 'J\'ai atteint la limite d\'iterations. Voici ce que j\'ai fait : ' . implode(', ', array_unique($toolsUsed)),
+            reply: $finalText ?: 'Recherche terminee mais aucun resume disponible. Outils utilises : ' . implode(', ', array_unique($toolsUsed)),
             toolsUsed: $toolsUsed,
-            iterations: $this->maxIterations,
+            iterations: $this->maxIterations + 1,
             model: $model,
         );
     }

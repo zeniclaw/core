@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\RunSubAgentJob;
+use App\Jobs\RunTaskJob;
 use App\Models\AppSetting;
 use App\Models\SubAgent;
 use Illuminate\Http\JsonResponse;
@@ -86,7 +87,7 @@ class SubAgentController extends Controller
         }
 
         // Update project status
-        $subAgent->project->update(['status' => 'failed']);
+        $subAgent->project?->update(['status' => 'failed']);
 
         return redirect()->back()->with('success', "SubAgent #{$subAgent->id} arrete.");
     }
@@ -102,6 +103,8 @@ class SubAgentController extends Controller
 
         $newSubAgent = SubAgent::create([
             'project_id' => $subAgent->project_id,
+            'type' => $subAgent->type ?? 'code',
+            'requester_phone' => $subAgent->requester_phone,
             'task_description' => $subAgent->task_description,
             'model' => $subAgent->model ?? 'opus',
             'timeout_minutes' => $subAgent->timeout_minutes ?? (int) (AppSetting::get('subagent_default_timeout') ?: 10),
@@ -109,9 +112,13 @@ class SubAgentController extends Controller
             'branch_name' => $subAgent->branch_name,
         ]);
 
-        $subAgent->project->update(['status' => 'in_progress']);
+        $subAgent->project?->update(['status' => 'in_progress']);
 
-        RunSubAgentJob::dispatch($newSubAgent);
+        if ($newSubAgent->type === 'research') {
+            RunTaskJob::dispatch($newSubAgent);
+        } else {
+            RunSubAgentJob::dispatch($newSubAgent);
+        }
 
         return redirect()->route('subagents.show', $newSubAgent)
             ->with('success', "SubAgent #{$newSubAgent->id} relance (copie de #{$subAgent->id}).");
@@ -130,6 +137,8 @@ class SubAgentController extends Controller
 
         $newSubAgent = SubAgent::create([
             'project_id' => $subAgent->project_id,
+            'type' => $subAgent->type ?? 'code',
+            'requester_phone' => $subAgent->requester_phone,
             'task_description' => $request->prompt,
             'model' => $subAgent->model ?? 'opus',
             'timeout_minutes' => $subAgent->timeout_minutes ?? (int) (AppSetting::get('subagent_default_timeout') ?: 10),
@@ -137,12 +146,17 @@ class SubAgentController extends Controller
             'branch_name' => $subAgent->branch_name,
         ]);
 
-        $subAgent->project->update(['status' => 'in_progress']);
+        $subAgent->project?->update(['status' => 'in_progress']);
 
-        RunSubAgentJob::dispatch($newSubAgent);
+        if ($newSubAgent->type === 'research') {
+            RunTaskJob::dispatch($newSubAgent);
+        } else {
+            RunSubAgentJob::dispatch($newSubAgent);
+        }
 
+        $projectName = $subAgent->project?->name ?? 'tache autonome';
         return redirect()->route('subagents.show', $newSubAgent)
-            ->with('success', "SubAgent #{$newSubAgent->id} lance sur {$subAgent->project->name}.");
+            ->with('success', "SubAgent #{$newSubAgent->id} lance sur {$projectName}.");
     }
 
     /**

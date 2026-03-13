@@ -67,7 +67,7 @@ class RunSubAgentJob implements ShouldQueue
                 'completed_at' => now(),
                 'pid' => null,
             ]);
-            $this->subAgent->project->update(['status' => 'failed']);
+            $this->subAgent->project?->update(['status' => 'failed']);
             $this->subAgent->appendLog('[ERROR] Job interrompu (container redemarré ou timeout)');
         }
     }
@@ -92,7 +92,7 @@ class RunSubAgentJob implements ShouldQueue
                 'status' => 'running',
                 'started_at' => now(),
             ]);
-            $this->subAgent->project->update(['status' => 'in_progress']);
+            $this->subAgent->project?->update(['status' => 'in_progress']);
 
             $this->subAgent->appendLog("[START] SubAgent #{$this->subAgent->id} demarré");
 
@@ -120,7 +120,7 @@ class RunSubAgentJob implements ShouldQueue
                     'status' => 'completed',
                     'completed_at' => now(),
                 ]);
-                $this->subAgent->project->update(['status' => 'completed']);
+                $this->subAgent->project?->update(['status' => 'completed']);
                 $this->syncImprovementStatus('completed');
                 $this->subAgent->appendLog("[DONE] Investigation terminee (readonly)");
 
@@ -156,7 +156,7 @@ class RunSubAgentJob implements ShouldQueue
                     'status' => 'completed',
                     'completed_at' => now(),
                 ]);
-                $this->subAgent->project->update(['status' => 'completed']);
+                $this->subAgent->project?->update(['status' => 'completed']);
                 $this->syncImprovementStatus('completed');
                 $this->subAgent->appendLog("[DONE] Termine. Branche: {$branchName}, Commit: {$commitHash}");
 
@@ -182,7 +182,7 @@ class RunSubAgentJob implements ShouldQueue
                     'error_message' => $e->getMessage(),
                     'completed_at' => now(),
                 ]);
-                $this->subAgent->project->update(['status' => 'failed']);
+                $this->subAgent->project?->update(['status' => 'failed']);
                 $this->syncImprovementStatus('failed');
                 $this->notifyRequester(
                     "Oups, j'ai pas reussi cette fois.\nErreur: " . substr($e->getMessage(), 0, 200)

@@ -573,10 +573,119 @@ if [ "$APP_OK" = true ]; then
     BALANCED_MODEL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Services\ModelResolver::balanced();" 2>/dev/null || echo "?")
     POWERFUL_MODEL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Services\ModelResolver::powerful();" 2>/dev/null || echo "?")
 
-    detail "Modeles configures: fast=$FAST_MODEL | balanced=$BALANCED_MODEL | powerful=$POWERFUL_MODEL"
+    detail "Modeles configures:"
+    detail "  fast     = $FAST_MODEL"
+    detail "  balanced = $BALANCED_MODEL"
+    detail "  powerful = $POWERFUL_MODEL"
 
-    # Collect unique models to test (avoid testing same model twice)
-    MODELS_TO_TEST=""
+    # Warn if all tiers use the same model
+    if [ "$FAST_MODEL" = "$BALANCED_MODEL" ] && [ "$BALANCED_MODEL" = "$POWERFUL_MODEL" ] && [ "$FAST_MODEL" != "?" ]; then
+        skip "Les 3 tiers utilisent le MEME modele — configurez des modeles differents pour de meilleures performances"
+        IS_ONPREM_MODEL=false
+        if ! echo "$FAST_MODEL" | grep -q "^claude-"; then IS_ONPREM_MODEL=true; fi
+        if [ "$IS_ONPREM_MODEL" = true ]; then
+            detail "Suggestion: fast=petit modele (rapide), balanced=moyen, powerful=gros (qualite)"
+            detail "Ex: fast=qwen2.5:0.5b, balanced=qwen2.5:3b, powerful=qwen2.5:7b"
+        fi
+    fi
+
+    # ── GPU & Hardware Detection ──
+    detail ""
+    detail "--- Hardware IA ---"
+
+    # Check GPU inside Ollama container (most relevant)
+    if [ "$OLLAMA_RUNNING" = true ]; then
+        GPU_INFO=$($CONTAINER_CMD exec zeniclaw_ollama nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo "")
+        if [ -n "$GPU_INFO" ]; then
+            GPU_NAME=$(echo "$GPU_INFO" | cut -d',' -f1 | xargs)
+            GPU_TOTAL=$(echo "$GPU_INFO" | cut -d',' -f2 | xargs)
+            GPU_USED=$(echo "$GPU_INFO" | cut -d',' -f3 | xargs)
+            GPU_FREE=$(echo "$GPU_INFO" | cut -d',' -f4 | xargs)
+            GPU_UTIL=$(echo "$GPU_INFO" | cut -d',' -f5 | xargs)
+            pass "GPU: $GPU_NAME | VRAM: ${GPU_USED}/${GPU_TOTAL} MiB (${GPU_FREE} MiB libre) | Utilisation: ${GPU_UTIL}%"
+        else
+            # Try lspci as fallback
+            GPU_PCI=$($CONTAINER_CMD exec zeniclaw_ollama lspci 2>/dev/null | grep -i "vga\|3d\|display" || true)
+            if [ -n "$GPU_PCI" ]; then
+                skip "GPU detecte mais nvidia-smi absent: $(echo "$GPU_PCI" | head -1)"
+            else
+                skip "Pas de GPU detecte — Ollama tourne sur CPU (lent)"
+                detail "Pour un modele 0.5B: ~5-15 tok/s sur CPU, ~50-100 tok/s sur GPU"
+            fi
+        fi
+
+        # Ollama container resources
+        OLLAMA_STATS=$($CONTAINER_CMD stats --no-stream --format '{{.CPUPerc}} | RAM: {{.MemUsage}}' zeniclaw_ollama 2>/dev/null || echo "?")
+        pass "Ollama container: CPU: $OLLAMA_STATS"
+    else
+        skip "Ollama non running — pas de diagnostic hardware IA"
+    fi
+
+    # ── Ollama Models Detail ──
+    if [ "$OLLAMA_RUNNING" = true ]; then
+        OLLAMA_URL_DIAG=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('onprem_api_url') ?? '';" 2>/dev/null || echo "")
+        if [ -n "$OLLAMA_URL_DIAG" ]; then
+            detail ""
+            detail "--- Modeles Ollama ---"
+
+            # List installed models with sizes
+            RAW_TAGS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL_DIAG}/api/tags" 2>/dev/null || echo "fail")
+            if [ "$RAW_TAGS" != "fail" ]; then
+                # Parse each model: name, size, quantization, parameter_size, family
+                MODEL_DETAILS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+                    \$tags = json_decode('$(echo "$RAW_TAGS" | sed "s/'/\\\\'/g")', true);
+                    foreach ((\$tags['models'] ?? []) as \$m) {
+                        \$name = \$m['name'] ?? '?';
+                        \$size = round((\$m['size'] ?? 0) / 1024 / 1024 / 1024, 1);
+                        \$family = \$m['details']['family'] ?? '?';
+                        \$params = \$m['details']['parameter_size'] ?? '?';
+                        \$quant = \$m['details']['quantization_level'] ?? '?';
+                        echo \"{$name}|{$size}GB|{$params}|{$family}|{$quant}\n\";
+                    }
+                " 2>/dev/null || echo "")
+
+                if [ -n "$MODEL_DETAILS" ]; then
+                    echo "$MODEL_DETAILS" | while IFS='|' read -r MNAME MSIZE MPARAMS MFAMILY MQUANT; do
+                        [ -z "$MNAME" ] && continue
+                        pass "  $MNAME — ${MSIZE} sur disque, ${MPARAMS} params, famille: $MFAMILY, quant: $MQUANT"
+                    done
+                fi
+            fi
+
+            # Currently loaded models (in VRAM/RAM)
+            RAW_PS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL_DIAG}/api/ps" 2>/dev/null || echo "fail")
+            if [ "$RAW_PS" != "fail" ]; then
+                LOADED_MODELS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+                    \$ps = json_decode('$(echo "$RAW_PS" | sed "s/'/\\\\'/g")', true);
+                    \$models = \$ps['models'] ?? [];
+                    if (empty(\$models)) { echo 'aucun'; return; }
+                    foreach (\$models as \$m) {
+                        \$name = \$m['name'] ?? '?';
+                        \$size = round((\$m['size'] ?? 0) / 1024 / 1024, 0);
+                        \$vram = round((\$m['size_vram'] ?? 0) / 1024 / 1024, 0);
+                        \$proc = \$m['details']['quantization_level'] ?? '?';
+                        \$expires = \$m['expires_at'] ?? '';
+                        echo \"{$name}|{$size}MB RAM|{$vram}MB VRAM|expire: {$expires}\n\";
+                    }
+                " 2>/dev/null || echo "aucun")
+
+                if [ "$LOADED_MODELS" = "aucun" ]; then
+                    detail "Modeles charges en memoire: aucun (cold start au prochain appel)"
+                else
+                    detail "Modeles charges en memoire:"
+                    echo "$LOADED_MODELS" | while IFS='|' read -r LNAME LRAM LVRAM LEXP; do
+                        [ -z "$LNAME" ] && continue
+                        detail "  $LNAME — $LRAM, $LVRAM, $LEXP"
+                    done
+                fi
+            fi
+        fi
+    fi
+
+    # ── Chat Tests per Model ──
+    detail ""
+    detail "--- Tests de chat ---"
+
     TESTED=""
     for ROLE_INFO in "fast:$FAST_MODEL" "balanced:$BALANCED_MODEL" "powerful:$POWERFUL_MODEL"; do
         ROLE="${ROLE_INFO%%:*}"
@@ -589,132 +698,182 @@ if [ "$APP_OK" = true ]; then
         fi
         TESTED="${TESTED}|${MODEL}|"
 
-        detail ""
-        detail "--- Test: $ROLE -> $MODEL ---"
+        IS_CLOUD=false
+        if echo "$MODEL" | grep -q "^claude-"; then IS_CLOUD=true; fi
 
-        # Run the actual chat test with full debug
+        detail ""
+        detail "--- Test: $ROLE -> $MODEL $([ "$IS_CLOUD" = true ] && echo '[cloud]' || echo '[on-prem]') ---"
+
+        # Run the actual chat test with extended debug (tokens, timing breakdown)
         CHAT_RESULT=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
             \$model = '$MODEL';
             \$client = new \App\Services\AnthropicClient();
+            \$isOnPrem = \$client->isOnPremModel(\$model);
+
             \$start = microtime(true);
             try {
-                \$response = \$client->chat('Reponds juste OK en un mot.', \$model, 'Tu es un assistant de test. Reponds en un seul mot.');
-                \$elapsed = round((microtime(true) - \$start) * 1000);
-                if (\$response) {
-                    echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$response), 0, 100);
+                if (\$isOnPrem) {
+                    // For on-prem: use raw API to get full response with usage stats
+                    \$url = \App\Models\AppSetting::get('onprem_api_url');
+                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\"{$url}/v1/chat/completions\", [
+                        'model' => \$model,
+                        'messages' => [['role' => 'user', 'content' => 'Reponds juste OK en un mot.']],
+                        'max_tokens' => 50,
+                        'stream' => false,
+                    ]);
+                    \$elapsed = round((microtime(true) - \$start) * 1000);
+
+                    if (\$resp->successful()) {
+                        \$data = \$resp->json();
+                        \$content = \$data['choices'][0]['message']['content'] ?? '';
+                        \$promptTok = \$data['usage']['prompt_tokens'] ?? 0;
+                        \$completionTok = \$data['usage']['completion_tokens'] ?? 0;
+                        \$totalTok = \$data['usage']['total_tokens'] ?? 0;
+                        \$tokPerSec = \$elapsed > 0 ? round(\$completionTok / (\$elapsed / 1000), 1) : 0;
+                        \$finishReason = \$data['choices'][0]['finish_reason'] ?? '?';
+
+                        echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$content), 0, 100) . \"|prompt={\$promptTok},completion={\$completionTok},total={\$totalTok}|{\$tokPerSec} tok/s|finish={\$finishReason}\";
+                    } else {
+                        echo \"ERROR|{\$elapsed}ms|HTTP \" . \$resp->status() . ': ' . substr(\$resp->body(), 0, 200) . '|||';
+                    }
                 } else {
-                    echo \"NULL|{\$elapsed}ms|reponse vide (null)\";
+                    \$response = \$client->chat('Reponds juste OK en un mot.', \$model, 'Tu es un assistant de test. Reponds en un seul mot.');
+                    \$elapsed = round((microtime(true) - \$start) * 1000);
+                    if (\$response) {
+                        echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$response), 0, 100) . '|cloud||';
+                    } else {
+                        echo \"NULL|{\$elapsed}ms|reponse vide (null)|cloud||';
+                    }
                 }
             } catch (\Throwable \$e) {
                 \$elapsed = round((microtime(true) - \$start) * 1000);
-                echo \"ERROR|{\$elapsed}ms|\" . substr(\$e->getMessage(), 0, 200);
+                echo \"ERROR|{\$elapsed}ms|\" . substr(\$e->getMessage(), 0, 200) . '|||';
             }
-        " 2>/dev/null || echo "ERROR|0ms|impossible d'executer le tinker")
+        " 2>/dev/null || echo "ERROR|0ms|impossible d'executer le tinker|||")
 
         CHAT_STATUS="${CHAT_RESULT%%|*}"
         CHAT_REST="${CHAT_RESULT#*|}"
         CHAT_TIME="${CHAT_REST%%|*}"
-        CHAT_MSG="${CHAT_REST#*|}"
+        CHAT_REST2="${CHAT_REST#*|}"
+        CHAT_MSG="${CHAT_REST2%%|*}"
+        CHAT_REST3="${CHAT_REST2#*|}"
+        CHAT_TOKENS="${CHAT_REST3%%|*}"
+        CHAT_REST4="${CHAT_REST3#*|}"
+        CHAT_TOKPS="${CHAT_REST4%%|*}"
+        CHAT_FINISH="${CHAT_REST4#*|}"
 
         if [ "$CHAT_STATUS" = "SUCCESS" ]; then
             pass "Chat $ROLE ($MODEL): OK ($CHAT_TIME)"
             detail "Reponse: $CHAT_MSG"
+            if [ -n "$CHAT_TOKENS" ] && [ "$CHAT_TOKENS" != "cloud" ]; then
+                detail "Tokens: $CHAT_TOKENS"
+
+                # Evaluate speed
+                if [ -n "$CHAT_TOKPS" ]; then
+                    TOKPS_NUM=$(echo "$CHAT_TOKPS" | grep -oP '[\d.]+' || echo "0")
+                    detail "Debit: $CHAT_TOKPS"
+                    # Speed assessment
+                    if [ -n "$TOKPS_NUM" ]; then
+                        TOKPS_INT=$(echo "$TOKPS_NUM" | cut -d. -f1)
+                        if [ "$TOKPS_INT" -lt 2 ] 2>/dev/null; then
+                            skip "  -> TRES LENT (<2 tok/s) — modele trop gros pour ce hardware ?"
+                        elif [ "$TOKPS_INT" -lt 5 ] 2>/dev/null; then
+                            skip "  -> LENT (2-5 tok/s) — acceptable pour du batch, lent pour du chat"
+                        elif [ "$TOKPS_INT" -lt 20 ] 2>/dev/null; then
+                            pass "  -> CORRECT (5-20 tok/s) — utilisable pour du chat"
+                        elif [ "$TOKPS_INT" -lt 50 ] 2>/dev/null; then
+                            pass "  -> RAPIDE (20-50 tok/s) — bonne experience utilisateur"
+                        else
+                            pass "  -> TRES RAPIDE (>50 tok/s)"
+                        fi
+                    fi
+                fi
+
+                if [ -n "$CHAT_FINISH" ]; then
+                    detail "$CHAT_FINISH"
+                fi
+            fi
+
+            # Timing assessment
+            TIME_NUM=$(echo "$CHAT_TIME" | grep -oP '\d+' || echo "0")
+            if [ "$TIME_NUM" -gt 30000 ] 2>/dev/null; then
+                skip "  -> Temps total ${CHAT_TIME} — possible cold start (le modele n'etait pas en memoire)"
+                detail "  Le 2eme appel sera beaucoup plus rapide (modele deja charge)"
+            elif [ "$TIME_NUM" -gt 10000 ] 2>/dev/null; then
+                skip "  -> Temps total ${CHAT_TIME} — un peu lent"
+            fi
+
+            # Second call to measure warm performance (if first was slow)
+            if [ "$TIME_NUM" -gt 10000 ] 2>/dev/null && [ "$IS_CLOUD" = false ]; then
+                detail ""
+                detail "  2eme appel (modele deja charge)..."
+                WARM_RESULT=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+                    \$url = \App\Models\AppSetting::get('onprem_api_url');
+                    \$start = microtime(true);
+                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\"\$url/v1/chat/completions\", [
+                        'model' => '$MODEL',
+                        'messages' => [['role' => 'user', 'content' => 'Dis OK.']],
+                        'max_tokens' => 10,
+                        'stream' => false,
+                    ]);
+                    \$elapsed = round((microtime(true) - \$start) * 1000);
+                    if (\$resp->successful()) {
+                        \$d = \$resp->json();
+                        \$ct = \$d['usage']['completion_tokens'] ?? 0;
+                        \$tps = \$elapsed > 0 ? round(\$ct / (\$elapsed / 1000), 1) : 0;
+                        echo \"{\$elapsed}ms|{\$tps} tok/s|\" . substr(\$d['choices'][0]['message']['content'] ?? '', 0, 50);
+                    } else {
+                        echo 'ECHEC|0|' . \$resp->status();
+                    }
+                " 2>/dev/null || echo "ECHEC|0|tinker error")
+                WARM_TIME="${WARM_RESULT%%|*}"
+                WARM_REST="${WARM_RESULT#*|}"
+                WARM_TOKPS="${WARM_REST%%|*}"
+                WARM_MSG="${WARM_REST#*|}"
+                if [ "$WARM_TIME" != "ECHEC" ]; then
+                    pass "  2eme appel (warm): $WARM_TIME ($WARM_TOKPS) — \"$WARM_MSG\""
+                else
+                    fail "  2eme appel: ECHEC"
+                fi
+            fi
         else
             fail "Chat $ROLE ($MODEL): ECHEC ($CHAT_TIME)"
             detail "Erreur: $CHAT_MSG"
 
-            # Show recent Laravel logs related to OnPrem
-            detail ""
-            detail "--- Derniers logs Laravel (OnPrem/chat) ---"
-            RECENT_LOGS=$($CONTAINER_CMD exec zeniclaw_app tail -50 /var/www/html/storage/logs/laravel.log 2>/dev/null | grep -i "onprem\|ollama\|chat.*fail\|chat.*exception\|timeout" | tail -5 || echo "aucun log pertinent")
-            if [ -n "$RECENT_LOGS" ] && [ "$RECENT_LOGS" != "aucun log pertinent" ]; then
-                echo "$RECENT_LOGS" | while read -r line; do detail "$line"; done
-            else
-                detail "Aucun log pertinent (verifiez manuellement: $CONTAINER_CMD exec zeniclaw_app tail -30 /var/www/html/storage/logs/laravel.log)"
-            fi
-
             # Extra debug for on-prem models
-            if ! echo "$MODEL" | grep -q "^claude-"; then
-                # Ollama container stats
+            if [ "$IS_CLOUD" = false ]; then
                 detail ""
-                detail "--- Debug Ollama container ---"
-                OLLAMA_MEM=$($CONTAINER_CMD stats --no-stream --format '{{.MemUsage}} | CPU: {{.CPUPerc}}' zeniclaw_ollama 2>/dev/null || echo "?")
+                detail "--- Debug On-Prem ---"
+                OLLAMA_MEM=$($CONTAINER_CMD stats --no-stream --format 'CPU: {{.CPUPerc}} | RAM: {{.MemUsage}}' zeniclaw_ollama 2>/dev/null || echo "?")
                 detail "Ressources Ollama: $OLLAMA_MEM"
-
-                OLLAMA_LOGS=$($CONTAINER_CMD logs --tail 10 zeniclaw_ollama 2>&1 | tail -10 || echo "pas de logs")
-                detail "Derniers logs Ollama:"
-                echo "$OLLAMA_LOGS" | while read -r line; do detail "  $line"; done
 
                 OLLAMA_URL=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('onprem_api_url') ?? 'non configure';" 2>/dev/null || echo "?")
                 detail "URL Ollama: $OLLAMA_URL"
 
-                # Test raw API call to Ollama
                 if [ "$OLLAMA_URL" != "non configure" ] && [ "$OLLAMA_URL" != "?" ]; then
+                    # Check if model exists
                     RAW_TAGS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL}/api/tags" 2>/dev/null || echo "fail")
-                    if [ "$RAW_TAGS" = "fail" ]; then
-                        detail "curl ${OLLAMA_URL}/api/tags: ECHEC (Ollama injoignable)"
-                    else
-                        INSTALLED=$(echo "$RAW_TAGS" | grep -oP '"name"\s*:\s*"\K[^"]+' | tr '\n' ', ')
-                        detail "Modeles Ollama installes: ${INSTALLED:-aucun}"
+                    if [ "$RAW_TAGS" != "fail" ]; then
                         if ! echo "$RAW_TAGS" | grep -q "$MODEL"; then
-                            detail "!! Le modele '$MODEL' n'est PAS dans la liste Ollama !"
-                            detail "Fix: ollama pull $MODEL ou importez-le via setup-ollama.sh"
+                            fail "Le modele '$MODEL' n'est PAS installe dans Ollama !"
+                            INSTALLED=$(echo "$RAW_TAGS" | grep -oP '"name"\s*:\s*"\K[^"]+' | tr '\n' ', ')
+                            detail "Modeles disponibles: ${INSTALLED:-aucun}"
+                            detail "Fix: ollama pull $MODEL"
                         fi
-                    fi
-
-                    # Test raw chat/completions (same endpoint as AnthropicClient)
-                    detail "Test raw API /v1/chat/completions (timeout 120s, cold start possible)..."
-                    RAW_START=$(date +%s)
-                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 120 -X POST "${OLLAMA_URL}/v1/chat/completions" \
-                        -H "Content-Type: application/json" \
-                        -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Say OK\"}],\"max_tokens\":10,\"stream\":false}" 2>/dev/null || echo "fail")
-                    RAW_END=$(date +%s)
-                    RAW_ELAPSED=$(( RAW_END - RAW_START ))
-                    if [ "$RAW_RESP" = "fail" ]; then
-                        detail "raw chat: ECHEC apres ${RAW_ELAPSED}s"
-                        detail "Cause probable: cold start trop long ou modele trop gros pour la RAM"
-                        detail "Test: $CONTAINER_CMD exec zeniclaw_app curl -m 120 -X POST ${OLLAMA_URL}/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false}'"
                     else
-                        RAW_CONTENT=$(echo "$RAW_RESP" | grep -oP '"content"\s*:\s*"\K[^"]*' | head -1)
-                        RAW_ERROR=$(echo "$RAW_RESP" | grep -oP '"error"\s*:\s*"\K[^"]*' | head -1)
-                        if [ -n "$RAW_ERROR" ]; then
-                            detail "raw chat erreur: $RAW_ERROR (${RAW_ELAPSED}s)"
-                        elif [ -n "$RAW_CONTENT" ]; then
-                            pass "raw chat OK (${RAW_ELAPSED}s): $RAW_CONTENT"
-                            detail "Le modele repond en direct mais pas via PHP — verifiez le timeout PHP (60s) ou logs Laravel"
-                        else
-                            detail "raw chat reponse brute (${RAW_ELAPSED}s): $(echo "$RAW_RESP" | head -c 300)"
-                        fi
+                        fail "Ollama API injoignable: ${OLLAMA_URL}/api/tags"
                     fi
                 fi
+
+                OLLAMA_LOGS=$($CONTAINER_CMD logs --tail 5 zeniclaw_ollama 2>&1 | tail -5 || echo "pas de logs")
+                detail "Derniers logs Ollama:"
+                echo "$OLLAMA_LOGS" | while read -r line; do detail "  $line"; done
             else
                 # Cloud model debug
                 HAS_KEY=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('anthropic_api_key') ? 'oui' : 'non';" 2>/dev/null || echo "?")
                 detail "Cle API Anthropic: $HAS_KEY"
                 if [ "$HAS_KEY" = "non" ]; then
                     detail "Fix: configurez la cle API dans Settings > API"
-                fi
-
-                # Test raw API call to Anthropic
-                API_KEY=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo \App\Models\AppSetting::get('anthropic_api_key');" 2>/dev/null || echo "")
-                if [ -n "$API_KEY" ]; then
-                    detail "Test raw API Anthropic..."
-                    RAW_RESP=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 15 -X POST "https://api.anthropic.com/v1/messages" \
-                        -H "Content-Type: application/json" \
-                        -H "x-api-key: $API_KEY" \
-                        -H "anthropic-version: 2023-06-01" \
-                        -d "{\"model\":\"$MODEL\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"Say OK\"}]}" 2>/dev/null || echo "fail")
-                    if [ "$RAW_RESP" = "fail" ]; then
-                        detail "raw API: ECHEC (timeout/reseau)"
-                    else
-                        RAW_TYPE=$(echo "$RAW_RESP" | grep -oP '"type"\s*:\s*"\K[^"]*' | head -1)
-                        if [ "$RAW_TYPE" = "message" ]; then
-                            detail "raw API: OK — le modele repond"
-                        else
-                            RAW_ERR=$(echo "$RAW_RESP" | grep -oP '"message"\s*:\s*"\K[^"]*' | head -1)
-                            detail "raw API erreur: ${RAW_ERR:-$(echo "$RAW_RESP" | head -c 200)}"
-                        fi
-                    fi
                 fi
             fi
         fi

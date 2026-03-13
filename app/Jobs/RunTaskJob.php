@@ -49,11 +49,15 @@ class RunTaskJob implements ShouldQueue
         try {
             $result = $this->runAgenticLoop();
 
-            $this->subAgent->update([
+            $this->subAgent->appendLog("[SAVE] Saving result, length=" . strlen($result ?? ''));
+            $saved = $this->subAgent->update([
                 'status' => 'completed',
                 'result' => $result,
                 'completed_at' => now(),
             ]);
+            $this->subAgent->appendLog("[SAVE] Update returned: " . ($saved ? 'true' : 'false'));
+            $this->subAgent->refresh();
+            $this->subAgent->appendLog("[VERIFY] result after save: " . (is_null($this->subAgent->result) ? 'NULL' : 'len=' . strlen($this->subAgent->result)));
             $this->subAgent->appendLog("[DONE] Task completed");
 
             // Send result to user
@@ -123,6 +127,9 @@ class RunTaskJob implements ShouldQueue
 
         $this->subAgent->appendLog("Tools used: " . implode(', ', array_unique($result->toolsUsed)));
         $this->subAgent->appendLog("Iterations: {$result->iterations}");
+        $this->subAgent->appendLog("Reply null: " . (is_null($result->reply) ? 'YES' : 'NO'));
+        $this->subAgent->appendLog("Reply length: " . strlen($result->reply ?? ''));
+        $this->subAgent->appendLog("Reply preview: " . mb_substr($result->reply ?? 'NULL', 0, 500));
 
         return $result->reply;
     }
@@ -157,13 +164,13 @@ PROMPT;
     private function buildContext(ToolRegistry $registry): AgentContext
     {
         // Find the default agent for logging
-        $agent = \App\Models\Agent::where('slug', 'chat')->first()
-            ?? \App\Models\Agent::first();
+        $agent = \App\Models\Agent::first();
 
         // Find or create a session
+        $peerId = $this->subAgent->requester_phone ?? 'system';
         $session = \App\Models\AgentSession::firstOrCreate(
-            ['phone' => $this->subAgent->requester_phone ?? 'system', 'agent_id' => $agent->id],
-            ['preferences' => []]
+            ['peer_id' => $peerId, 'agent_id' => $agent->id],
+            ['channel' => str_starts_with($peerId, 'web-') ? 'web' : 'whatsapp', 'session_key' => $peerId . ':' . $agent->id]
         );
 
         return new AgentContext(
