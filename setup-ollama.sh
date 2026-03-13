@@ -321,12 +321,72 @@ else
     fi
 fi
 
-# --- Step 3: Check for GGUF files to import ---------------------------------
+# --- Step 3: Check for offline model files to import -----------------------
 MODELS_DIR="$REPO_DIR/models"
 GGUF_FILES=""
+TARGZ_FILES=""
 if [ -d "$MODELS_DIR" ]; then
     GGUF_FILES=$(find "$MODELS_DIR" -name "*.gguf" -type f 2>/dev/null || true)
+    TARGZ_FILES=$(find "$MODELS_DIR" -name "ollama-*.tar.gz" -type f 2>/dev/null || true)
 fi
+
+# --- 3a: Import tar.gz exports (from ZeniClaw /models mirror) ---------------
+if [ -n "$TARGZ_FILES" ]; then
+    info "Archives Ollama trouvees dans models/ :"
+    echo "$TARGZ_FILES" | while read -r f; do
+        SIZE=$(du -h "$f" 2>/dev/null | awk '{print $1}')
+        echo -e "  ${GREEN}•${NC} $(basename "$f") ($SIZE)"
+    done
+    echo ""
+    echo -e "${YELLOW}Importer ces modeles dans Ollama ?${NC}"
+    echo -e "${DIM}(Format export ZeniClaw — contient blobs + manifeste)${NC}"
+    read -rp "Importer ? (O/n) : " IMPORT_TARGZ
+    if [[ ! "$IMPORT_TARGZ" =~ ^[nN]$ ]]; then
+        echo "$TARGZ_FILES" | while read -r tgz_file; do
+            TGZ_BASENAME=$(basename "$tgz_file")
+            info "Import de $TGZ_BASENAME..."
+
+            # Extract to temp dir
+            TMPDIR_EXTRACT=$(mktemp -d)
+            if ! tar xzf "$tgz_file" -C "$TMPDIR_EXTRACT" 2>&1; then
+                warn "Echec extraction de $TGZ_BASENAME"
+                rm -rf "$TMPDIR_EXTRACT"
+                continue
+            fi
+
+            # Copy blobs into Ollama data dir
+            if [ -d "$TMPDIR_EXTRACT/blobs" ]; then
+                BLOB_COUNT=$(ls "$TMPDIR_EXTRACT/blobs/" | wc -l)
+                info "Copie de $BLOB_COUNT blobs..."
+                $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /root/.ollama/models/blobs 2>/dev/null || true
+                for blob in "$TMPDIR_EXTRACT/blobs/"*; do
+                    BLOB_NAME=$(basename "$blob")
+                    $CONTAINER_CMD cp "$blob" "zeniclaw_ollama:/root/.ollama/models/blobs/$BLOB_NAME" 2>&1 || true
+                done
+            fi
+
+            # Copy manifests into Ollama data dir
+            if [ -d "$TMPDIR_EXTRACT/manifests" ]; then
+                info "Copie des manifestes..."
+                # Walk the manifest tree and recreate dirs in container
+                find "$TMPDIR_EXTRACT/manifests" -type f 2>/dev/null | while read -r manifest_file; do
+                    REL_PATH="${manifest_file#$TMPDIR_EXTRACT/}"
+                    DEST_DIR="/root/.ollama/models/$(dirname "$REL_PATH")"
+                    $CONTAINER_CMD exec zeniclaw_ollama mkdir -p "$DEST_DIR" 2>/dev/null || true
+                    $CONTAINER_CMD cp "$manifest_file" "zeniclaw_ollama:/root/.ollama/models/$REL_PATH" 2>&1 || true
+                done
+            fi
+
+            # Detect imported model name from manifest path
+            MODEL_TAG=$(find "$TMPDIR_EXTRACT" -path "*/manifests/registry.ollama.ai/library/*/*" -type f 2>/dev/null | head -1 | sed 's|.*/library/||' | tr '/' ':' || true)
+
+            rm -rf "$TMPDIR_EXTRACT"
+            success "Modele $TGZ_BASENAME importe! ${MODEL_TAG:+(${MODEL_TAG})}"
+        done
+    fi
+fi
+
+# --- 3b: Import GGUF files -------------------------------------------------
 
 if [ -n "$GGUF_FILES" ]; then
     info "Fichiers GGUF trouves dans models/ :"
@@ -494,6 +554,51 @@ if [ -n "$MODEL_NAME" ]; then
             fi
         elif [ -n "$GGUF_PATH" ]; then
             warn "Fichier introuvable: $GGUF_PATH"
+        fi
+
+        echo ""
+        echo -e "${BOLD}Option C: Telecharger depuis un serveur ZeniClaw (/models)${NC}"
+        echo -e "${DIM}Si un autre serveur ZeniClaw a le modele, telechargez l'archive depuis sa page /models.${NC}"
+        echo ""
+        echo -e "  1. Telechargez l'archive .tar.gz depuis ${CYAN}http://SERVEUR:8080/models${NC}"
+        echo -e "  2. Placez-la dans ${DIM}$REPO_DIR/models/${NC}"
+        echo -e "  3. Relancez ce script — il detectera et importera l'archive automatiquement"
+        echo ""
+        echo -e "${DIM}Ou importez maintenant :${NC}"
+        read -rp "Chemin vers un fichier ollama-*.tar.gz (vide = passer) : " TARGZ_PATH
+        if [ -n "$TARGZ_PATH" ] && [ -f "$TARGZ_PATH" ]; then
+            info "Import de $(basename "$TARGZ_PATH")..."
+            TMPDIR_IMPORT=$(mktemp -d)
+            if tar xzf "$TARGZ_PATH" -C "$TMPDIR_IMPORT" 2>&1; then
+                # Copy blobs
+                if [ -d "$TMPDIR_IMPORT/blobs" ]; then
+                    BLOB_COUNT=$(ls "$TMPDIR_IMPORT/blobs/" | wc -l)
+                    info "Copie de $BLOB_COUNT blobs..."
+                    $CONTAINER_CMD exec zeniclaw_ollama mkdir -p /root/.ollama/models/blobs 2>/dev/null || true
+                    for blob in "$TMPDIR_IMPORT/blobs/"*; do
+                        BLOB_NAME=$(basename "$blob")
+                        $CONTAINER_CMD cp "$blob" "zeniclaw_ollama:/root/.ollama/models/blobs/$BLOB_NAME" 2>&1 || true
+                    done
+                fi
+                # Copy manifests
+                if [ -d "$TMPDIR_IMPORT/manifests" ]; then
+                    info "Copie des manifestes..."
+                    find "$TMPDIR_IMPORT/manifests" -type f 2>/dev/null | while read -r mf; do
+                        REL_P="${mf#$TMPDIR_IMPORT/}"
+                        DEST_D="/root/.ollama/models/$(dirname "$REL_P")"
+                        $CONTAINER_CMD exec zeniclaw_ollama mkdir -p "$DEST_D" 2>/dev/null || true
+                        $CONTAINER_CMD cp "$mf" "zeniclaw_ollama:/root/.ollama/models/$REL_P" 2>&1 || true
+                    done
+                fi
+                IMPORTED_TAG=$(find "$TMPDIR_IMPORT" -path "*/library/*/*" -type f 2>/dev/null | head -1 | sed 's|.*/library/||' | tr '/' ':' || true)
+                success "Modele importe! ${IMPORTED_TAG:+(${IMPORTED_TAG})}"
+                [ -n "$IMPORTED_TAG" ] && MODEL_NAME="$IMPORTED_TAG"
+            else
+                warn "Echec extraction de $(basename "$TARGZ_PATH")"
+            fi
+            rm -rf "$TMPDIR_IMPORT"
+        elif [ -n "$TARGZ_PATH" ]; then
+            warn "Fichier introuvable: $TARGZ_PATH"
         fi
     fi
 fi
