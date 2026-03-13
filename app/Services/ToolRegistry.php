@@ -50,19 +50,31 @@ class ToolRegistry
     /**
      * Execute a tool by finding its owner provider.
      * Falls back to legacy AgentTools for not-yet-migrated tools.
+     * Fires BeforeToolCall/AfterToolCall lifecycle events.
      */
     public function execute(string $toolName, array $input, AgentContext $context): string
     {
+        \App\Events\BeforeToolCall::dispatch($toolName, $input, $context);
+        $start = microtime(true);
+
         // Try dynamic providers first
+        $result = null;
         foreach ($this->providers as $provider) {
             $result = $provider->executeTool($toolName, $input, $context);
             if ($result !== null) {
-                return $result;
+                break;
             }
         }
 
         // Fallback to legacy AgentTools
-        return AgentTools::execute($toolName, $input, $context);
+        if ($result === null) {
+            $result = AgentTools::execute($toolName, $input, $context);
+        }
+
+        $durationMs = (microtime(true) - $start) * 1000;
+        \App\Events\AfterToolCall::dispatch($toolName, $input, $result, $context, $durationMs);
+
+        return $result;
     }
 
     public function providerCount(): int

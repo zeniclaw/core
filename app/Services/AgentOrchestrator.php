@@ -91,6 +91,42 @@ class AgentOrchestrator
         }
     }
 
+    /**
+     * Resolve an agent instance by name. Used by send_agent_message tool.
+     * Static so BaseAgent can call it without an orchestrator instance.
+     */
+    public static function resolveAgent(string $name): ?BaseAgent
+    {
+        // Build a temporary discovery (cached via static)
+        static $agentCache = null;
+
+        if ($agentCache === null) {
+            $agentCache = [];
+            $agentDir = app_path('Services/Agents');
+            $namespace = 'App\\Services\\Agents\\';
+
+            foreach (glob("{$agentDir}/*Agent.php") as $file) {
+                $className = basename($file, '.php');
+                if (in_array($className, ['BaseAgent', 'RouterAgent'])) continue;
+
+                $fqcn = $namespace . $className;
+                if (!class_exists($fqcn)) continue;
+
+                try {
+                    $reflection = new \ReflectionClass($fqcn);
+                    if ($reflection->isAbstract() || !$reflection->isSubclassOf(BaseAgent::class)) continue;
+
+                    $agent = new $fqcn();
+                    $agentCache[$agent->name()] = $agent;
+                } catch (\Throwable $e) {
+                    // Skip broken agents
+                }
+            }
+        }
+
+        return $agentCache[$name] ?? null;
+    }
+
     public function process(AgentContext $context): AgentResult
     {
         try {
@@ -216,24 +252,24 @@ class AgentOrchestrator
                     );
 
                     $dispatchAgent = $newRouting['agent'];
-                    if (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
+                    if (!isset($this->agents[$dispatchAgent])) {
                         $dispatchAgent = 'chat';
                     }
                 } else {
                     // Low confidence or failed — voice agent already replied to user
                     return $voiceResult;
                 }
-            } elseif (!in_array($dispatchAgent, ['dev', 'streamline', 'assistant'])) {
-                // If routed to document but context involves a project with API,
-                // redirect to dev — DevAgent fetches fresh data then creates the file
-                if ($dispatchAgent === 'document' && (
-                    $this->messageReferencesApiProject($context->body)
-                    || $this->sessionHasApiProject($context->session)
-                )) {
-                    $dispatchAgent = 'dev';
-                } else {
-                    $dispatchAgent = 'chat';
-                }
+            } elseif (!isset($this->agents[$dispatchAgent])) {
+                // Agent not found in registry — fallback to chat
+                $dispatchAgent = 'chat';
+            }
+            // If routed to document but context involves a project with API,
+            // redirect to dev — DevAgent fetches fresh data then creates the file
+            if ($dispatchAgent === 'document' && (
+                $this->messageReferencesApiProject($context->body)
+                || $this->sessionHasApiProject($context->session)
+            )) {
+                $dispatchAgent = 'dev';
             }
 
             // Inject conversation memory context into the routed context
@@ -569,7 +605,14 @@ class AgentOrchestrator
         }
 
         $agent = $this->agents[$agentName] ?? $this->agents['chat'];
+
+        \App\Events\BeforeAgentHandle::dispatch($agent, $context, $agentName);
+        $handleStart = microtime(true);
+
         $result = $agent->handle($context);
+
+        $handleDuration = (microtime(true) - $handleStart) * 1000;
+        \App\Events\AfterAgentHandle::dispatch($agent, $context, $result, $agentName, $handleDuration);
 
         // Handle handoff
         if ($result->action === 'handoff' && $result->handoffTo) {

@@ -1128,83 +1128,55 @@ PROMPT;
             return json_encode(['error' => 'Invalid or missing URL']);
         }
 
-        try {
-            $response = Http::timeout(15)
-                ->withHeaders([
-                    'User-Agent' => 'ZeniClaw/1.0 (WhatsApp AI Assistant)',
-                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language' => 'fr-FR,fr;q=0.9,en;q=0.8',
-                ])
-                ->get($url);
+        // Delegate to WebFetchService (handles safety: private IP blocking, size limits, timeouts)
+        $fetcher = new \App\Services\WebFetchService();
+        $fetchResult = $fetcher->fetch($url);
 
-            if (!$response->successful()) {
-                return json_encode(['error' => "HTTP {$response->status()} fetching {$url}"]);
-            }
-
-            $html = $response->body();
-            $contentType = $response->header('Content-Type') ?? '';
-
-            // If not HTML, return raw (truncated)
-            if (!str_contains($contentType, 'html')) {
-                return json_encode([
-                    'url' => $url,
-                    'content_type' => $contentType,
-                    'text' => mb_substr($html, 0, 8000),
-                    'truncated' => mb_strlen($html) > 8000,
-                ]);
-            }
-
-            // Extract text content from HTML
-            $text = $this->extractTextFromHtml($html);
-            $links = $extractLinks ? $this->extractLinksFromHtml($html, $url) : [];
-
-            // Extract page title
-            $title = '';
-            if (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $html, $m)) {
-                $title = trim(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
-            }
-
-            // Extract meta description
-            $description = '';
-            if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']|<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']/i', $html, $m)) {
-                $description = trim(html_entity_decode($m[1] ?: $m[2], ENT_QUOTES, 'UTF-8'));
-            }
-
-            // Truncate text to ~8000 chars to fit in context
-            $truncated = mb_strlen($text) > 8000;
-            $text = mb_substr($text, 0, 8000);
-
-            $result = [
-                'url' => $url,
-                'title' => $title,
-                'description' => $description,
-                'text' => $text,
-                'char_count' => mb_strlen($text),
-                'truncated' => $truncated,
-            ];
-
-            if ($extractLinks && !empty($links)) {
-                $result['links'] = array_slice($links, 0, 50);
-                $result['link_count'] = count($links);
-            }
-
-            // Log API usage
-            \App\Models\ApiUsageLog::create([
-                'agent_id' => $context->agent->id,
-                'api_name' => 'web_fetch',
-                'endpoint' => $url,
-                'method' => 'GET',
-                'caller_agent' => $context->routedAgent ?? 'chat',
-                'requester_phone' => $context->from,
-                'response_status' => $response->status(),
-                'result_count' => mb_strlen($text),
-            ]);
-
-            return json_encode($result);
-        } catch (\Exception $e) {
-            Log::warning('[web_fetch] Error fetching URL', ['url' => $url, 'error' => $e->getMessage()]);
-            return json_encode(['error' => 'Failed to fetch URL: ' . $e->getMessage()]);
+        if (!$fetchResult['success']) {
+            return json_encode(['error' => $fetchResult['error']]);
         }
+
+        $text = $fetchResult['text'] ?? '';
+        $title = $fetchResult['title'] ?? '';
+
+        // Extract links if requested (need raw HTML — re-fetch is avoided by using text)
+        $result = [
+            'url' => $url,
+            'title' => $title,
+            'text' => mb_substr($text, 0, 8000),
+            'char_count' => mb_strlen($text),
+            'truncated' => mb_strlen($text) > 8000,
+        ];
+
+        // For link extraction, do a lightweight re-parse
+        if ($extractLinks) {
+            try {
+                $response = Http::timeout(15)
+                    ->withHeaders(['User-Agent' => 'ZeniClaw/1.0 (Web Fetch Bot)'])
+                    ->get($url);
+                if ($response->successful() && str_contains($response->header('Content-Type') ?? '', 'html')) {
+                    $links = $this->extractLinksFromHtml($response->body(), $url);
+                    $result['links'] = array_slice($links, 0, 50);
+                    $result['link_count'] = count($links);
+                }
+            } catch (\Exception $e) {
+                // Link extraction is best-effort
+            }
+        }
+
+        // Log API usage
+        \App\Models\ApiUsageLog::create([
+            'agent_id' => $context->agent->id,
+            'api_name' => 'web_fetch',
+            'endpoint' => $url,
+            'method' => 'GET',
+            'caller_agent' => $context->routedAgent ?? 'chat',
+            'requester_phone' => $context->from,
+            'response_status' => 200,
+            'result_count' => mb_strlen($text),
+        ]);
+
+        return json_encode($result);
     }
 
     /**

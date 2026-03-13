@@ -11,8 +11,11 @@ class SubAgent extends Model
 
     protected $fillable = [
         'project_id',
+        'parent_id',
         'type',
         'requester_phone',
+        'spawning_agent',
+        'depth',
         'status',
         'task_description',
         'branch_name',
@@ -37,6 +40,25 @@ class SubAgent extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_id');
+    }
+
+    public function children(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /**
+     * Scope: active (queued or running) subagents for a user.
+     */
+    public function scopeActiveForUser($query, string $phone)
+    {
+        return $query->where('requester_phone', $phone)
+            ->whereIn('status', ['queued', 'running']);
     }
 
     /**

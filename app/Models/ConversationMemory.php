@@ -39,4 +39,12 @@ class ConversationMemory extends Model
               ->orWhere('expires_at', '>', now());
         });
     }
+
+    /**
+     * Search memories by keyword (LIKE match on content).
+     */
+    public function scopeSearch($query, string $keyword)
+    {
+        return $query->where('content', 'like', '%' . $keyword . '%');
+    }
 }

@@ -194,6 +194,8 @@ PROMPT;
             mimetype: null,
             media: null,
             toolRegistry: $registry,
+            currentSubAgentId: $this->subAgent->id,
+            currentDepth: $this->subAgent->depth ?? 0,
         );
     }
 

@@ -13,6 +13,9 @@ class EventServiceProvider extends ServiceProvider
         'message.reaction' => [
             \App\Listeners\ReactionVoteListener::class,
         ],
+        \App\Events\AfterToolCall::class => [
+            \App\Listeners\ToolCallMetricsListener::class,
+        ],
     ];
 
     public function boot(): void

@@ -25,6 +25,9 @@ class AgentContext
         public readonly ?string $memoryContext = null,
         public ?array $routingMetadata = null,
         public ?ToolRegistry $toolRegistry = null,
+        public ?int $currentSubAgentId = null,
+        public int $currentDepth = 0,
+        public int $interAgentCallCount = 0,
     ) {}
 
     public function phone(): string
@@ -56,6 +59,9 @@ class AgentContext
             autonomy: $autonomy,
             memoryContext: $this->memoryContext,
             toolRegistry: $this->toolRegistry,
+            currentSubAgentId: $this->currentSubAgentId,
+            currentDepth: $this->currentDepth,
+            interAgentCallCount: $this->interAgentCallCount,
         );
     }
 
@@ -78,6 +84,9 @@ class AgentContext
             autonomy: $this->autonomy,
             memoryContext: $memoryContext,
             toolRegistry: $this->toolRegistry,
+            currentSubAgentId: $this->currentSubAgentId,
+            currentDepth: $this->currentDepth,
+            interAgentCallCount: $this->interAgentCallCount,
         );
     }
 
@@ -100,6 +109,9 @@ class AgentContext
             autonomy: $this->autonomy,
             memoryContext: $this->memoryContext,
             toolRegistry: $toolRegistry,
+            currentSubAgentId: $this->currentSubAgentId,
+            currentDepth: $this->currentDepth,
+            interAgentCallCount: $this->interAgentCallCount,
         );
     }
 }

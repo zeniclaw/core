@@ -390,6 +390,57 @@ PROMPT;
                     'required' => ['skill_key'],
                 ],
             ],
+            // ── Memory Tools ──────────────────────────────────────────
+            [
+                'name' => 'memory_store',
+                'description' => 'Sauvegarder un fait ou une information importante sur l\'utilisateur dans la memoire persistante. Utiliser quand l\'utilisateur partage une info personnelle, une preference, ou quand tu decouvres quelque chose d\'utile a retenir pour les prochaines conversations.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Le fait ou l\'information a memoriser (ex: "L\'utilisateur habite a Bruxelles", "Il prefere les reponses courtes")'],
+                        'fact_type' => ['type' => 'string', 'description' => 'Type de fait: preference, personal_info, work_context, relationship, habit, other', 'enum' => ['preference', 'personal_info', 'work_context', 'relationship', 'habit', 'other']],
+                        'tags' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tags optionnels pour categoriser (ex: ["localisation", "belgique"])'],
+                    ],
+                    'required' => ['content', 'fact_type'],
+                ],
+            ],
+            [
+                'name' => 'memory_search',
+                'description' => 'Chercher dans la memoire persistante de l\'utilisateur. Utiliser pour retrouver des informations precedemment sauvegardees. Utile quand l\'utilisateur fait reference a quelque chose qu\'il a deja dit.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Mot-cle ou phrase a chercher dans la memoire'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+            // ── Spawn SubAgent Tool ───────────────────────────────────
+            [
+                'name' => 'spawn_subagent',
+                'description' => 'Lancer une tache autonome en arriere-plan. Le sous-agent executera la tache de maniere independante avec ses propres outils (recherche web, creation de documents, etc.). Utiliser pour les taches longues: recherches approfondies, creation de fichiers complexes, collecte de donnees. L\'utilisateur sera notifie quand la tache sera terminee.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'task_description' => ['type' => 'string', 'description' => 'Description detaillee de la tache a effectuer (sois precis pour que le sous-agent sache exactement quoi faire)'],
+                        'timeout_minutes' => ['type' => 'integer', 'description' => 'Duree max en minutes (defaut: 5, max: 15)', 'default' => 5],
+                    ],
+                    'required' => ['task_description'],
+                ],
+            ],
+            // ── Send Agent Message Tool ───────────────────────────────
+            [
+                'name' => 'send_agent_message',
+                'description' => 'Envoyer un message a un autre agent specialise et recevoir sa reponse. Permet la collaboration inter-agents. Exemples: demander a TodoAgent de creer une tache, demander a ReminderAgent de programmer un rappel, demander a WebSearchAgent de chercher quelque chose.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'target_agent' => ['type' => 'string', 'description' => 'Nom de l\'agent cible (ex: "todo", "reminder", "web_search", "document", "finance", "dev")'],
+                        'message' => ['type' => 'string', 'description' => 'Le message/instruction a envoyer a l\'agent cible'],
+                    ],
+                    'required' => ['target_agent', 'message'],
+                ],
+            ],
         ];
     }
 
@@ -399,6 +450,10 @@ PROMPT;
             'teach_skill' => $this->baseTeachSkill($input, $context),
             'list_skills' => $this->baseListSkills($context),
             'forget_skill' => $this->baseForgetSkill($input, $context),
+            'memory_store' => $this->baseMemoryStore($input, $context),
+            'memory_search' => $this->baseMemorySearch($input, $context),
+            'spawn_subagent' => $this->baseSpawnSubagent($input, $context),
+            'send_agent_message' => $this->baseSendAgentMessage($input, $context),
             default => null,
         };
     }
@@ -465,6 +520,189 @@ PROMPT;
             'success' => true,
             'message' => "Competence '{$title}' oubliee.",
         ]);
+    }
+
+    // ── Memory Tools ──────────────────────────────────────────────
+
+    private function baseMemoryStore(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        $factType = $input['fact_type'] ?? 'other';
+        $tags = $input['tags'] ?? [];
+
+        if (!$content) {
+            return json_encode(['error' => 'Missing content parameter']);
+        }
+
+        $memory = \App\Models\ConversationMemory::create([
+            'user_id' => $context->from,
+            'fact_type' => $factType,
+            'content' => $content,
+            'tags' => $tags,
+            'status' => 'active',
+        ]);
+
+        return json_encode([
+            'success' => true,
+            'memory_id' => $memory->id,
+            'message' => "Memorise: {$content}",
+        ]);
+    }
+
+    private function baseMemorySearch(array $input, AgentContext $context): string
+    {
+        $query = $input['query'] ?? '';
+        if (!$query) {
+            return json_encode(['error' => 'Missing query parameter']);
+        }
+
+        $memories = \App\Models\ConversationMemory::forUser($context->from)
+            ->active()
+            ->notExpired()
+            ->search($query)
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get();
+
+        if ($memories->isEmpty()) {
+            return json_encode(['results' => [], 'message' => "Aucun souvenir trouve pour: {$query}"]);
+        }
+
+        $results = $memories->map(fn($m) => [
+            'id' => $m->id,
+            'fact_type' => $m->fact_type,
+            'content' => $m->content,
+            'tags' => $m->tags,
+            'created_at' => $m->created_at->format('d/m/Y H:i'),
+        ])->toArray();
+
+        return json_encode(['results' => $results, 'count' => count($results)]);
+    }
+
+    // ── Spawn SubAgent Tool ──────────────────────────────────────
+
+    private function baseSpawnSubagent(array $input, AgentContext $context): string
+    {
+        $taskDescription = $input['task_description'] ?? '';
+        $timeoutMinutes = min((int) ($input['timeout_minutes'] ?? 5), 15);
+
+        if (!$taskDescription) {
+            return json_encode(['error' => 'Missing task_description parameter']);
+        }
+
+        // Guard: max depth 2
+        $currentDepth = $context->currentDepth ?? 0;
+        if ($currentDepth >= 2) {
+            return json_encode(['error' => 'Profondeur maximale atteinte (max 2 niveaux). Impossible de creer un sous-agent supplementaire.']);
+        }
+
+        // Guard: max 5 active subagents per user
+        $activeCount = \App\Models\SubAgent::where('requester_phone', $context->from)
+            ->whereIn('status', ['queued', 'running'])
+            ->count();
+
+        if ($activeCount >= 5) {
+            return json_encode(['error' => "Trop de taches en cours ({$activeCount}/5). Attends qu'une tache se termine."]);
+        }
+
+        // Create the SubAgent record
+        $subAgent = \App\Models\SubAgent::create([
+            'type' => 'research',
+            'requester_phone' => $context->from,
+            'status' => 'queued',
+            'task_description' => $taskDescription,
+            'timeout_minutes' => $timeoutMinutes,
+            'parent_id' => $context->currentSubAgentId,
+            'spawning_agent' => $this->name(),
+            'depth' => $currentDepth + 1,
+        ]);
+
+        // Dispatch the background job
+        \App\Jobs\RunTaskJob::dispatch($subAgent)->onQueue('default');
+
+        $this->log($context, "Spawned subagent #{$subAgent->id}: " . mb_substr($taskDescription, 0, 100), [
+            'subagent_id' => $subAgent->id,
+            'depth' => $currentDepth + 1,
+        ]);
+
+        return json_encode([
+            'success' => true,
+            'subagent_id' => $subAgent->id,
+            'message' => "Tache lancee en arriere-plan (#{$subAgent->id}). L'utilisateur sera notifie quand elle sera terminee.",
+            'timeout_minutes' => $timeoutMinutes,
+        ]);
+    }
+
+    // ── Send Agent Message Tool ──────────────────────────────────
+
+    private function baseSendAgentMessage(array $input, AgentContext $context): string
+    {
+        $targetName = $input['target_agent'] ?? '';
+        $message = $input['message'] ?? '';
+
+        if (!$targetName || !$message) {
+            return json_encode(['error' => 'Missing target_agent or message parameter']);
+        }
+
+        // Guard: max 3 inter-agent calls per agentic loop
+        $callCount = $context->interAgentCallCount ?? 0;
+        if ($callCount >= 3) {
+            return json_encode(['error' => 'Limite de 3 appels inter-agents atteinte pour cette iteration.']);
+        }
+
+        // Resolve the target agent
+        $targetAgent = \App\Services\AgentOrchestrator::resolveAgent($targetName);
+        if (!$targetAgent) {
+            return json_encode(['error' => "Agent '{$targetName}' non trouve. Agents disponibles: todo, reminder, web_search, document, finance, dev, chat, etc."]);
+        }
+
+        // Prevent self-calls
+        if ($targetAgent->name() === $this->name()) {
+            return json_encode(['error' => 'Un agent ne peut pas s\'envoyer un message a lui-meme.']);
+        }
+
+        // Increment call count
+        $context->interAgentCallCount = ($context->interAgentCallCount ?? 0) + 1;
+
+        // Build a context for the target agent with the inter-agent message
+        $interContext = new AgentContext(
+            agent: $context->agent,
+            session: $context->session,
+            from: $context->from,
+            senderName: $context->senderName,
+            body: $message,
+            hasMedia: false,
+            mediaUrl: null,
+            mimetype: null,
+            media: null,
+            routedAgent: $targetAgent->name(),
+            routedModel: $context->routedModel,
+            complexity: $context->complexity,
+            reasoning: "inter-agent call from {$this->name()}",
+            memoryContext: $context->memoryContext,
+            toolRegistry: $context->toolRegistry,
+        );
+
+        try {
+            $result = $targetAgent->handle($interContext);
+
+            $this->log($context, "Inter-agent message to {$targetName}: " . mb_substr($message, 0, 80), [
+                'target' => $targetName,
+                'result_action' => $result->action,
+            ]);
+
+            return json_encode([
+                'success' => true,
+                'agent' => $targetName,
+                'response' => $result->reply ?? 'Action effectuee (pas de reponse textuelle).',
+                'action' => $result->action,
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("Inter-agent call failed: {$this->name()} → {$targetName}", [
+                'error' => $e->getMessage(),
+            ]);
+            return json_encode(['error' => "Erreur lors de l'appel a {$targetName}: " . $e->getMessage()]);
+        }
     }
 
     /**
