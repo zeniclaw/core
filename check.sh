@@ -705,8 +705,7 @@ if [ "$APP_OK" = true ]; then
         # Run the actual chat test with extended debug (tokens, timing breakdown)
         CHAT_RESULT=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
             \$model = '$MODEL';
-            \$client = new \App\Services\AnthropicClient();
-            \$isOnPrem = \$client->isOnPremModel(\$model);
+            \$isOnPrem = !str_starts_with(\$model, 'claude-');
 
             \$start = microtime(true);
             try {
