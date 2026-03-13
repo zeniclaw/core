@@ -28,7 +28,17 @@ class RunTaskJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 300; // 5 minutes max
-    public int $tries = 1;
+    public int $tries = 0; // no retry limit (controlled by retryUntil)
+    public int $maxExceptions = 1; // fail after 1 unhandled exception
+
+    /**
+     * Allow the job to run until timeout_minutes + 1 min buffer.
+     */
+    public function retryUntil(): \DateTime
+    {
+        $minutes = $this->subAgent->timeout_minutes ?: 5;
+        return now()->addMinutes($minutes + 1);
+    }
 
     public function __construct(
         public SubAgent $subAgent
