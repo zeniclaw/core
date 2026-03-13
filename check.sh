@@ -628,56 +628,54 @@ if [ "$APP_OK" = true ]; then
             detail ""
             detail "--- Modeles Ollama ---"
 
-            # List installed models with sizes
-            RAW_TAGS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL_DIAG}/api/tags" 2>/dev/null || echo "fail")
-            if [ "$RAW_TAGS" != "fail" ]; then
-                # Parse each model: name, size, quantization, parameter_size, family
-                MODEL_DETAILS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
-                    \$tags = json_decode('$(echo "$RAW_TAGS" | sed "s/'/\\\\'/g")', true);
-                    foreach ((\$tags['models'] ?? []) as \$m) {
-                        \$name = \$m['name'] ?? '?';
-                        \$size = round((\$m['size'] ?? 0) / 1024 / 1024 / 1024, 1);
-                        \$family = \$m['details']['family'] ?? '?';
-                        \$params = \$m['details']['parameter_size'] ?? '?';
-                        \$quant = \$m['details']['quantization_level'] ?? '?';
-                        echo \"{$name}|{$size}GB|{$params}|{$family}|{$quant}\n\";
-                    }
-                " 2>/dev/null || echo "")
+            # List installed models with sizes (PHP fetches API directly to avoid bash escaping issues)
+            MODEL_DETAILS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+                \$url = \App\Models\AppSetting::get('onprem_api_url');
+                \$resp = @file_get_contents(\$url . '/api/tags');
+                if (!\$resp) { echo ''; return; }
+                \$tags = json_decode(\$resp, true);
+                foreach ((\$tags['models'] ?? []) as \$m) {
+                    \$n = \$m['name'] ?? '?';
+                    \$s = round((\$m['size'] ?? 0) / 1024 / 1024 / 1024, 1);
+                    \$f = \$m['details']['family'] ?? '?';
+                    \$p = \$m['details']['parameter_size'] ?? '?';
+                    \$q = \$m['details']['quantization_level'] ?? '?';
+                    echo \$n . '|' . \$s . 'GB|' . \$p . '|' . \$f . '|' . \$q . \"\n\";
+                }
+            " 2>/dev/null || echo "")
 
-                if [ -n "$MODEL_DETAILS" ]; then
-                    echo "$MODEL_DETAILS" | while IFS='|' read -r MNAME MSIZE MPARAMS MFAMILY MQUANT; do
-                        [ -z "$MNAME" ] && continue
-                        pass "  $MNAME — ${MSIZE} sur disque, ${MPARAMS} params, famille: $MFAMILY, quant: $MQUANT"
-                    done
-                fi
+            if [ -n "$MODEL_DETAILS" ]; then
+                echo "$MODEL_DETAILS" | while IFS='|' read -r MNAME MSIZE MPARAMS MFAMILY MQUANT; do
+                    [ -z "$MNAME" ] && continue
+                    pass "  $MNAME — ${MSIZE} sur disque, ${MPARAMS} params, famille: $MFAMILY, quant: $MQUANT"
+                done
             fi
 
             # Currently loaded models (in VRAM/RAM)
-            RAW_PS=$($CONTAINER_CMD exec zeniclaw_app curl -sf -m 5 "${OLLAMA_URL_DIAG}/api/ps" 2>/dev/null || echo "fail")
-            if [ "$RAW_PS" != "fail" ]; then
-                LOADED_MODELS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
-                    \$ps = json_decode('$(echo "$RAW_PS" | sed "s/'/\\\\'/g")', true);
-                    \$models = \$ps['models'] ?? [];
-                    if (empty(\$models)) { echo 'aucun'; return; }
-                    foreach (\$models as \$m) {
-                        \$name = \$m['name'] ?? '?';
-                        \$size = round((\$m['size'] ?? 0) / 1024 / 1024, 0);
-                        \$vram = round((\$m['size_vram'] ?? 0) / 1024 / 1024, 0);
-                        \$proc = \$m['details']['quantization_level'] ?? '?';
-                        \$expires = \$m['expires_at'] ?? '';
-                        echo \"{$name}|{$size}MB RAM|{$vram}MB VRAM|expire: {$expires}\n\";
-                    }
-                " 2>/dev/null || echo "aucun")
+            LOADED_MODELS=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
+                \$url = \App\Models\AppSetting::get('onprem_api_url');
+                \$resp = @file_get_contents(\$url . '/api/ps');
+                if (!\$resp) { echo 'aucun'; return; }
+                \$ps = json_decode(\$resp, true);
+                \$models = \$ps['models'] ?? [];
+                if (empty(\$models)) { echo 'aucun'; return; }
+                foreach (\$models as \$m) {
+                    \$n = \$m['name'] ?? '?';
+                    \$s = round((\$m['size'] ?? 0) / 1024 / 1024, 0);
+                    \$v = round((\$m['size_vram'] ?? 0) / 1024 / 1024, 0);
+                    \$e = \$m['expires_at'] ?? '';
+                    echo \$n . '|' . \$s . 'MB RAM|' . \$v . 'MB VRAM|expire: ' . \$e . \"\n\";
+                }
+            " 2>/dev/null || echo "aucun")
 
-                if [ "$LOADED_MODELS" = "aucun" ]; then
-                    detail "Modeles charges en memoire: aucun (cold start au prochain appel)"
-                else
-                    detail "Modeles charges en memoire:"
-                    echo "$LOADED_MODELS" | while IFS='|' read -r LNAME LRAM LVRAM LEXP; do
-                        [ -z "$LNAME" ] && continue
-                        detail "  $LNAME — $LRAM, $LVRAM, $LEXP"
-                    done
-                fi
+            if [ "$LOADED_MODELS" = "aucun" ]; then
+                detail "Modeles charges en memoire: aucun (cold start au prochain appel)"
+            else
+                detail "Modeles charges en memoire:"
+                echo "$LOADED_MODELS" | while IFS='|' read -r LNAME LRAM LVRAM LEXP; do
+                    [ -z "$LNAME" ] && continue
+                    detail "  $LNAME — $LRAM, $LVRAM, $LEXP"
+                done
             fi
         fi
     fi
@@ -713,9 +711,8 @@ if [ "$APP_OK" = true ]; then
             \$start = microtime(true);
             try {
                 if (\$isOnPrem) {
-                    // For on-prem: use raw API to get full response with usage stats
                     \$url = \App\Models\AppSetting::get('onprem_api_url');
-                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\"{$url}/v1/chat/completions\", [
+                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\$url . '/v1/chat/completions', [
                         'model' => \$model,
                         'messages' => [['role' => 'user', 'content' => 'Reponds juste OK en un mot.']],
                         'max_tokens' => 50,
@@ -726,28 +723,28 @@ if [ "$APP_OK" = true ]; then
                     if (\$resp->successful()) {
                         \$data = \$resp->json();
                         \$content = \$data['choices'][0]['message']['content'] ?? '';
-                        \$promptTok = \$data['usage']['prompt_tokens'] ?? 0;
-                        \$completionTok = \$data['usage']['completion_tokens'] ?? 0;
-                        \$totalTok = \$data['usage']['total_tokens'] ?? 0;
-                        \$tokPerSec = \$elapsed > 0 ? round(\$completionTok / (\$elapsed / 1000), 1) : 0;
-                        \$finishReason = \$data['choices'][0]['finish_reason'] ?? '?';
+                        \$pt = \$data['usage']['prompt_tokens'] ?? 0;
+                        \$ct = \$data['usage']['completion_tokens'] ?? 0;
+                        \$tt = \$data['usage']['total_tokens'] ?? 0;
+                        \$tps = \$elapsed > 0 ? round(\$ct / (\$elapsed / 1000), 1) : 0;
+                        \$fr = \$data['choices'][0]['finish_reason'] ?? '?';
 
-                        echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$content), 0, 100) . \"|prompt={\$promptTok},completion={\$completionTok},total={\$totalTok}|{\$tokPerSec} tok/s|finish={\$finishReason}\";
+                        echo 'SUCCESS|' . \$elapsed . 'ms|' . substr(trim(\$content), 0, 100) . '|prompt=' . \$pt . ',completion=' . \$ct . ',total=' . \$tt . '|' . \$tps . ' tok/s|finish=' . \$fr;
                     } else {
-                        echo \"ERROR|{\$elapsed}ms|HTTP \" . \$resp->status() . ': ' . substr(\$resp->body(), 0, 200) . '|||';
+                        echo 'ERROR|' . \$elapsed . 'ms|HTTP ' . \$resp->status() . ': ' . substr(\$resp->body(), 0, 200) . '|||';
                     }
                 } else {
                     \$response = \$client->chat('Reponds juste OK en un mot.', \$model, 'Tu es un assistant de test. Reponds en un seul mot.');
                     \$elapsed = round((microtime(true) - \$start) * 1000);
                     if (\$response) {
-                        echo \"SUCCESS|{\$elapsed}ms|\" . substr(trim(\$response), 0, 100) . '|cloud||';
+                        echo 'SUCCESS|' . \$elapsed . 'ms|' . substr(trim(\$response), 0, 100) . '|cloud||';
                     } else {
-                        echo \"NULL|{\$elapsed}ms|reponse vide (null)|cloud||';
+                        echo 'NULL|' . \$elapsed . 'ms|reponse vide (null)|cloud||';
                     }
                 }
             } catch (\Throwable \$e) {
                 \$elapsed = round((microtime(true) - \$start) * 1000);
-                echo \"ERROR|{\$elapsed}ms|\" . substr(\$e->getMessage(), 0, 200) . '|||';
+                echo 'ERROR|' . \$elapsed . 'ms|' . substr(\$e->getMessage(), 0, 200) . '|||';
             }
         " 2>/dev/null || echo "ERROR|0ms|impossible d'executer le tinker|||")
 
@@ -810,7 +807,7 @@ if [ "$APP_OK" = true ]; then
                 WARM_RESULT=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="
                     \$url = \App\Models\AppSetting::get('onprem_api_url');
                     \$start = microtime(true);
-                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\"\$url/v1/chat/completions\", [
+                    \$resp = \Illuminate\Support\Facades\Http::timeout(120)->post(\$url . '/v1/chat/completions', [
                         'model' => '$MODEL',
                         'messages' => [['role' => 'user', 'content' => 'Dis OK.']],
                         'max_tokens' => 10,
@@ -821,7 +818,7 @@ if [ "$APP_OK" = true ]; then
                         \$d = \$resp->json();
                         \$ct = \$d['usage']['completion_tokens'] ?? 0;
                         \$tps = \$elapsed > 0 ? round(\$ct / (\$elapsed / 1000), 1) : 0;
-                        echo \"{\$elapsed}ms|{\$tps} tok/s|\" . substr(\$d['choices'][0]['message']['content'] ?? '', 0, 50);
+                        echo \$elapsed . 'ms|' . \$tps . ' tok/s|' . substr(\$d['choices'][0]['message']['content'] ?? '', 0, 50);
                     } else {
                         echo 'ECHEC|0|' . \$resp->status();
                     }
