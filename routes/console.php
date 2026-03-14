@@ -22,6 +22,9 @@ Schedule::command('zeniclaw:heartbeat')->everyFifteenMinutes();
 Schedule::command('zeniclaw:auto-improve-agents')->everyThirtyMinutes()->when(function () {
     return AppSetting::get('auto_improve_agents_enabled') === 'true';
 });
+Schedule::command('zeniclaw:continuous-improve')->hourly()->when(function () {
+    return \App\Services\ContinuousImprovementService::shouldRun();
+});
 Schedule::command('memories:cleanup')->dailyAt('02:00');
 Schedule::command('content:daily-digest')->dailyAt('07:30');
 Schedule::job(new PurgeStaleContext)->dailyAt('03:00');

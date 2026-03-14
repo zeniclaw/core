@@ -194,6 +194,8 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/debug/toggle-auto-suggest', [DebugController::class, 'toggleAutoSuggest'])->name('debug.toggle-auto-suggest');
         Route::post('/debug/toggle-auto-improve', [DebugController::class, 'toggleAutoImprove'])->name('debug.toggle-auto-improve');
         Route::post('/debug/trigger-auto-improve', [DebugController::class, 'triggerAutoImprove'])->name('debug.trigger-auto-improve');
+        Route::post('/debug/toggle-continuous-improve', [DebugController::class, 'toggleContinuousImprove'])->name('debug.toggle-continuous-improve');
+        Route::post('/debug/trigger-continuous-improve', [DebugController::class, 'triggerContinuousImprove'])->name('debug.trigger-continuous-improve');
         Route::get('/debug/system-info', [DebugController::class, 'systemInfo'])->name('debug.system-info');
 
         // Monitoring & Observability (D15.2, D15.3, D14.3)

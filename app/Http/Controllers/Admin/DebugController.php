@@ -18,6 +18,7 @@ class DebugController extends Controller
     {
         $autoSuggestEnabled = AppSetting::get('auto_suggest_enabled') === 'true';
         $autoImproveEnabled = AppSetting::get('auto_improve_agents_enabled') === 'true';
+        $continuousImproveMode = \App\Services\ContinuousImprovementService::getMode();
 
         // System info
         $system = $this->gatherSystemInfo();
@@ -28,7 +29,7 @@ class DebugController extends Controller
         // Recent improvements
         $recentImprovements = SelfImprovement::orderByDesc('created_at')->limit(10)->get();
 
-        return view('admin.debug', compact('autoSuggestEnabled', 'autoImproveEnabled', 'system', 'jobs', 'recentImprovements'));
+        return view('admin.debug', compact('autoSuggestEnabled', 'autoImproveEnabled', 'continuousImproveMode', 'system', 'jobs', 'recentImprovements'));
     }
 
     public function toggleAutoSuggest(Request $request): JsonResponse
@@ -63,6 +64,34 @@ class DebugController extends Controller
         return response()->json([
             'success' => $exitCode === 0,
             'message' => $output ?: ($exitCode === 0 ? 'Auto-improve triggered' : 'Failed to trigger'),
+        ]);
+    }
+
+    public function toggleContinuousImprove(Request $request): JsonResponse
+    {
+        $mode = $request->input('mode', 'off');
+        if (!in_array($mode, ['off', 'once', 'continuous'])) {
+            $mode = 'off';
+        }
+
+        \App\Services\ContinuousImprovementService::setMode($mode);
+
+        $labels = ['off' => 'disabled', 'once' => 'one-shot', 'continuous' => 'continuous'];
+
+        return response()->json([
+            'mode' => $mode,
+            'message' => "Continuous improvement: {$labels[$mode]}",
+        ]);
+    }
+
+    public function triggerContinuousImprove(Request $request): JsonResponse
+    {
+        $exitCode = \Illuminate\Support\Facades\Artisan::call('zeniclaw:continuous-improve', ['--once' => true]);
+        $output = trim(\Illuminate\Support\Facades\Artisan::output());
+
+        return response()->json([
+            'success' => $exitCode === 0,
+            'message' => $output ?: ($exitCode === 0 ? 'Continuous improvement completed' : 'Failed'),
         ]);
     }
 
@@ -177,6 +206,7 @@ class DebugController extends Controller
             ['name' => 'zeniclaw:watchdog', 'schedule' => 'Every minute', 'enabled' => true],
             ['name' => 'zeniclaw:auto-suggest', 'schedule' => 'Every 15 minutes', 'enabled' => $autoSuggestEnabled],
             ['name' => 'zeniclaw:auto-improve-agents', 'schedule' => 'Continuous (chained)', 'enabled' => AppSetting::get('auto_improve_agents_enabled') === 'true'],
+            ['name' => 'zeniclaw:continuous-improve', 'schedule' => 'Every hour', 'enabled' => \App\Services\ContinuousImprovementService::getMode() !== 'off'],
             ['name' => 'zeniclaw:compact-logs', 'schedule' => 'Daily', 'enabled' => true],
             ['name' => 'finance:check-alerts', 'schedule' => 'Daily at 09:00', 'enabled' => true],
             ['name' => 'habits:remind', 'schedule' => 'Daily at 08:00', 'enabled' => true],

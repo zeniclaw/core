@@ -158,6 +158,11 @@
                         @elseif($job['name'] === 'zeniclaw:auto-improve-agents')
                             <span x-show="autoImproveEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
                             <span x-show="!autoImproveEnabled" class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Disabled</span>
+                        @elseif($job['name'] === 'zeniclaw:continuous-improve')
+                            <span x-show="continuousImproveMode !== 'off'" class="px-2 py-0.5 rounded-full text-xs font-medium"
+                                  :class="continuousImproveMode === 'continuous' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+                                  x-text="continuousImproveMode === 'continuous' ? 'Continuous' : 'One-shot'"></span>
+                            <span x-show="continuousImproveMode === 'off'" class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Disabled</span>
                         @elseif($job['enabled'])
                             <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
                         @else
@@ -183,6 +188,19 @@
                                     <span x-text="triggeringImprove ? 'Launching...' : 'Run Now'"></span>
                                 </button>
                             </div>
+                        @elseif($job['name'] === 'zeniclaw:continuous-improve')
+                            <div class="flex items-center gap-2">
+                                <select x-model="continuousImproveMode" @change="setContinuousMode()"
+                                        class="rounded text-xs border-gray-300 py-1 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="off">Off</option>
+                                    <option value="once">Once</option>
+                                    <option value="continuous">Continuous</option>
+                                </select>
+                                <button @click="triggerContinuousImprove()" :disabled="triggeringContinuous"
+                                        class="px-3 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors disabled:opacity-50">
+                                    <span x-text="triggeringContinuous ? 'Running...' : 'Run Now'"></span>
+                                </button>
+                            </div>
                         @else
                             <span class="text-xs text-gray-400">-</span>
                         @endif
@@ -191,6 +209,37 @@
                 @endforeach
             </tbody>
         </table>
+    </div>
+
+    {{-- Continuous Improvement --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Continuous Log Improvement
+        </h3>
+        <p class="text-sm text-gray-500 mb-4">Analyse les logs utilisateur et ameliore ZeniClaw automatiquement. Chaque amelioration cree un commit avec une sous-version incrementee.</p>
+
+        <div class="flex items-center gap-3 mb-4">
+            <span class="text-sm text-gray-600">Mode:</span>
+            <select x-model="continuousImproveMode" @change="setContinuousMode()"
+                    class="rounded-lg border-gray-300 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <option value="off">Disabled</option>
+                <option value="once">One-shot (run once)</option>
+                <option value="continuous">Continuous (every hour)</option>
+            </select>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                  :class="continuousImproveMode === 'off' ? 'bg-gray-100 text-gray-500' : continuousImproveMode === 'once' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'"
+                  x-text="continuousImproveMode === 'off' ? 'Disabled' : continuousImproveMode === 'once' ? 'One-shot' : 'Continuous'"></span>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button @click="triggerContinuousImprove()" :disabled="triggeringContinuous"
+                    class="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2">
+                <svg x-show="triggeringContinuous" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                <span x-text="triggeringContinuous ? 'Analyzing logs...' : 'Run Now'"></span>
+            </button>
+            <span x-show="continuousResult" class="text-sm" :class="continuousSuccess ? 'text-green-600' : 'text-red-600'" x-text="continuousResult"></span>
+        </div>
     </div>
 
     {{-- Recent Improvements --}}
@@ -267,7 +316,11 @@ function debugPage() {
     return {
         autoSuggestEnabled: @json($autoSuggestEnabled),
         autoImproveEnabled: @json($autoImproveEnabled),
+        continuousImproveMode: @json($continuousImproveMode),
         triggeringImprove: false,
+        triggeringContinuous: false,
+        continuousResult: '',
+        continuousSuccess: false,
         refreshing: false,
         sys: @json($system),
 
@@ -309,6 +362,42 @@ function debugPage() {
                 alert(d.message);
             } catch(e) { alert('Error: ' + e.message); }
             this.triggeringImprove = false;
+        },
+
+        async setContinuousMode() {
+            try {
+                const r = await fetch('{{ route("admin.debug.toggle-continuous-improve") }}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ mode: this.continuousImproveMode }),
+                });
+                const d = await r.json();
+                this.continuousResult = d.message;
+                this.continuousSuccess = true;
+                setTimeout(() => this.continuousResult = '', 3000);
+            } catch(e) { this.continuousResult = 'Error: ' + e.message; this.continuousSuccess = false; }
+        },
+
+        async triggerContinuousImprove() {
+            this.triggeringContinuous = true;
+            this.continuousResult = '';
+            try {
+                const r = await fetch('{{ route("admin.debug.trigger-continuous-improve") }}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                    },
+                });
+                const d = await r.json();
+                this.continuousResult = d.message;
+                this.continuousSuccess = d.success;
+            } catch(e) { this.continuousResult = 'Error: ' + e.message; this.continuousSuccess = false; }
+            this.triggeringContinuous = false;
         },
 
         async refreshSystemInfo() {
