@@ -62,8 +62,9 @@ class ContinuousImprovementService
 
     /**
      * Execute a single improvement: generate code, commit, bump version.
+     * If a SubAgent is provided, stream logs to it for real-time visibility.
      */
-    public function executeImprovement(array $improvement, string $apiKey): array
+    public function executeImprovement(array $improvement, string $apiKey, ?\App\Models\SubAgent $subAgent = null): array
     {
         $workdir = '/opt/zeniclaw-repo';
 
@@ -73,8 +74,14 @@ class ContinuousImprovementService
 
         $prompt = $this->buildExecutionPrompt($improvement, $currentVersion, $newVersion);
 
-        // Run Claude Code
-        $result = $this->runClaudeCode($prompt, $apiKey, $workdir, $newVersion);
+        $subAgent?->appendLog("[START] {$improvement['title']}");
+        $subAgent?->appendLog("[VERSION] {$currentVersion} → {$newVersion}");
+        $subAgent?->updateProgress(10, 'Lancement Claude Code...');
+
+        // Run Claude Code with streaming
+        $result = $this->runClaudeCode($prompt, $apiKey, $workdir, $newVersion, $subAgent);
+
+        $subAgent?->updateProgress($result['success'] ? 90 : 100, $result['success'] ? 'Code genere' : 'Echec');
 
         return array_merge($result, [
             'previous_version' => $currentVersion,
@@ -340,7 +347,7 @@ PROMPT;
         return implode('.', $parts);
     }
 
-    private function runClaudeCode(string $prompt, string $apiKey, string $workdir, string $newVersion): array
+    private function runClaudeCode(string $prompt, string $apiKey, string $workdir, string $newVersion, ?\App\Models\SubAgent $subAgent = null): array
     {
         $envKey = str_starts_with($apiKey, 'sk-ant-oat')
             ? 'CLAUDE_CODE_OAUTH_TOKEN'
@@ -351,33 +358,110 @@ PROMPT;
             escapeshellarg($prompt)
         );
 
+        $apiCalls = 0;
+
         $process = \Illuminate\Support\Facades\Process::timeout(300)
             ->path($workdir)
             ->env([
                 $envKey => $apiKey,
                 'HOME' => '/tmp',
             ])
-            ->run($cmd);
+            ->start($cmd);
 
-        $output = $process->output();
-        $success = $process->successful();
-
-        // Parse stream events for summary
-        $summary = [];
-        foreach (explode("\n", $output) as $line) {
-            $line = trim($line);
-            if (!$line) continue;
-            $event = json_decode($line, true);
-            if ($event && ($event['type'] ?? '') === 'result') {
-                $summary[] = $event['result'] ?? '';
-            }
+        $pid = $process->id();
+        if ($pid && $subAgent) {
+            $subAgent->update(['pid' => $pid]);
         }
 
+        // Stream output in real-time
+        while ($process->running()) {
+            if ($subAgent) {
+                $subAgent->refresh();
+                if ($subAgent->status === 'killed') {
+                    $subAgent->appendLog("[KILL] Arret demande par l'admin");
+                    if ($pid) {
+                        \Illuminate\Support\Facades\Process::run("kill -TERM {$pid} 2>/dev/null");
+                    }
+                    return ['success' => false, 'output_summary' => 'Killed by admin', 'exit_code' => -1];
+                }
+            }
+
+            $newOutput = $process->latestOutput();
+            if ($newOutput) {
+                $this->processStreamLines($newOutput, $subAgent, $apiCalls);
+            }
+            usleep(500_000);
+        }
+
+        // Process remaining output
+        $result = $process->wait();
+        $remaining = $result->output();
+        if ($remaining) {
+            $this->processStreamLines($remaining, $subAgent, $apiCalls);
+        }
+
+        $subAgent?->update(['api_calls_count' => $apiCalls, 'pid' => null]);
+
         return [
-            'success' => $success,
-            'output_summary' => implode("\n", $summary) ?: mb_substr($output, -500),
-            'exit_code' => $process->exitCode(),
+            'success' => $result->successful(),
+            'output_summary' => "Claude Code: {$apiCalls} API calls",
+            'exit_code' => $result->exitCode(),
         ];
+    }
+
+    private function processStreamLines(string $output, ?\App\Models\SubAgent $subAgent, int &$apiCalls): void
+    {
+        foreach (explode("\n", trim($output)) as $line) {
+            $line = trim($line);
+            if (!$line) continue;
+
+            $event = json_decode($line, true);
+            if (!$event) {
+                $subAgent?->appendLog($line);
+                continue;
+            }
+
+            $type = $event['type'] ?? '';
+
+            switch ($type) {
+                case 'system':
+                    if (($event['subtype'] ?? '') === 'init') {
+                        $subAgent?->appendLog("[AI] Modele: " . ($event['model'] ?? 'unknown'));
+                    }
+                    break;
+
+                case 'assistant':
+                    $apiCalls++;
+                    foreach ($event['message']['content'] ?? [] as $block) {
+                        if (($block['type'] ?? '') === 'text' && !empty($block['text'])) {
+                            $text = mb_substr($block['text'], 0, 300);
+                            if (strlen($block['text']) > 300) $text .= '...';
+                            $subAgent?->appendLog("[CLAUDE] " . $text);
+                        } elseif (($block['type'] ?? '') === 'tool_use') {
+                            $tool = $block['name'] ?? '?';
+                            $input = $block['input'] ?? [];
+                            $desc = match ($tool) {
+                                'Read' => "Lecture: " . ($input['file_path'] ?? '?'),
+                                'Edit' => "Edition: " . ($input['file_path'] ?? '?'),
+                                'Write' => "Ecriture: " . ($input['file_path'] ?? '?'),
+                                'Bash' => "Commande: " . mb_substr($input['command'] ?? '?', 0, 100),
+                                'Glob' => "Recherche fichiers: " . ($input['pattern'] ?? '?'),
+                                'Grep' => "Recherche code: " . ($input['pattern'] ?? '?'),
+                                default => "Outil: {$tool}",
+                            };
+                            $subAgent?->appendLog("[TOOL] {$desc}");
+                        }
+                    }
+                    break;
+
+                case 'result':
+                    $resultText = $event['result'] ?? '';
+                    if ($resultText) {
+                        $subAgent?->appendLog("[RESULT] " . mb_substr($resultText, 0, 500));
+                    }
+                    break;
+            }
+        }
     }
 
     /**

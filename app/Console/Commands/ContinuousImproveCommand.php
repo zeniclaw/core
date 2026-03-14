@@ -2,8 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Agent;
 use App\Models\AppSetting;
+use App\Models\Project;
 use App\Models\SelfImprovement;
+use App\Models\SubAgent;
 use App\Services\ContinuousImprovementService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -51,15 +54,30 @@ class ContinuousImproveCommand extends Command
             return 1;
         }
 
+        $project = $this->getOrCreateProject();
+        $defaultTimeout = (int) (AppSetting::get('subagent_default_timeout') ?: 10);
+
         $applied = 0;
         foreach ($improvements as $i => $improvement) {
             $num = $i + 1;
             $total = count($improvements);
             $this->info("[{$num}/{$total}] {$improvement['title']} ({$improvement['priority']})");
 
-            // Create SelfImprovement record for tracking
+            // Create SubAgent for visibility on /subagents page
+            $subAgent = SubAgent::create([
+                'project_id' => $project->id,
+                'type' => 'continuous_improve',
+                'requester_phone' => 'system',
+                'spawning_agent' => 'continuous_improve',
+                'status' => 'running',
+                'task_description' => "[Auto] {$improvement['title']}\n\n{$improvement['plan']}",
+                'timeout_minutes' => $defaultTimeout,
+                'started_at' => now(),
+            ]);
+
+            // Create SelfImprovement record linked to SubAgent
             $record = SelfImprovement::create([
-                'agent_id' => \App\Models\Agent::first()?->id ?? 1,
+                'agent_id' => Agent::first()?->id ?? 1,
                 'trigger_message' => 'Continuous improvement — log analysis',
                 'agent_response' => $improvement['problem'],
                 'routed_agent' => 'continuous_improve',
@@ -73,17 +91,19 @@ class ContinuousImproveCommand extends Command
                 'improvement_title' => $improvement['title'],
                 'development_plan' => $improvement['plan'],
                 'status' => 'in_progress',
+                'sub_agent_id' => $subAgent->id,
             ]);
 
-            // Execute the improvement
-            $result = $service->executeImprovement($improvement, $apiKey);
+            // Execute the improvement with SubAgent logging
+            $result = $service->executeImprovement($improvement, $apiKey, $subAgent);
 
             if (!$result['success']) {
                 $this->warn("  Failed: " . mb_substr($result['output_summary'] ?? 'unknown error', 0, 200));
+                $subAgent->update(['status' => 'failed', 'error_message' => $result['output_summary'], 'completed_at' => now(), 'pid' => null]);
                 $record->update(['status' => 'failed']);
                 Log::warning('[ContinuousImprove] Improvement failed', [
                     'title' => $improvement['title'],
-                    'exit_code' => $result['exit_code'],
+                    'subagent_id' => $subAgent->id,
                 ]);
                 continue;
             }
@@ -94,6 +114,8 @@ class ContinuousImproveCommand extends Command
 
             if (empty($changes)) {
                 $this->info("  No code changes produced. Skipping commit.");
+                $subAgent->appendLog("[DONE] Aucune modification necessaire");
+                $subAgent->update(['status' => 'completed', 'completed_at' => now(), 'pid' => null]);
                 $record->update(['status' => 'completed', 'admin_notes' => 'No changes needed']);
                 continue;
             }
@@ -106,13 +128,17 @@ class ContinuousImproveCommand extends Command
                 $commitMsg = "feat(auto): {$improvement['title']} (v{$newVersion})";
             }
 
+            $subAgent->appendLog("[GIT] Commit: {$commitMsg}");
             Process::path($this->workdir)->run('git add -A');
             $commitResult = Process::path($this->workdir)->run(
                 sprintf('git commit -m %s', escapeshellarg($commitMsg))
             );
 
             if (!$commitResult->successful()) {
-                $this->warn("  Git commit failed: " . $commitResult->errorOutput());
+                $errMsg = $commitResult->errorOutput();
+                $this->warn("  Git commit failed: " . $errMsg);
+                $subAgent->appendLog("[ERROR] Git commit failed: " . $errMsg);
+                $subAgent->update(['status' => 'failed', 'error_message' => 'Git commit failed', 'completed_at' => now(), 'pid' => null]);
                 $record->update(['status' => 'failed']);
                 continue;
             }
@@ -123,13 +149,24 @@ class ContinuousImproveCommand extends Command
             );
 
             // Push
+            $subAgent->appendLog("[GIT] Push v{$newVersion}...");
             $pushResult = Process::path($this->workdir)->run('git push origin main --tags 2>&1');
             if (!$pushResult->successful()) {
+                $subAgent->appendLog("[WARN] Push failed: " . $pushResult->errorOutput());
                 $this->warn("  Git push failed: " . $pushResult->errorOutput());
-                // Commit succeeded locally, still mark as completed
             } else {
+                $subAgent->appendLog("[GIT] Push OK — v{$newVersion}");
                 $this->info("  Committed and pushed v{$newVersion}");
             }
+
+            $subAgent->update([
+                'status' => 'completed',
+                'completed_at' => now(),
+                'commit_hash' => trim(Process::path($this->workdir)->run('git rev-parse HEAD')->output()),
+                'result' => "v{$newVersion}: {$improvement['title']}",
+                'pid' => null,
+            ]);
+            $subAgent->updateProgress(100, "v{$newVersion} deploye");
 
             $record->update([
                 'status' => 'completed',
@@ -140,6 +177,7 @@ class ContinuousImproveCommand extends Command
             Log::info("[ContinuousImprove] Applied improvement", [
                 'title' => $improvement['title'],
                 'version' => $newVersion,
+                'subagent_id' => $subAgent->id,
             ]);
         }
 
@@ -171,5 +209,32 @@ class ContinuousImproveCommand extends Command
         Process::env($env)->path($this->workdir)->run('git clean -fd 2>&1');
 
         return true;
+    }
+
+    private function getOrCreateProject(): Project
+    {
+        $projectId = AppSetting::get('zeniclaw_project_id');
+        if ($projectId) {
+            $project = Project::find($projectId);
+            if ($project) return $project;
+        }
+
+        $project = Project::where('name', 'ZeniClaw (Auto-Improve)')->first();
+        if ($project) return $project;
+
+        $project = Project::create([
+            'name' => 'ZeniClaw (Auto-Improve)',
+            'gitlab_url' => 'https://gitlab.com/zenidev/zeniclaw.git',
+            'request_description' => 'Projet auto-genere pour les ameliorations continues.',
+            'requester_phone' => 'system',
+            'requester_name' => 'Continuous Improve',
+            'agent_id' => Agent::first()?->id ?? 1,
+            'status' => 'approved',
+            'approved_at' => now(),
+        ]);
+
+        AppSetting::set('zeniclaw_project_id', (string) $project->id);
+
+        return $project;
     }
 }
