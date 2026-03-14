@@ -15,11 +15,14 @@ class ConversationMemory extends Model
         'tags',
         'status',
         'expires_at',
+        'version',
+        'previous_content',
     ];
 
     protected $casts = [
         'tags' => 'array',
         'expires_at' => 'datetime',
+        'version' => 'integer',
     ];
 
     public function scopeActive($query)
@@ -41,10 +44,37 @@ class ConversationMemory extends Model
     }
 
     /**
-     * Search memories by keyword (LIKE match on content).
+     * Full-text search on content.
+     * Uses PostgreSQL full-text search (tsvector) when available,
+     * falls back to ILIKE for compatibility.
      */
     public function scopeSearch($query, string $keyword)
     {
+        if (config('database.default') === 'pgsql') {
+            // Use PostgreSQL full-text search with ranking
+            return $query->whereRaw(
+                "to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)",
+                [$keyword]
+            )->orderByRaw(
+                "ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) DESC",
+                [$keyword]
+            );
+        }
+
+        // Fallback to LIKE for other databases
         return $query->where('content', 'like', '%' . $keyword . '%');
+    }
+
+    /**
+     * Update content with versioning — keeps history of previous values.
+     */
+    public function updateContent(string $newContent): self
+    {
+        $this->previous_content = $this->content;
+        $this->content = $newContent;
+        $this->version = ($this->version ?? 1) + 1;
+        $this->save();
+
+        return $this;
     }
 }

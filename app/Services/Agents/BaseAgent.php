@@ -431,14 +431,55 @@ PROMPT;
             // ── Send Agent Message Tool ───────────────────────────────
             [
                 'name' => 'send_agent_message',
-                'description' => 'Envoyer un message a un autre agent specialise et recevoir sa reponse. Permet la collaboration inter-agents. Exemples: demander a TodoAgent de creer une tache, demander a ReminderAgent de programmer un rappel, demander a WebSearchAgent de chercher quelque chose.',
+                'description' => 'Envoyer un message a un autre agent specialise et recevoir sa reponse. Permet la collaboration inter-agents. Exemples: demander a TodoAgent de creer une tache, demander a ReminderAgent de programmer un rappel, demander a WebSearchAgent de chercher quelque chose. Mode async pour taches longues.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
                         'target_agent' => ['type' => 'string', 'description' => 'Nom de l\'agent cible (ex: "todo", "reminder", "web_search", "document", "finance", "dev")'],
                         'message' => ['type' => 'string', 'description' => 'Le message/instruction a envoyer a l\'agent cible'],
+                        'async' => ['type' => 'boolean', 'description' => 'Si true, lance la tache en arriere-plan via spawn_subagent au lieu d\'attendre la reponse. Utile pour les taches longues.'],
                     ],
                     'required' => ['target_agent', 'message'],
+                ],
+            ],
+            // ── Multimodal Tools (D9.1, D9.2) ───────────────────────────
+            [
+                'name' => 'create_audio',
+                'description' => 'Convertir du texte en fichier audio (text-to-speech). Utiliser quand l\'utilisateur demande de lire a voix haute, creer un audio, ou generer une version vocale d\'un texte.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'text' => ['type' => 'string', 'description' => 'Le texte a convertir en audio'],
+                        'voice' => ['type' => 'string', 'description' => 'Voix: "male" ou "female"', 'enum' => ['male', 'female']],
+                        'language' => ['type' => 'string', 'description' => 'Langue: "fr", "en", "nl", etc.', 'default' => 'fr'],
+                    ],
+                    'required' => ['text'],
+                ],
+            ],
+            [
+                'name' => 'create_image',
+                'description' => 'Generer une image a partir d\'une description textuelle (DALL-E). Utiliser quand l\'utilisateur demande de creer, generer, dessiner une image ou illustration.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'prompt' => ['type' => 'string', 'description' => 'Description detaillee de l\'image a generer (en anglais de preference pour meilleurs resultats)'],
+                        'size' => ['type' => 'string', 'description' => 'Taille: "1024x1024", "1792x1024" (paysage), "1024x1792" (portrait)', 'enum' => ['1024x1024', '1792x1024', '1024x1792']],
+                        'quality' => ['type' => 'string', 'description' => 'Qualite: "standard" ou "hd"', 'enum' => ['standard', 'hd']],
+                    ],
+                    'required' => ['prompt'],
+                ],
+            ],
+            // ── Code Sandbox Tool (D11.1) ────────────────────────────────
+            [
+                'name' => 'run_code',
+                'description' => 'Executer du code dans un environnement isole (sandbox Docker). Langages supportes: python, php, bash, node. Utiliser pour tester du code, faire des calculs, ou executer des scripts.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'code' => ['type' => 'string', 'description' => 'Le code a executer'],
+                        'language' => ['type' => 'string', 'description' => 'Langage: python, php, bash, node', 'enum' => ['python', 'php', 'bash', 'node']],
+                    ],
+                    'required' => ['code', 'language'],
                 ],
             ],
         ];
@@ -454,6 +495,9 @@ PROMPT;
             'memory_search' => $this->baseMemorySearch($input, $context),
             'spawn_subagent' => $this->baseSpawnSubagent($input, $context),
             'send_agent_message' => $this->baseSendAgentMessage($input, $context),
+            'create_audio' => $this->baseCreateAudio($input, $context),
+            'create_image' => $this->baseCreateImage($input, $context),
+            'run_code' => $this->baseRunCode($input, $context),
             default => null,
         };
     }
@@ -590,10 +634,10 @@ PROMPT;
             return json_encode(['error' => 'Missing task_description parameter']);
         }
 
-        // Guard: max depth 2
+        // Guard: max depth 3
         $currentDepth = $context->currentDepth ?? 0;
-        if ($currentDepth >= 2) {
-            return json_encode(['error' => 'Profondeur maximale atteinte (max 2 niveaux). Impossible de creer un sous-agent supplementaire.']);
+        if ($currentDepth >= 3) {
+            return json_encode(['error' => 'Profondeur maximale atteinte (max 3 niveaux). Impossible de creer un sous-agent supplementaire.']);
         }
 
         // Guard: max 5 active subagents per user
@@ -617,8 +661,11 @@ PROMPT;
             'depth' => $currentDepth + 1,
         ]);
 
-        // Dispatch the background job
-        \App\Jobs\RunTaskJob::dispatch($subAgent)->onQueue('default');
+        // Dispatch the background job with priority queue support
+        \App\Jobs\RunTaskJob::dispatch($subAgent)->onQueue($subAgent->getQueueName());
+
+        // Fire SubagentSpawned event
+        \App\Events\SubagentSpawned::dispatch($subAgent, $this->name(), $currentDepth + 1);
 
         $this->log($context, "Spawned subagent #{$subAgent->id}: " . mb_substr($taskDescription, 0, 100), [
             'subagent_id' => $subAgent->id,
@@ -639,15 +686,29 @@ PROMPT;
     {
         $targetName = $input['target_agent'] ?? '';
         $message = $input['message'] ?? '';
+        $async = $input['async'] ?? false;
 
         if (!$targetName || !$message) {
             return json_encode(['error' => 'Missing target_agent or message parameter']);
         }
 
-        // Guard: max 3 inter-agent calls per agentic loop
+        // D6.3: Async mode — delegate to spawn_subagent
+        if ($async) {
+            return $this->baseSpawnSubagent([
+                'task_description' => "[Inter-agent async → {$targetName}] {$message}",
+                'timeout_minutes' => 10,
+            ], $context);
+        }
+
+        // Guard: max 5 inter-agent calls per agentic loop
         $callCount = $context->interAgentCallCount ?? 0;
-        if ($callCount >= 3) {
-            return json_encode(['error' => 'Limite de 3 appels inter-agents atteinte pour cette iteration.']);
+        if ($callCount >= 5) {
+            return json_encode(['error' => 'Limite de 5 appels inter-agents atteinte pour cette iteration.']);
+        }
+
+        // Circuit breaker check (D6.5)
+        if (self::isInterAgentCircuitOpen($targetName)) {
+            return json_encode(['error' => "L'agent '{$targetName}' est temporairement indisponible (trop d'echecs recents). Reessaie dans quelques minutes ou utilise un autre agent."]);
         }
 
         // Resolve the target agent
@@ -664,13 +725,13 @@ PROMPT;
         // Increment call count
         $context->interAgentCallCount = ($context->interAgentCallCount ?? 0) + 1;
 
-        // Build a context for the target agent with the inter-agent message
+        // Build a context for the target agent with inter-agent source context (D6.2)
         $interContext = new AgentContext(
             agent: $context->agent,
             session: $context->session,
             from: $context->from,
             senderName: $context->senderName,
-            body: $message,
+            body: "[Inter-agent message from {$this->name()}] {$message}",
             hasMedia: false,
             mediaUrl: null,
             mimetype: null,
@@ -681,6 +742,7 @@ PROMPT;
             reasoning: "inter-agent call from {$this->name()}",
             memoryContext: $context->memoryContext,
             toolRegistry: $context->toolRegistry,
+            sourceAgent: $this->name(),
         );
 
         try {
@@ -691,18 +753,130 @@ PROMPT;
                 'result_action' => $result->action,
             ]);
 
+            // Reset circuit breaker on success
+            self::resetInterAgentCircuit($targetName);
+
+            // Structured response (D6.4): include action, metadata, and files if any
             return json_encode([
                 'success' => true,
                 'agent' => $targetName,
                 'response' => $result->reply ?? 'Action effectuee (pas de reponse textuelle).',
                 'action' => $result->action,
+                'metadata' => $result->metadata ?? [],
+                'source_agent' => $this->name(),
             ]);
         } catch (\Exception $e) {
+            // Record failure for circuit breaker (D6.5)
+            self::recordInterAgentFailure($targetName);
+
             \Illuminate\Support\Facades\Log::warning("Inter-agent call failed: {$this->name()} → {$targetName}", [
                 'error' => $e->getMessage(),
             ]);
             return json_encode(['error' => "Erreur lors de l'appel a {$targetName}: " . $e->getMessage()]);
         }
+    }
+
+    // ── Multimodal Tools (D9.1, D9.2) ─────────────────────────
+
+    private function baseCreateAudio(array $input, AgentContext $context): string
+    {
+        $text = $input['text'] ?? '';
+        $voice = $input['voice'] ?? 'male';
+        $language = $input['language'] ?? 'fr';
+
+        if (!$text) {
+            return json_encode(['error' => 'Missing text parameter']);
+        }
+
+        $tts = new \App\Services\TTSService();
+        $result = $tts->synthesize($text, $voice, $language);
+
+        if ($result['success']) {
+            // Send audio file to user
+            $this->sendFile($context->from, $result['path'], 'audio.mp3', 'Audio genere');
+            $this->log($context, 'TTS audio generated', ['provider' => $result['provider'] ?? 'unknown', 'duration_ms' => $result['duration_ms']]);
+            return json_encode(['success' => true, 'message' => 'Audio genere et envoye.', 'provider' => $result['provider'] ?? 'unknown']);
+        }
+
+        return json_encode(['error' => $result['error'] ?? 'TTS generation failed']);
+    }
+
+    private function baseCreateImage(array $input, AgentContext $context): string
+    {
+        $prompt = $input['prompt'] ?? '';
+        $size = $input['size'] ?? '1024x1024';
+        $quality = $input['quality'] ?? 'standard';
+
+        if (!$prompt) {
+            return json_encode(['error' => 'Missing prompt parameter']);
+        }
+
+        $imageGen = new \App\Services\ImageGenerationService();
+        $result = $imageGen->generate($prompt, $size, $quality);
+
+        if ($result['success']) {
+            $this->sendFile($context->from, $result['path'], 'generated.png', $result['revised_prompt'] ?? 'Image generee');
+            $this->log($context, 'Image generated', ['prompt' => mb_substr($prompt, 0, 100)]);
+            return json_encode(['success' => true, 'message' => 'Image generee et envoyee.', 'revised_prompt' => $result['revised_prompt'] ?? null]);
+        }
+
+        return json_encode(['error' => $result['error'] ?? 'Image generation failed']);
+    }
+
+    // ── Code Sandbox Tool (D11.1) ───────────────────────────────
+
+    private function baseRunCode(array $input, AgentContext $context): string
+    {
+        $code = $input['code'] ?? '';
+        $language = $input['language'] ?? 'python';
+
+        if (!$code) {
+            return json_encode(['error' => 'Missing code parameter']);
+        }
+
+        if (!\App\Services\CodeSandbox::isAvailable()) {
+            return json_encode(['error' => 'Code sandbox non disponible (Docker requis).']);
+        }
+
+        $sandbox = new \App\Services\CodeSandbox();
+        $result = $sandbox->run($code, $language);
+
+        $this->log($context, "Code executed ({$language})", [
+            'success' => $result['success'],
+            'duration_ms' => $result['duration_ms'],
+        ]);
+
+        return json_encode($result);
+    }
+
+    // ── Inter-Agent Circuit Breaker (D6.5) ──────────────────────
+
+    private static function isInterAgentCircuitOpen(string $targetAgent): bool
+    {
+        $failures = \Illuminate\Support\Facades\Cache::get("inter_agent_failures:{$targetAgent}", 0);
+        if ($failures >= 3) {
+            $openedAt = \Illuminate\Support\Facades\Cache::get("inter_agent_circuit_opened:{$targetAgent}", 0);
+            if (time() - $openedAt < 120) { // 2 minute cooldown
+                return true;
+            }
+            // Reset after cooldown
+            \Illuminate\Support\Facades\Cache::forget("inter_agent_failures:{$targetAgent}");
+            \Illuminate\Support\Facades\Cache::forget("inter_agent_circuit_opened:{$targetAgent}");
+        }
+        return false;
+    }
+
+    private static function recordInterAgentFailure(string $targetAgent): void
+    {
+        $failures = \Illuminate\Support\Facades\Cache::increment("inter_agent_failures:{$targetAgent}");
+        if ($failures >= 3) {
+            \Illuminate\Support\Facades\Cache::put("inter_agent_circuit_opened:{$targetAgent}", time(), 300);
+        }
+    }
+
+    private static function resetInterAgentCircuit(string $targetAgent): void
+    {
+        \Illuminate\Support\Facades\Cache::forget("inter_agent_failures:{$targetAgent}");
     }
 
     /**
@@ -772,6 +946,9 @@ Tu fais partie d'un ecosysteme d'agents specialises. Tu as acces a ces outils de
 - spawn_subagent: Lancer une tache autonome en arriere-plan (recherches longues, collecte de donnees)
 - memory_store / memory_search: Sauvegarder/chercher des infos sur l'utilisateur
 - teach_skill / list_skills / forget_skill: Gerer les competences apprises
+- create_audio: Convertir du texte en fichier audio (TTS)
+- create_image: Generer une image a partir d'une description (DALL-E)
+- run_code: Executer du code dans un sandbox isole (python, php, bash, node)
 
 REGLES DE COLLABORATION:
 1. Si tu as besoin de donnees que tu n'as pas, utilise web_search ou web_fetch AVANT de repondre

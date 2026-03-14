@@ -5,10 +5,236 @@ namespace App\Services;
 use App\Models\AppSetting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class AnthropicClient
 {
     private string $baseUrl = 'https://api.anthropic.com/v1';
+
+    // ── Circuit Breaker State ──────────────────────────────────
+    private const CIRCUIT_BREAKER_THRESHOLD = 5; // failures before opening
+    private const CIRCUIT_BREAKER_TIMEOUT = 300; // seconds to wait before half-open
+
+    // ── Token Usage Tracking ──────────────────────────────────
+    private static array $tokenUsage = [];
+
+    /**
+     * Classify an HTTP error for intelligent retry decisions.
+     */
+    public static function classifyError(int $status, ?string $body = null): array
+    {
+        return match (true) {
+            $status === 429 => ['type' => 'rate_limit', 'retryable' => true, 'backoff' => 'exponential'],
+            $status === 529 => ['type' => 'overloaded', 'retryable' => true, 'backoff' => 'exponential'],
+            $status === 401 => ['type' => 'auth', 'retryable' => false, 'backoff' => null],
+            $status === 403 => ['type' => 'forbidden', 'retryable' => false, 'backoff' => null],
+            $status === 400 => ['type' => 'bad_request', 'retryable' => false, 'backoff' => null],
+            $status >= 500 => ['type' => 'server_error', 'retryable' => true, 'backoff' => 'linear'],
+            default => ['type' => 'unknown', 'retryable' => false, 'backoff' => null],
+        };
+    }
+
+    /**
+     * Get adaptive timeout based on model tier.
+     */
+    private function getAdaptiveTimeout(string $model, bool $isMultimodal = false, int $maxTokens = 0): int
+    {
+        if ($this->isOnPremModel($model)) {
+            return 120;
+        }
+
+        $base = match (true) {
+            str_contains($model, 'haiku') => 30,
+            str_contains($model, 'sonnet') => 60,
+            str_contains($model, 'opus') => 120,
+            default => 60,
+        };
+
+        if ($isMultimodal) $base = max($base, 90);
+        if ($maxTokens >= 4096) $base = max($base, 120);
+
+        return $base;
+    }
+
+    /**
+     * Check circuit breaker state for a provider.
+     * Returns true if requests should be allowed.
+     */
+    private function isCircuitClosed(string $provider = 'anthropic'): bool
+    {
+        $key = "circuit_breaker:{$provider}";
+        $state = Cache::get($key);
+
+        if (!$state) return true; // No state = closed (healthy)
+
+        if ($state['failures'] >= self::CIRCUIT_BREAKER_THRESHOLD) {
+            // Circuit is open — check if timeout has elapsed
+            if (time() - $state['opened_at'] > self::CIRCUIT_BREAKER_TIMEOUT) {
+                // Half-open: allow one request
+                return true;
+            }
+            return false; // Still open
+        }
+
+        return true;
+    }
+
+    /**
+     * Record a failure for circuit breaker.
+     */
+    private function recordFailure(string $provider = 'anthropic'): void
+    {
+        $key = "circuit_breaker:{$provider}";
+        $state = Cache::get($key, ['failures' => 0, 'opened_at' => 0]);
+        $state['failures']++;
+        if ($state['failures'] >= self::CIRCUIT_BREAKER_THRESHOLD) {
+            $state['opened_at'] = time();
+        }
+        Cache::put($key, $state, self::CIRCUIT_BREAKER_TIMEOUT * 2);
+    }
+
+    /**
+     * Record a success — reset circuit breaker.
+     */
+    private function recordSuccess(string $provider = 'anthropic'): void
+    {
+        Cache::forget("circuit_breaker:{$provider}");
+    }
+
+    /**
+     * Track token usage from API response.
+     */
+    private function trackTokenUsage(string $model, ?array $usage, string $from = 'unknown'): void
+    {
+        if (!$usage) return;
+
+        $inputTokens = $usage['input_tokens'] ?? 0;
+        $outputTokens = $usage['output_tokens'] ?? 0;
+
+        // In-memory tracking for current request
+        self::$tokenUsage[] = [
+            'model' => $model,
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'timestamp' => time(),
+        ];
+
+        // Persistent daily tracking via cache
+        $dateKey = "tokens:" . date('Y-m-d');
+        $daily = Cache::get($dateKey, ['input' => 0, 'output' => 0, 'calls' => 0]);
+        $daily['input'] += $inputTokens;
+        $daily['output'] += $outputTokens;
+        $daily['calls']++;
+        Cache::put($dateKey, $daily, 86400 * 2);
+
+        // Per-user tracking if from is known
+        if ($from !== 'unknown') {
+            $userKey = "tokens:{$from}:" . date('Y-m-d');
+            $userDaily = Cache::get($userKey, ['input' => 0, 'output' => 0, 'calls' => 0]);
+            $userDaily['input'] += $inputTokens;
+            $userDaily['output'] += $outputTokens;
+            $userDaily['calls']++;
+            Cache::put($userKey, $userDaily, 86400 * 2);
+        }
+    }
+
+    /**
+     * Get token usage stats for today.
+     */
+    public static function getTokenUsage(?string $from = null): array
+    {
+        $dateKey = "tokens:" . date('Y-m-d');
+        if ($from) {
+            $dateKey = "tokens:{$from}:" . date('Y-m-d');
+        }
+        return Cache::get($dateKey, ['input' => 0, 'output' => 0, 'calls' => 0]);
+    }
+
+    /**
+     * Make an API request with intelligent retry and error classification.
+     */
+    private function requestWithRetry(string $url, array $body, array $headers, int $timeout, int $maxRetries = 2): ?\Illuminate\Http\Client\Response
+    {
+        $lastError = null;
+
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $response = Http::timeout($timeout)
+                    ->withHeaders($headers)
+                    ->post($url, $body);
+
+                if ($response->successful()) {
+                    $this->recordSuccess();
+                    return $response;
+                }
+
+                $error = self::classifyError($response->status(), $response->body());
+                $lastError = $error;
+
+                Log::warning('AnthropicClient request failed', [
+                    'status' => $response->status(),
+                    'error_type' => $error['type'],
+                    'retryable' => $error['retryable'],
+                    'attempt' => $attempt + 1,
+                    'body' => substr($response->body(), 0, 300),
+                ]);
+
+                if (!$error['retryable'] || $attempt >= $maxRetries) {
+                    $this->recordFailure();
+                    return $response;
+                }
+
+                // Backoff before retry
+                $delay = match ($error['backoff']) {
+                    'exponential' => min(pow(2, $attempt) * 1000000, 10000000), // 1s, 2s, 4s... max 10s
+                    'linear' => ($attempt + 1) * 1000000, // 1s, 2s, 3s
+                    default => 1000000,
+                };
+
+                // Check for Retry-After header
+                $retryAfter = $response->header('Retry-After');
+                if ($retryAfter && is_numeric($retryAfter)) {
+                    $delay = min((int)$retryAfter * 1000000, 30000000);
+                }
+
+                usleep($delay);
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                Log::warning('AnthropicClient connection error', [
+                    'error' => $e->getMessage(),
+                    'attempt' => $attempt + 1,
+                ]);
+
+                if ($attempt >= $maxRetries) {
+                    $this->recordFailure();
+                    return null;
+                }
+
+                usleep(($attempt + 1) * 1000000); // Linear backoff for timeouts
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the fallback model when primary fails.
+     */
+    private function getFallbackModel(string $failedModel): ?string
+    {
+        // Anthropic model fallback chain
+        $fallback = match (true) {
+            str_contains($failedModel, 'opus') => ModelResolver::balanced(),
+            str_contains($failedModel, 'sonnet') => ModelResolver::fast(),
+            default => null,
+        };
+
+        // If no Anthropic fallback and OpenAI is available, map to equivalent (D5.4)
+        if (!$fallback && OpenAIProvider::isAvailable()) {
+            $fallback = 'openai:' . OpenAIProvider::mapModel($failedModel);
+        }
+
+        return $fallback;
+    }
 
     /**
      * Check if a model is on-prem (non-Claude).
@@ -56,7 +282,6 @@ class AnthropicClient
                     ->all();
 
                 $modelLower = strtolower($model);
-                // Check exact match or match without tag (e.g. "qwen2.5:7b" matches "qwen2.5:7b")
                 $found = in_array($modelLower, $models)
                     || in_array($modelLower . ':latest', $models);
 
@@ -71,8 +296,9 @@ class AnthropicClient
 
     /**
      * Route on-prem model calls to Ollama/OpenAI-compatible API.
+     * Supports tool_use for models that handle it (Qwen 2.5, Llama 3.2).
      */
-    private function chatOnPrem(string|array $message, string $model, string $systemPrompt = '', int $maxTokens = 0): ?string
+    private function chatOnPrem(string|array $message, string $model, string $systemPrompt = '', int $maxTokens = 0, array $tools = []): ?string
     {
         $baseUrl = $this->getOrDetectOnPremUrl();
         if (!$baseUrl) {
@@ -83,13 +309,11 @@ class AnthropicClient
         // Check if the model is actually available before attempting (avoids 120s timeout)
         $check = $this->checkModelAvailable($baseUrl, $model);
         if (!$check['available']) {
-            $available = implode(', ', $check['models']);
             Log::warning('On-prem model not available on Ollama', [
                 'model' => $model,
                 'available' => $check['models'],
             ]);
 
-            // If there are other models available, use the first one as fallback
             if (!empty($check['models'])) {
                 $fallback = $check['models'][0];
                 Log::info("Falling back to available Ollama model", ['from' => $model, 'to' => $fallback]);
@@ -107,8 +331,6 @@ class AnthropicClient
         $content = is_array($message) ? json_encode($message) : $message;
         $messages[] = ['role' => 'user', 'content' => $content];
 
-        // Small on-prem models on CPU can't generate many tokens fast enough
-        // Default to 512 to avoid Ollama's internal 2-minute timeout
         if ($maxTokens <= 0) {
             $maxTokens = 512;
         }
@@ -119,6 +341,11 @@ class AnthropicClient
             'max_tokens' => $maxTokens,
             'stream' => false,
         ];
+
+        // On-prem tool_use: supported by Qwen 2.5, Llama 3.2, Mistral
+        if (!empty($tools) && $this->supportsOnPremTools($model)) {
+            $body['tools'] = $this->convertToolsToOpenAIFormat($tools);
+        }
 
         $headers = ['content-type' => 'application/json'];
         $apiKey = AppSetting::get('onprem_api_key');
@@ -154,18 +381,42 @@ class AnthropicClient
     }
 
     /**
-     * @param string|array $message Text string or array of content blocks (multimodal)
+     * Check if an on-prem model supports tool_use via OpenAI-compatible API.
      */
-    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0): ?string
+    private function supportsOnPremTools(string $model): bool
     {
-        if ($this->isOnPremModel($model)) {
-            return $this->chatOnPrem($message, $model, $systemPrompt, $maxTokens);
+        $modelLower = strtolower($model);
+        $toolCapableModels = ['qwen2.5', 'llama3.2', 'llama3.1', 'mistral', 'command-r'];
+        foreach ($toolCapableModels as $prefix) {
+            if (str_contains($modelLower, $prefix)) return true;
         }
+        return false;
+    }
 
-        $apiKey = AppSetting::get('anthropic_api_key');
-        if (!$apiKey) {
-            return null;
-        }
+    /**
+     * Convert Anthropic tool format to OpenAI format for Ollama.
+     */
+    private function convertToolsToOpenAIFormat(array $tools): array
+    {
+        return array_map(function ($tool) {
+            return [
+                'type' => 'function',
+                'function' => [
+                    'name' => $tool['name'],
+                    'description' => $tool['description'] ?? '',
+                    'parameters' => $tool['input_schema'] ?? ['type' => 'object', 'properties' => (object)[]],
+                ],
+            ];
+        }, $tools);
+    }
+
+    /**
+     * Build Anthropic API headers.
+     */
+    private function buildHeaders(?string $apiKey = null): ?array
+    {
+        $apiKey = $apiKey ?? AppSetting::get('anthropic_api_key');
+        if (!$apiKey) return null;
 
         $isOAuth = str_starts_with($apiKey, 'sk-ant-oat01-');
 
@@ -175,17 +426,41 @@ class AnthropicClient
         ];
 
         if ($isOAuth) {
-            // OAuth token (Claude Max/Pro subscription) → Bearer auth + beta header
             $headers['Authorization'] = "Bearer {$apiKey}";
             $headers['anthropic-beta'] = 'oauth-2025-04-20';
         } else {
-            // Standard API key → x-api-key header
             $headers['x-api-key'] = $apiKey;
         }
 
-        // If array, it's multimodal content blocks — use directly and increase max_tokens
+        return $headers;
+    }
+
+    /**
+     * @param string|array $message Text string or array of content blocks (multimodal)
+     */
+    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0): ?string
+    {
+        if ($this->isOnPremModel($model)) {
+            return $this->chatOnPrem($message, $model, $systemPrompt, $maxTokens);
+        }
+
+        // Circuit breaker check
+        if (!$this->isCircuitClosed()) {
+            $fallback = $this->getFallbackModel($model);
+            if ($fallback && $fallback !== $model) {
+                Log::info('AnthropicClient: circuit open, trying fallback', ['from' => $model, 'to' => $fallback]);
+                $model = $fallback;
+            } else {
+                Log::warning('AnthropicClient: circuit open, no fallback available');
+                return null;
+            }
+        }
+
+        $headers = $this->buildHeaders();
+        if (!$headers) return null;
+
         $isMultimodal = is_array($message);
-        $content = $isMultimodal ? $message : $message;
+        $content = $message;
 
         $body = [
             'model' => $model,
@@ -204,37 +479,54 @@ class AnthropicClient
         $maxContinuations = 3;
 
         for ($cont = 0; $cont <= $maxContinuations; $cont++) {
-            $timeoutSec = $isMultimodal ? 90 : ($maxTokens >= 4096 ? 120 : 60);
-            $response = Http::timeout($timeoutSec)
-                ->withHeaders($headers)
-                ->post("{$this->baseUrl}/messages", $body);
+            $timeoutSec = $this->getAdaptiveTimeout($model, $isMultimodal, $body['max_tokens']);
 
-            if (!$response->successful()) {
-                Log::error('AnthropicClient::chat failed', [
-                    'status' => $response->status(),
-                    'body' => substr($response->body(), 0, 500),
-                    'model' => $model,
-                ]);
+            $response = $this->requestWithRetry(
+                "{$this->baseUrl}/messages",
+                $body,
+                $headers,
+                $timeoutSec,
+                maxRetries: 2
+            );
+
+            if (!$response || !$response->successful()) {
+                // Try fallback model on failure
+                if ($cont === 0 && $response) {
+                    $error = self::classifyError($response->status());
+                    if ($error['type'] === 'rate_limit' || $error['type'] === 'overloaded') {
+                        $fallback = $this->getFallbackModel($model);
+                        if ($fallback && $fallback !== $model) {
+                            Log::info('AnthropicClient: falling back model', ['from' => $model, 'to' => $fallback]);
+                            $body['model'] = $fallback;
+                            $response = $this->requestWithRetry("{$this->baseUrl}/messages", $body, $headers, $timeoutSec);
+                            if ($response && $response->successful()) {
+                                goto process_response;
+                            }
+                        }
+                    }
+                }
                 return $fullText ?: null;
             }
 
+            process_response:
             $data = $response->json();
+
+            // Track token usage
+            $this->trackTokenUsage($model, $data['usage'] ?? null);
+
             $text = $data['content'][0]['text'] ?? '';
             $fullText .= $text;
             $stopReason = $data['stop_reason'] ?? 'end_turn';
 
-            // If response completed normally, return
             if ($stopReason !== 'max_tokens') {
                 return $fullText;
             }
 
-            // Response truncated — continue by asking for the rest
             Log::info('AnthropicClient::chat continuation needed', [
                 'continuation' => $cont + 1,
                 'accumulated_length' => mb_strlen($fullText),
             ]);
 
-            // Switch to multi-turn: send accumulated text as assistant, ask to continue
             $body = [
                 'model' => $model,
                 'max_tokens' => $body['max_tokens'],
@@ -255,24 +547,30 @@ class AnthropicClient
     /**
      * Multi-turn conversation with tool use support (agentic loop).
      * Returns the raw API response array (content blocks + stop_reason).
-     *
-     * @param array $messages Messages array
-     * @param string $model Claude model
-     * @param string $systemPrompt System prompt
-     * @param array $tools Tool definitions for the Anthropic API
-     * @param int $maxTokens Max tokens
-     * @return array|null Raw response with 'content' and 'stop_reason'
+     * Includes error classification, retry, and fallback chain.
      */
     public function chatWithToolUse(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): ?array
     {
-        // On-prem models don't support tool_use — fallback to simple chat
+        // On-prem models: try tool_use for supported models, fallback to simple chat
         if ($this->isOnPremModel($model)) {
-            $lastMessage = end($messages);
-            $content = $lastMessage['content'] ?? '';
-            if (is_array($content)) {
-                $content = collect($content)->where('type', 'text')->pluck('text')->implode("\n");
+            if (!empty($tools) && $this->supportsOnPremTools($model)) {
+                // Use OpenAI-compatible tool_use endpoint
+                $reply = $this->chatOnPrem(
+                    end($messages)['content'] ?? '',
+                    $model,
+                    $systemPrompt,
+                    $maxTokens,
+                    $tools
+                );
+            } else {
+                $lastMessage = end($messages);
+                $content = $lastMessage['content'] ?? '';
+                if (is_array($content)) {
+                    $content = collect($content)->where('type', 'text')->pluck('text')->implode("\n");
+                }
+                $reply = $this->chatOnPrem($content, $model, $systemPrompt);
             }
-            $reply = $this->chatOnPrem($content, $model, $systemPrompt);
+
             if ($reply) {
                 return [
                     'content' => [['type' => 'text', 'text' => $reply]],
@@ -284,24 +582,18 @@ class AnthropicClient
             return null;
         }
 
-        $apiKey = AppSetting::get('anthropic_api_key');
-        if (!$apiKey) {
-            return null;
+        // Circuit breaker check
+        if (!$this->isCircuitClosed()) {
+            $fallback = $this->getFallbackModel($model);
+            if ($fallback && $fallback !== $model) {
+                $model = $fallback;
+            } else {
+                return null;
+            }
         }
 
-        $isOAuth = str_starts_with($apiKey, 'sk-ant-oat01-');
-
-        $headers = [
-            'anthropic-version' => '2023-06-01',
-            'content-type' => 'application/json',
-        ];
-
-        if ($isOAuth) {
-            $headers['Authorization'] = "Bearer {$apiKey}";
-            $headers['anthropic-beta'] = 'oauth-2025-04-20';
-        } else {
-            $headers['x-api-key'] = $apiKey;
-        }
+        $headers = $this->buildHeaders();
+        if (!$headers) return null;
 
         $body = [
             'model' => $model,
@@ -317,22 +609,54 @@ class AnthropicClient
             $body['tools'] = $tools;
         }
 
-        $response = Http::timeout(120)
-            ->withHeaders($headers)
-            ->post("{$this->baseUrl}/messages", $body);
+        $timeoutSec = $this->getAdaptiveTimeout($model, false, $maxTokens);
 
-        if ($response->successful()) {
+        $response = $this->requestWithRetry(
+            "{$this->baseUrl}/messages",
+            $body,
+            $headers,
+            $timeoutSec,
+            maxRetries: 2
+        );
+
+        if ($response && $response->successful()) {
+            $data = $response->json();
+            $this->trackTokenUsage($model, $data['usage'] ?? null);
+
             return [
-                'content' => $response->json('content') ?? [],
-                'stop_reason' => $response->json('stop_reason') ?? 'end_turn',
-                'model' => $response->json('model'),
-                'usage' => $response->json('usage'),
+                'content' => $data['content'] ?? [],
+                'stop_reason' => $data['stop_reason'] ?? 'end_turn',
+                'model' => $data['model'] ?? $model,
+                'usage' => $data['usage'] ?? null,
             ];
         }
 
+        // Fallback on rate_limit/overloaded
+        if ($response) {
+            $error = self::classifyError($response->status());
+            if ($error['type'] === 'rate_limit' || $error['type'] === 'overloaded') {
+                $fallback = $this->getFallbackModel($model);
+                if ($fallback && $fallback !== $model) {
+                    Log::info('AnthropicClient::chatWithToolUse fallback', ['from' => $model, 'to' => $fallback]);
+                    $body['model'] = $fallback;
+                    $retryResponse = $this->requestWithRetry("{$this->baseUrl}/messages", $body, $headers, $timeoutSec);
+                    if ($retryResponse && $retryResponse->successful()) {
+                        $data = $retryResponse->json();
+                        $this->trackTokenUsage($fallback, $data['usage'] ?? null);
+                        return [
+                            'content' => $data['content'] ?? [],
+                            'stop_reason' => $data['stop_reason'] ?? 'end_turn',
+                            'model' => $data['model'] ?? $fallback,
+                            'usage' => $data['usage'] ?? null,
+                        ];
+                    }
+                }
+            }
+        }
+
         Log::error('AnthropicClient::chatWithToolUse failed', [
-            'status' => $response->status(),
-            'body' => substr($response->body(), 0, 500),
+            'status' => $response?->status(),
+            'body' => $response ? substr($response->body(), 0, 500) : 'no response',
             'model' => $model,
         ]);
 
@@ -342,12 +666,6 @@ class AnthropicClient
     /**
      * Multi-turn conversation with full messages array.
      * Used by SubAgent for iterative code modification loops.
-     *
-     * @param array $messages Array of ['role' => 'user'|'assistant', 'content' => '...']
-     * @param string $model Claude model to use
-     * @param string $systemPrompt System prompt
-     * @param int $maxTokens Maximum tokens in response
-     * @return string|null
      */
     public function chatWithMessages(array $messages, string $model, string $systemPrompt = '', int $maxTokens = 4096): ?string
     {
@@ -357,24 +675,8 @@ class AnthropicClient
             return $this->chatOnPrem($content, $model, $systemPrompt);
         }
 
-        $apiKey = AppSetting::get('anthropic_api_key');
-        if (!$apiKey) {
-            return null;
-        }
-
-        $isOAuth = str_starts_with($apiKey, 'sk-ant-oat01-');
-
-        $headers = [
-            'anthropic-version' => '2023-06-01',
-            'content-type' => 'application/json',
-        ];
-
-        if ($isOAuth) {
-            $headers['Authorization'] = "Bearer {$apiKey}";
-            $headers['anthropic-beta'] = 'oauth-2025-04-20';
-        } else {
-            $headers['x-api-key'] = $apiKey;
-        }
+        $headers = $this->buildHeaders();
+        if (!$headers) return null;
 
         $body = [
             'model' => $model,
@@ -386,21 +688,70 @@ class AnthropicClient
             $body['system'] = $systemPrompt;
         }
 
-        $response = Http::timeout(120)
-            ->withHeaders($headers)
-            ->post("{$this->baseUrl}/messages", $body);
+        $timeoutSec = $this->getAdaptiveTimeout($model, false, $maxTokens);
 
-        if ($response->successful()) {
-            $data = $response->json('content');
-            return $data[0]['text'] ?? null;
+        $response = $this->requestWithRetry(
+            "{$this->baseUrl}/messages",
+            $body,
+            $headers,
+            $timeoutSec,
+            maxRetries: 1
+        );
+
+        if ($response && $response->successful()) {
+            $data = $response->json();
+            $this->trackTokenUsage($model, $data['usage'] ?? null);
+            return $data['content'][0]['text'] ?? null;
         }
 
         Log::error('AnthropicClient::chatWithMessages failed', [
-            'status' => $response->status(),
-            'body' => substr($response->body(), 0, 500),
+            'status' => $response?->status(),
+            'body' => $response ? substr($response->body(), 0, 500) : 'no response',
             'model' => $model,
         ]);
 
         return null;
+    }
+
+    /**
+     * Health check — verify provider availability.
+     */
+    public static function healthCheck(): array
+    {
+        $results = ['anthropic' => false, 'ollama' => false];
+
+        // Check Anthropic
+        $apiKey = AppSetting::get('anthropic_api_key');
+        if ($apiKey) {
+            try {
+                $headers = ['anthropic-version' => '2023-06-01', 'content-type' => 'application/json'];
+                if (str_starts_with($apiKey, 'sk-ant-oat01-')) {
+                    $headers['Authorization'] = "Bearer {$apiKey}";
+                } else {
+                    $headers['x-api-key'] = $apiKey;
+                }
+                $response = Http::timeout(10)->withHeaders($headers)
+                    ->post('https://api.anthropic.com/v1/messages', [
+                        'model' => 'claude-haiku-4-5-20251001',
+                        'max_tokens' => 1,
+                        'messages' => [['role' => 'user', 'content' => 'ping']],
+                    ]);
+                $results['anthropic'] = $response->successful() || $response->status() === 429;
+            } catch (\Exception $e) {
+                $results['anthropic'] = false;
+            }
+        }
+
+        // Check Ollama
+        $ollamaUrl = AppSetting::get('onprem_api_url');
+        if ($ollamaUrl) {
+            try {
+                $results['ollama'] = Http::timeout(5)->get("{$ollamaUrl}/api/tags")->successful();
+            } catch (\Exception $e) {
+                $results['ollama'] = false;
+            }
+        }
+
+        return $results;
     }
 }

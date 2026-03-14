@@ -17,7 +17,10 @@ class SubAgent extends Model
         'spawning_agent',
         'depth',
         'status',
+        'progress_percent',
+        'progress_message',
         'task_description',
+        'next_task_description',
         'branch_name',
         'commit_hash',
         'output_log',
@@ -25,6 +28,9 @@ class SubAgent extends Model
         'error_message',
         'api_calls_count',
         'timeout_minutes',
+        'priority',
+        'cron_expression',
+        'is_recurring',
         'pid',
         'is_readonly',
         'started_at',
@@ -33,6 +39,7 @@ class SubAgent extends Model
 
     protected $casts = [
         'is_readonly' => 'boolean',
+        'is_recurring' => 'boolean',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
     ];
@@ -68,5 +75,61 @@ class SubAgent extends Model
     {
         $this->output_log = ($this->output_log ?? '') . $line . "\n";
         $this->save();
+    }
+
+    /**
+     * Update progress (D8.2 - Progress reporting).
+     */
+    public function updateProgress(int $percent, ?string $message = null): void
+    {
+        $this->progress_percent = min(100, max(0, $percent));
+        if ($message) {
+            $this->progress_message = $message;
+        }
+        $this->save();
+    }
+
+    /**
+     * Chain a follow-up task (D8.1 - Task chaining).
+     * When this task completes, the next_task_description will be spawned.
+     */
+    public function chainTask(string $nextTaskDescription): void
+    {
+        $this->next_task_description = $nextTaskDescription;
+        $this->save();
+    }
+
+    /**
+     * Spawn the chained task if one exists.
+     */
+    public function spawnChainedTask(): ?self
+    {
+        if (!$this->next_task_description) {
+            return null;
+        }
+
+        return self::create([
+            'type' => $this->type,
+            'requester_phone' => $this->requester_phone,
+            'status' => 'queued',
+            'task_description' => $this->next_task_description,
+            'timeout_minutes' => $this->timeout_minutes,
+            'parent_id' => $this->id,
+            'spawning_agent' => $this->spawning_agent,
+            'depth' => ($this->depth ?? 0) + 1,
+            'priority' => $this->priority ?? 'normal',
+        ]);
+    }
+
+    /**
+     * Get the queue name based on priority (D8.4 - Priority queues).
+     */
+    public function getQueueName(): string
+    {
+        return match ($this->priority ?? 'normal') {
+            'high' => 'high',
+            'low' => 'low',
+            default => 'default',
+        };
     }
 }

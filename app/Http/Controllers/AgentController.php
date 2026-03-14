@@ -729,4 +729,78 @@ class AgentController extends Controller
 
         return response()->json($pref);
     }
+
+    /**
+     * Skills marketplace — list all shared skills across agents (D12.3).
+     * Skills taught by one agent can be exported/imported to others.
+     */
+    public function skillsMarketplace(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->user();
+        $agentId = $request->query('agent_id');
+
+        // Get all skills for user's agents
+        $query = \App\Models\AgentSkill::where('active', true);
+
+        if ($agentId) {
+            $query->where('agent_id', $agentId);
+        } else {
+            $agentIds = $user->agents()->pluck('id');
+            $query->whereIn('agent_id', $agentIds);
+        }
+
+        $skills = $query->orderBy('sub_agent')->orderBy('title')->get();
+
+        $grouped = $skills->groupBy('sub_agent')->map(function ($group, $subAgent) {
+            return [
+                'agent' => $subAgent,
+                'skills' => $group->map(fn($s) => [
+                    'id' => $s->id,
+                    'skill_key' => $s->skill_key,
+                    'title' => $s->title,
+                    'instructions' => $s->instructions,
+                    'examples' => $s->examples,
+                    'taught_by' => $s->taught_by,
+                    'created_at' => $s->created_at->toIso8601String(),
+                ])->values(),
+                'count' => $group->count(),
+            ];
+        })->values();
+
+        return response()->json([
+            'skills' => $grouped,
+            'total' => $skills->count(),
+        ]);
+    }
+
+    /**
+     * Import a skill to a specific agent (D12.3).
+     */
+    public function importSkill(Request $request, \App\Models\Agent $agent): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate([
+            'skill_key' => 'required|string',
+            'title' => 'required|string',
+            'instructions' => 'required|string',
+            'sub_agent' => 'required|string',
+            'examples' => 'nullable|array',
+        ]);
+
+        $skill = \App\Models\AgentSkill::updateOrCreate(
+            [
+                'agent_id' => $agent->id,
+                'sub_agent' => $validated['sub_agent'],
+                'skill_key' => $validated['skill_key'],
+            ],
+            [
+                'title' => $validated['title'],
+                'instructions' => $validated['instructions'],
+                'examples' => $validated['examples'] ?? null,
+                'taught_by' => 'marketplace',
+                'active' => true,
+            ]
+        );
+
+        return response()->json(['success' => true, 'skill' => $skill]);
+    }
 }

@@ -1081,6 +1081,30 @@ PROMPT;
                     'required' => ['url'],
                 ],
             ],
+            [
+                'name' => 'web_extract',
+                'description' => 'Extract specific content from a web page using CSS selectors. Use this for structured data extraction (e.g., extract all h2 headings, all links with a specific class, table data). More precise than web_fetch for targeted extraction.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'url' => ['type' => 'string', 'description' => 'The full URL to extract from'],
+                        'selector' => ['type' => 'string', 'description' => 'CSS selector (e.g. "h2", ".product-name", "#main-content", "table tr")'],
+                    ],
+                    'required' => ['url', 'selector'],
+                ],
+            ],
+            [
+                'name' => 'run_code',
+                'description' => 'Execute code in a sandboxed Docker container. Supports Python, PHP, Node.js, Bash. Use for calculations, data processing, testing code snippets. No network access. Max 30s execution time.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'code' => ['type' => 'string', 'description' => 'The code to execute'],
+                        'language' => ['type' => 'string', 'enum' => ['python', 'php', 'node', 'bash'], 'description' => 'Programming language (default: python)'],
+                    ],
+                    'required' => ['code'],
+                ],
+            ],
         ]);
     }
 
@@ -1089,6 +1113,8 @@ PROMPT;
         return match ($name) {
             'web_search' => $this->toolWebSearch($input, $context),
             'web_fetch' => $this->toolWebFetch($input, $context),
+            'web_extract' => $this->toolWebExtract($input, $context),
+            'run_code' => $this->toolRunCode($input, $context),
             default => parent::executeTool($name, $input, $context),
         };
     }
@@ -1256,5 +1282,53 @@ PROMPT;
         }
 
         return $links;
+    }
+
+    /**
+     * web_extract tool handler (D10.1).
+     */
+    private function toolWebExtract(array $input, AgentContext $context): string
+    {
+        $url = $input['url'] ?? '';
+        $selector = $input['selector'] ?? '';
+
+        if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) {
+            return json_encode(['error' => 'Invalid or missing URL']);
+        }
+        if (!$selector) {
+            return json_encode(['error' => 'Missing selector parameter']);
+        }
+
+        $fetcher = new \App\Services\WebFetchService();
+        $result = $fetcher->extract($url, $selector);
+
+        return json_encode($result);
+    }
+
+    /**
+     * run_code tool handler (D11.1).
+     */
+    private function toolRunCode(array $input, AgentContext $context): string
+    {
+        $code = $input['code'] ?? '';
+        $language = $input['language'] ?? 'python';
+
+        if (!$code) {
+            return json_encode(['error' => 'Missing code parameter']);
+        }
+
+        if (!\App\Services\CodeSandbox::isAvailable()) {
+            return json_encode(['error' => 'Docker n\'est pas disponible. L\'execution de code necessite Docker.']);
+        }
+
+        $sandbox = new \App\Services\CodeSandbox();
+        $result = $sandbox->run($code, $language);
+
+        $this->log($context, "run_code ({$language}): " . ($result['success'] ? 'success' : 'error'), [
+            'duration_ms' => $result['duration_ms'],
+            'exit_code' => $result['exit_code'] ?? null,
+        ]);
+
+        return json_encode($result);
     }
 }

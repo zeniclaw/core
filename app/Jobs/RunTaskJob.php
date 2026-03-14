@@ -57,21 +57,35 @@ class RunTaskJob implements ShouldQueue
         $this->notifyRequester("⏳ Tache en cours...");
 
         try {
+            $this->subAgent->updateProgress(10, 'Demarrage de la boucle agentique...');
             $result = $this->runAgenticLoop();
 
+            $this->subAgent->updateProgress(90, 'Sauvegarde des resultats...');
             $this->subAgent->appendLog("[SAVE] Saving result, length=" . strlen($result ?? ''));
             $saved = $this->subAgent->update([
                 'status' => 'completed',
                 'result' => $result,
                 'completed_at' => now(),
+                'progress_percent' => 100,
+                'progress_message' => 'Termine',
             ]);
             $this->subAgent->appendLog("[SAVE] Update returned: " . ($saved ? 'true' : 'false'));
             $this->subAgent->refresh();
             $this->subAgent->appendLog("[VERIFY] result after save: " . (is_null($this->subAgent->result) ? 'NULL' : 'len=' . strlen($this->subAgent->result)));
             $this->subAgent->appendLog("[DONE] Task completed");
 
+            // Fire SubagentEnded event
+            \App\Events\SubagentEnded::dispatch($this->subAgent, 'completed', $result);
+
             // Send result to user
             $this->notifyRequester($result ?: "Tache terminee mais aucun resultat.");
+
+            // Task chaining: spawn the next task if one is queued
+            $chainedTask = $this->subAgent->spawnChainedTask();
+            if ($chainedTask) {
+                $this->subAgent->appendLog("[CHAIN] Spawned chained task #{$chainedTask->id}");
+                self::dispatch($chainedTask)->onQueue($chainedTask->getQueueName());
+            }
         } catch (\Throwable $e) {
             Log::error('RunTaskJob failed', [
                 'task_id' => $this->subAgent->id,
@@ -120,7 +134,7 @@ class RunTaskJob implements ShouldQueue
         $context = $this->buildContext($registry);
 
         // Run the agentic loop with high iteration count for thorough research
-        $loop = new AgenticLoop(maxIterations: 15, debug: true);
+        $loop = new AgenticLoop(maxIterations: 25, debug: true);
 
         $systemPrompt = $this->buildSystemPrompt();
 

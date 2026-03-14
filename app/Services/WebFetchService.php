@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -14,14 +15,24 @@ class WebFetchService
     private const TIMEOUT_SECONDS = 15;
     private const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
     private const MAX_TEXT_LENGTH = 50000; // chars returned to LLM
+    private const CACHE_TTL = 600; // 10 minutes page cache
 
     /**
      * Fetch a URL and return extracted text content.
+     * Uses page cache (D10.5) to avoid re-fetching.
      *
      * @return array{success: bool, url: string, title: ?string, text: ?string, error: ?string, length: int}
      */
-    public function fetch(string $url): array
+    public function fetch(string $url, bool $useCache = true): array
     {
+        // Page cache (D10.5)
+        if ($useCache) {
+            $cacheKey = 'web_fetch:' . md5($url);
+            $cached = Cache::get($cacheKey);
+            if ($cached) {
+                return $cached;
+            }
+        }
         // Validate URL scheme
         $parsed = parse_url($url);
         $scheme = strtolower($parsed['scheme'] ?? '');
@@ -65,7 +76,14 @@ class WebFetchService
             $text = $this->htmlToText($body);
             $text = mb_substr($text, 0, self::MAX_TEXT_LENGTH);
 
-            return $this->success($url, $title, $text);
+            $result = $this->success($url, $title, $text);
+
+            // Cache the result
+            if ($useCache) {
+                Cache::put($cacheKey, $result, self::CACHE_TTL);
+            }
+
+            return $result;
         } catch (\Exception $e) {
             Log::warning('WebFetchService failed', ['url' => $url, 'error' => $e->getMessage()]);
             return $this->error($url, $e->getMessage());
@@ -143,6 +161,112 @@ class WebFetchService
             'error' => null,
             'length' => mb_strlen($text),
         ];
+    }
+
+    /**
+     * Extract specific content from a page using CSS-like selectors (D10.1).
+     * Uses DOMDocument + XPath for advanced HTML parsing.
+     */
+    public function extract(string $url, string $selector): array
+    {
+        $fetchResult = $this->fetch($url);
+        if (!$fetchResult['success']) {
+            return $fetchResult;
+        }
+
+        // Re-fetch raw HTML for DOM parsing
+        try {
+            $response = Http::timeout(self::TIMEOUT_SECONDS)
+                ->withHeaders(['User-Agent' => 'ZeniClaw/1.0 (Web Extract Bot)'])
+                ->get($url);
+
+            if (!$response->successful()) {
+                return $this->error($url, "HTTP {$response->status()}");
+            }
+
+            $html = $response->body();
+            $dom = new \DOMDocument();
+            @$dom->loadHTML(mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'), LIBXML_NOERROR);
+            $xpath = new \DOMXPath($dom);
+
+            // Convert simple CSS selectors to XPath
+            $xpathQuery = $this->cssToXpath($selector);
+            $nodes = $xpath->query($xpathQuery);
+
+            if ($nodes === false || $nodes->length === 0) {
+                return [
+                    'success' => true,
+                    'url' => $url,
+                    'selector' => $selector,
+                    'results' => [],
+                    'count' => 0,
+                    'error' => null,
+                ];
+            }
+
+            $results = [];
+            foreach ($nodes as $node) {
+                $text = trim($node->textContent);
+                if ($text) {
+                    $results[] = $text;
+                }
+            }
+
+            return [
+                'success' => true,
+                'url' => $url,
+                'selector' => $selector,
+                'results' => array_slice($results, 0, 50),
+                'count' => count($results),
+                'error' => null,
+            ];
+        } catch (\Exception $e) {
+            return $this->error($url, "Extract failed: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Convert simple CSS selectors to XPath.
+     */
+    private function cssToXpath(string $css): string
+    {
+        // Handle common CSS selectors
+        $css = trim($css);
+
+        // ID selector: #id
+        if (str_starts_with($css, '#')) {
+            $id = substr($css, 1);
+            return "//*[@id='{$id}']";
+        }
+
+        // Class selector: .class
+        if (str_starts_with($css, '.')) {
+            $class = substr($css, 1);
+            return "//*[contains(@class, '{$class}')]";
+        }
+
+        // Tag selector: tag
+        if (preg_match('/^[a-zA-Z][a-zA-Z0-9]*$/', $css)) {
+            return "//{$css}";
+        }
+
+        // Tag.class selector: tag.class
+        if (preg_match('/^([a-zA-Z]+)\.([a-zA-Z0-9_-]+)$/', $css, $m)) {
+            return "//{$m[1]}[contains(@class, '{$m[2]}')]";
+        }
+
+        // Tag#id selector: tag#id
+        if (preg_match('/^([a-zA-Z]+)#([a-zA-Z0-9_-]+)$/', $css, $m)) {
+            return "//{$m[1]}[@id='{$m[2]}']";
+        }
+
+        // Attribute selector: [attr=value]
+        if (preg_match('/^\[([a-zA-Z-]+)=["\']?(.+?)["\']?\]$/', $css, $m)) {
+            return "//*[@{$m[1]}='{$m[2]}']";
+        }
+
+        // Fallback: treat as XPath directly
+        return $css;
     }
 
     private function error(string $url, string $message): array

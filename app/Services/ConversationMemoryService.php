@@ -39,6 +39,21 @@ class ConversationMemoryService
             'summary' => $summary,
         ];
 
+        // Bound conversation files: archive old entries beyond 500
+        if (count($data['entries']) > 500) {
+            $overflow = array_slice($data['entries'], 0, -500);
+            $data['entries'] = array_slice($data['entries'], -500);
+
+            // Archive overflow to a separate file
+            $archivePath = $this->path($agentId, $peerId) . '.archive';
+            $archiveData = [];
+            if (Storage::disk('local')->exists($archivePath)) {
+                $archiveData = json_decode(Storage::disk('local')->get($archivePath), true) ?: [];
+            }
+            $archiveData = array_merge($archiveData, $overflow);
+            Storage::disk('local')->put($archivePath, json_encode($archiveData, JSON_UNESCAPED_UNICODE));
+        }
+
         $path = $this->path($agentId, $peerId);
         Storage::disk('local')->put($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }

@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Agent;
 use App\Models\AgentLog;
 use App\Models\AgentSession;
+use App\Models\AuditLog;
 use App\Services\AgentContext;
 use App\Services\AgentOrchestrator;
+use App\Services\RateLimiter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -177,6 +179,17 @@ class ChannelController extends Controller
                 }
             }
 
+            // Rate limiting check
+            $rateLimitError = RateLimiter::check($from);
+            if ($rateLimitError) {
+                AuditLog::logSecurity($from, 'rate_limited', ['body' => mb_substr($body ?? '', 0, 50)]);
+                return response()->json(['ok' => true, 'blocked' => 'rate_limit']);
+            }
+            RateLimiter::hit($from);
+
+            // Fire MessageReceived event
+            \App\Events\MessageReceived::dispatch('whatsapp', $from, $body, $hasMedia);
+
             // Create or update AgentSession
             $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $from);
             $pushName = $payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? null;
@@ -232,6 +245,14 @@ class ChannelController extends Controller
                 return response()->json(['error' => 'Message is required'], 400);
             }
 
+            // Rate limiting check for web chat
+            $peerId = 'web-' . $user->id;
+            $rateLimitError = RateLimiter::check($peerId);
+            if ($rateLimitError) {
+                return response()->json(['error' => $rateLimitError], 429);
+            }
+            RateLimiter::hit($peerId);
+
             // Use specified agent or first active agent
             $agent = $agentId
                 ? $user->agents()->findOrFail($agentId)
@@ -270,12 +291,21 @@ class ChannelController extends Controller
             $orchestrator = new AgentOrchestrator();
             $result = $orchestrator->process($context);
 
+            $subAgentId = $result->metadata['sub_agent_id'] ?? $result->metadata['background_task_id'] ?? null;
+
+            Log::info('WebChat response', [
+                'action' => $result->action,
+                'metadata' => $result->metadata,
+                'sub_agent_id' => $subAgentId,
+                'reply_len' => strlen($result->reply ?? ''),
+            ]);
+
             $response = [
                 'ok' => true,
                 'reply' => $result->reply ?? 'No response',
                 'action' => $result->action,
                 'agent' => $agent->name,
-                'sub_agent_id' => $result->metadata['sub_agent_id'] ?? null,
+                'sub_agent_id' => $subAgentId,
                 'debug_mode' => $session->debug_mode ?? false,
             ];
 
@@ -299,9 +329,13 @@ class ChannelController extends Controller
         $subAgent = \App\Models\SubAgent::findOrFail($id);
 
         $findings = null;
-        if ($subAgent->status === 'completed' && $subAgent->output_log) {
-            // Extract Claude's findings from [RESULT] blocks
-            $findings = $this->extractSubAgentFindings($subAgent->output_log);
+        if ($subAgent->status === 'completed') {
+            // Use result field first (RunTaskJob stores reply there)
+            $findings = $subAgent->result;
+            // Fallback: extract from output_log
+            if (!$findings && $subAgent->output_log) {
+                $findings = $this->extractSubAgentFindings($subAgent->output_log);
+            }
         }
 
         return response()->json([

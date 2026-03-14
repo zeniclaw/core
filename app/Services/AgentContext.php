@@ -28,6 +28,7 @@ class AgentContext
         public ?int $currentSubAgentId = null,
         public int $currentDepth = 0,
         public int $interAgentCallCount = 0,
+        public ?string $sourceAgent = null,
     ) {}
 
     public function phone(): string
@@ -62,6 +63,7 @@ class AgentContext
             currentSubAgentId: $this->currentSubAgentId,
             currentDepth: $this->currentDepth,
             interAgentCallCount: $this->interAgentCallCount,
+            sourceAgent: $this->sourceAgent,
         );
     }
 
@@ -87,6 +89,7 @@ class AgentContext
             currentSubAgentId: $this->currentSubAgentId,
             currentDepth: $this->currentDepth,
             interAgentCallCount: $this->interAgentCallCount,
+            sourceAgent: $this->sourceAgent,
         );
     }
 
@@ -112,6 +115,7 @@ class AgentContext
             currentSubAgentId: $this->currentSubAgentId,
             currentDepth: $this->currentDepth,
             interAgentCallCount: $this->interAgentCallCount,
+            sourceAgent: $this->sourceAgent,
         );
     }
 }

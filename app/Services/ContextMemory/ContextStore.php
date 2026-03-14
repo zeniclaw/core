@@ -95,11 +95,11 @@ class ContextStore
             );
         }
 
-        // Sort by relevance score descending, keep top 50
+        // Sort by relevance score descending, keep top 200
         $result = array_values($indexed);
         usort($result, fn($a, $b) => ($b['score'] ?? 0.5) <=> ($a['score'] ?? 0.5));
 
-        return array_slice($result, 0, 50);
+        return array_slice($result, 0, 200);
     }
 
     private function persistToDatabase(string $userId, array $facts): void

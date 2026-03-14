@@ -17,7 +17,7 @@ class AgenticLoop
     private int $maxIterations;
     private bool $debug;
 
-    public function __construct(int $maxIterations = 10, bool $debug = false)
+    public function __construct(int $maxIterations = 15, bool $debug = false)
     {
         $this->claude = new AnthropicClient();
         $this->maxIterations = $maxIterations;
@@ -160,18 +160,32 @@ class AgenticLoop
 
                 $this->debugLog($context, "Tool call: {$toolName}", $toolInput);
 
-                $result = $context->toolRegistry
-                    ? $context->toolRegistry->execute($toolName, $toolInput, $context)
-                    : AgentTools::execute($toolName, $toolInput, $context);
+                $isError = false;
+                try {
+                    $result = $context->toolRegistry
+                        ? $context->toolRegistry->execute($toolName, $toolInput, $context)
+                        : AgentTools::execute($toolName, $toolInput, $context);
+                } catch (\Throwable $e) {
+                    // Re-report tool errors to LLM so it can adapt its strategy
+                    $result = json_encode([
+                        'error' => true,
+                        'tool' => $toolName,
+                        'message' => $e->getMessage(),
+                        'hint' => 'L\'outil a echoue. Adapte ta strategie: essaie un autre outil ou reformule ta requete.',
+                    ]);
+                    $isError = true;
+                    Log::warning("AgenticLoop: tool {$toolName} threw exception", ['error' => $e->getMessage()]);
+                }
                 $totalToolCalls++;
                 $toolsUsed[] = $toolName;
 
-                $this->debugLog($context, "Tool result: {$toolName}", ['result' => mb_substr($result, 0, 200)]);
+                $this->debugLog($context, "Tool result: {$toolName}" . ($isError ? ' [ERROR]' : ''), ['result' => mb_substr($result, 0, 200)]);
 
                 $toolResults[] = [
                     'type' => 'tool_result',
                     'tool_use_id' => $toolUseId,
                     'content' => $result,
+                    ...($isError ? ['is_error' => true] : []),
                 ];
             }
 

@@ -127,6 +127,61 @@ class AgentOrchestrator
         return $agentCache[$name] ?? null;
     }
 
+    /**
+     * Hot reload a specific agent (D12.4).
+     * Re-instantiate and re-register a single agent without restarting the app.
+     */
+    public function hotReloadAgent(string $agentName): bool
+    {
+        $agentDir = app_path('Services/Agents');
+        $namespace = 'App\\Services\\Agents\\';
+
+        foreach (glob("{$agentDir}/*Agent.php") as $file) {
+            $className = basename($file, '.php');
+            if (in_array($className, self::EXCLUDED_AGENTS)) continue;
+
+            $fqcn = $namespace . $className;
+            try {
+                $reflection = new \ReflectionClass($fqcn);
+                if ($reflection->isAbstract() || !$reflection->isSubclassOf(BaseAgent::class)) continue;
+
+                $agent = new $fqcn();
+                if ($agent->name() === $agentName) {
+                    $this->agents[$agentName] = $agent;
+                    // Re-register tool provider
+                    if ($agent instanceof ToolProviderInterface && !empty($agent->tools())) {
+                        $this->toolRegistry->register($agent);
+                    }
+                    $this->router->registerAgents($this->agents);
+                    Log::info("Hot reloaded agent: {$agentName}");
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Hot reload failed for {$className}: " . $e->getMessage());
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get list of all registered agent names and their versions.
+     */
+    public function listAgents(): array
+    {
+        $list = [];
+        foreach ($this->agents as $name => $agent) {
+            $list[$name] = [
+                'name' => $name,
+                'class' => get_class($agent),
+                'description' => $agent->description(),
+                'version' => $agent->version(),
+                'tools_count' => count($agent->tools()),
+            ];
+        }
+        return $list;
+    }
+
     public function process(AgentContext $context): AgentResult
     {
         try {
@@ -154,7 +209,9 @@ class AgentOrchestrator
             }
 
             // 2. Route the message
+            \App\Events\BeforeRouting::dispatch($context);
             $routing = $this->router->route($context);
+            \App\Events\AfterRouting::dispatch($context, $routing);
 
             // Log routing decision
             AgentLog::create([

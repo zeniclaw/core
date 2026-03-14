@@ -61,6 +61,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Web chat API
     Route::post('/api/chat', [ChannelController::class, 'webChat'])->name('api.chat');
+    Route::post('/api/chat/stream', [\App\Http\Controllers\StreamController::class, 'stream'])->name('api.chat.stream');
     Route::get('/api/subagent/{id}/status', [ChannelController::class, 'subAgentStatus'])->name('api.subagent.status');
 
     // Context Memory Bridge debug endpoint
@@ -75,6 +76,10 @@ Route::middleware(['auth'])->group(function () {
 
     // AI Assistant stats API
     Route::get('/api/agents/stats', [AgentController::class, 'agentStats'])->name('api.agents.stats');
+
+    // Skills marketplace (D12.3)
+    Route::get('/api/agents/skills', [AgentController::class, 'skillsMarketplace'])->name('api.agents.skills');
+    Route::post('/api/agents/{agent}/skills/import', [AgentController::class, 'importSkill'])->name('api.agents.skills.import');
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
@@ -190,6 +195,11 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/debug/toggle-auto-improve', [DebugController::class, 'toggleAutoImprove'])->name('debug.toggle-auto-improve');
         Route::post('/debug/trigger-auto-improve', [DebugController::class, 'triggerAutoImprove'])->name('debug.trigger-auto-improve');
         Route::get('/debug/system-info', [DebugController::class, 'systemInfo'])->name('debug.system-info');
+
+        // Monitoring & Observability (D15.2, D15.3, D14.3)
+        Route::get('/monitoring', [\App\Http\Controllers\MonitoringController::class, 'dashboard'])->name('monitoring');
+        Route::get('/monitoring/health', [\App\Http\Controllers\MonitoringController::class, 'healthCheck'])->name('monitoring.health');
+        Route::get('/monitoring/alerts', [\App\Http\Controllers\MonitoringController::class, 'alerts'])->name('monitoring.alerts');
     });
 });
 

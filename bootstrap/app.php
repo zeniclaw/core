@@ -17,6 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'webhook/*',
             'api/public-chat',
         ]);
+        $middleware->alias([
+            'role' => \App\Http\Middleware\RequireRole::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

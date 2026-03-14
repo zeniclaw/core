@@ -51,14 +51,8 @@ class RouterAgent
         // Mood → mood_check
         '/^(je\s+(me\s+sens|suis)\s+(fatigu|stress|triste|heureux|bien|mal|nul|depress|anxieu|énervé|content|motivé))/iu'
             => ['mood_check', 'fast', 'simple', 'auto'],
-        // Hangman → hangman
-        '/\b(pendu|hangman|jouer\s+au\s+pendu)\b/iu'
-            => ['hangman', 'fast', 'simple', 'auto'],
-        // Quiz / trivia / challenge → interactive_quiz
-        '/\b(quiz|quizz|trivia|qcm|challenge)\b/iu'
-            => ['interactive_quiz', 'fast', 'simple', 'auto'],
-        // Game master → game_master
-        '/\b(jeu|game|jouer|play|startgame|enigme|devinette|riddle|anagramme|20\s*questions)\b/iu'
+        // Games (hangman, quiz, riddles) → game_master (consolidated D3.3)
+        '/\b(pendu|hangman|quiz|quizz|trivia|qcm|challenge|enigme|devinette|riddle|anagramme|20\s*questions|startgame)\b/iu'
             => ['game_master', 'fast', 'simple', 'auto'],
         // Preferences / profile → user_preferences
         '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
@@ -66,10 +60,8 @@ class RouterAgent
         // Content curation → content_curator
         '/\b(digest|trending|tendance|follow\s+\w+|veille|curation|mes\s+bookmarks?|resume\s+quotidien|daily\s+digest)\b/iu'
             => ['content_curator', 'fast', 'simple', 'auto'],
-        // Workflow / chain / streamline → streamline
-        '/^\/workflow\b/iu'
-            => ['streamline', 'fast', 'simple', 'confirm'],
-        '/\b(workflow|chain|enchainer|chainer|pipeline)\s+.*(then|puis|ensuite|etape)/iu'
+        // Workflow / chain / streamline → streamline (consolidated D3.3)
+        '/(?:^\/workflow\b|\b(?:workflow|chain|enchainer|chainer|pipeline)\s+.*(?:then|puis|ensuite|etape))/iu'
             => ['streamline', 'fast', 'simple', 'confirm'],
         // Budget tracker → budget_tracker
         '/\b(d[eé]pense\s+\d|budget\s+\d|\d+\s*€|j[\x27\x{2019}]ai\s+(?:d[eé]pens[eé]|pay[eé])\s+\d|r[eé]sum[eé]\s+budget|mes\s+d[eé]penses|reset\s+budget|cat[eé]gories\s+budget)\b/iu'
@@ -77,12 +69,8 @@ class RouterAgent
         // Daily brief → daily_brief
         '/\b(daily\s*brief|mon\s+brief|briefing\s+du\s+jour|r[eé]sum[eé]\s+du\s+jour|r[eé]sum[eé]\s+matinal|morning\s+brief|configure\s+brief|enable\s+brief|disable\s+brief)\b/iu'
             => ['daily_brief', 'fast', 'simple', 'auto'],
-        // Collaborative task / vote → collaborative_task
-        '/^\/(?:vote|approve|decide)\b/iu'
-            => ['collaborative_task', 'fast', 'simple', 'confirm'],
-        '/\b(voter?\s+(?:pour|contre)\s+\d+|consensus|votes?\s+en\s+cours|proposer\s+|soumettre\s+|sondage|poll)\b/iu'
-            => ['collaborative_task', 'fast', 'simple', 'confirm'],
-        '/^(👍|👎|❓)\s*\d+\s*$/u'
+        // Collaborative task / vote → collaborative_task (consolidated D3.3)
+        '/(?:^\/(?:vote|approve|decide)\b|\b(?:voter?\s+(?:pour|contre)\s+\d+|consensus|votes?\s+en\s+cours|proposer\s+|soumettre\s+|sondage|poll)\b|^[👍👎❓]\s*\d+\s*$)/iu'
             => ['collaborative_task', 'fast', 'simple', 'confirm'],
         // Recipe / cooking → recipe
         '/\b(recette|cuisiner|cuisine|qu[\x27\x{2019}]est[\s-]ce\s+que\s+je\s+peux\s+faire\s+avec|quoi\s+cuisiner|recipe|cook|meal\s+prep|ingr[eé]dients?\s+disponibles?|plat\s+du\s+jour|liste\s+de\s+courses)\b/iu'
@@ -334,6 +322,7 @@ PROMPT;
 
     /**
      * Build the agent catalog section from registered agents.
+     * Includes capabilities (tools) for capability-based routing (D3.2, D3.5).
      */
     private function buildAgentCatalog(): string
     {
@@ -351,11 +340,27 @@ PROMPT;
             $keywords = method_exists($agent, 'keywords') ? $agent->keywords() : [];
             $version = method_exists($agent, 'version') ? $agent->version() : '1.0.0';
 
+            // Capability-based routing (D3.5): list tools each agent provides
+            $capabilities = [];
+            if ($agent instanceof ToolProviderInterface && method_exists($agent, 'tools')) {
+                $tools = $agent->tools();
+                foreach ($tools as $tool) {
+                    $toolName = $tool['name'] ?? '';
+                    // Skip base tools that all agents share
+                    if (in_array($toolName, ['teach_skill', 'list_skills', 'forget_skill', 'memory_store', 'memory_search', 'spawn_subagent', 'send_agent_message'])) {
+                        continue;
+                    }
+                    $capabilities[] = $toolName;
+                }
+            }
+
             $keywordsStr = !empty($keywords) ? implode(', ', array_slice($keywords, 0, 30)) : 'aucun';
+            $capsStr = !empty($capabilities) ? implode(', ', $capabilities) : 'aucun outil specifique';
 
             $lines[] = "■ \"{$name}\" (v{$version})";
             $lines[] = "  Description: {$description}";
             $lines[] = "  Mots-cles: {$keywordsStr}";
+            $lines[] = "  Outils: {$capsStr}";
             $lines[] = "";
         }
 
