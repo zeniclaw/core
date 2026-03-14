@@ -80,10 +80,22 @@ class StreamController extends Controller
             $this->sendSSE('start', ['status' => 'processing']);
 
             try {
+                // Try direct Anthropic streaming for simple chat (no tools needed)
                 $orchestrator = new AgentOrchestrator();
+
+                // Check if this is a simple chat that can use direct streaming
+                $agentType = $context->agent->type ?? 'chat';
+                $useDirectStream = in_array($agentType, ['chat', 'general', 'default']);
+
+                if ($useDirectStream) {
+                    $this->streamDirect($context);
+                    return;
+                }
+
+                // Fallback: full orchestrator processing with chunked output
                 $result = $orchestrator->process($context);
 
-                // Stream the reply in chunks (simulates token-by-token for now)
+                // Stream the reply in chunks (simulates token-by-token)
                 $reply = $result->reply ?? 'No response';
                 $chunks = $this->chunkText($reply, 50); // ~50 char chunks
 
@@ -114,6 +126,51 @@ class StreamController extends Controller
             'Connection' => 'keep-alive',
             'X-Accel-Buffering' => 'no', // Disable nginx buffering
         ]);
+    }
+
+    /**
+     * Stream directly from the Anthropic API for simple chat messages.
+     */
+    private function streamDirect(AgentContext $context): void
+    {
+        $claude = new \App\Services\AnthropicClient();
+        $model = \App\Services\ModelResolver::balanced();
+
+        $systemPrompt = "Tu es ZeniClaw, un assistant IA personnel intelligent et bienveillant. Reponds en francais sauf si l'utilisateur parle une autre langue.";
+
+        $messages = [
+            ['role' => 'user', 'content' => $context->body],
+        ];
+
+        $fullText = '';
+        foreach ($claude->chatStream($messages, $model, $systemPrompt) as $event) {
+            match ($event['type']) {
+                'text_delta' => (function () use ($event, &$fullText) {
+                    $fullText .= $event['data'];
+                    $this->sendSSE('token', ['text' => $event['data']]);
+                })(),
+                'done' => $this->sendSSE('done', [
+                    'full_reply' => $fullText,
+                    'action' => 'reply',
+                    'streamed' => true,
+                ]),
+                'error' => $this->sendSSE('error', ['message' => $event['data']]),
+                default => null,
+            };
+        }
+
+        // Save to conversation memory
+        if ($fullText) {
+            $memory = new \App\Services\ConversationMemoryService();
+            $memory->append(
+                $context->agent->id,
+                $context->from,
+                $context->senderName,
+                $context->body,
+                $fullText,
+                ''
+            );
+        }
     }
 
     private function sendSSE(string $event, array $data): void

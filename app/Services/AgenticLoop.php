@@ -55,6 +55,8 @@ class AgenticLoop
         $toolsUsed = [];
 
         for ($iteration = 0; $iteration < $this->maxIterations; $iteration++) {
+            $this->compactMessages($messages, $context);
+
             $response = $this->claude->chatWithToolUse($messages, $model, $systemPrompt, $tools);
 
             if (!$response) {
@@ -232,6 +234,76 @@ class AgenticLoop
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Compact messages when approaching context limits (D1.3).
+     * Summarizes older tool results to reduce token count.
+     */
+    private function compactMessages(array &$messages, AgentContext $context): void
+    {
+        // Estimate token count (rough: 4 chars ≈ 1 token)
+        $totalChars = 0;
+        foreach ($messages as $msg) {
+            $content = $msg['content'] ?? '';
+            $totalChars += is_string($content) ? strlen($content) : strlen(json_encode($content));
+        }
+        $estimatedTokens = $totalChars / 4;
+
+        // Compact if approaching 80% of context window (128K for Claude = ~100K usable)
+        if ($estimatedTokens < 80000) {
+            return;
+        }
+
+        Log::info('AgenticLoop: compacting messages', [
+            'estimated_tokens' => $estimatedTokens,
+            'message_count' => count($messages),
+        ]);
+
+        // Keep first message (user query) and last 4 messages (recent context)
+        // Summarize everything in between
+        if (count($messages) <= 6) {
+            return;
+        }
+
+        $first = $messages[0]; // Original user message
+        $last4 = array_slice($messages, -4);
+        $middle = array_slice($messages, 1, count($messages) - 5);
+
+        // Build summary of middle messages
+        $toolSummary = [];
+        foreach ($middle as $msg) {
+            $content = $msg['content'] ?? '';
+            if ($msg['role'] === 'user' && is_array($content)) {
+                // tool_result messages
+                foreach ($content as $block) {
+                    if (is_array($block) && ($block['type'] ?? '') === 'tool_result') {
+                        $result = $block['content'] ?? '';
+                        $toolSummary[] = mb_substr(is_string($result) ? $result : json_encode($result), 0, 200);
+                    }
+                }
+            } elseif ($msg['role'] === 'assistant' && is_array($content)) {
+                foreach ($content as $block) {
+                    if (is_array($block) && ($block['type'] ?? '') === 'tool_use') {
+                        $toolSummary[] = "[Tool: {$block['name']}]";
+                    }
+                }
+            }
+        }
+
+        $summaryText = "CONTEXT COMPACTE (iterations precedentes):\n" . implode("\n", array_slice($toolSummary, -20));
+
+        $messages = [
+            $first,
+            ['role' => 'assistant', 'content' => $summaryText],
+            ['role' => 'user', 'content' => 'Continue avec les informations collectees.'],
+            ...$last4,
+        ];
+
+        Log::info('AgenticLoop: compacted', [
+            'new_count' => count($messages),
+            'summary_len' => strlen($summaryText),
+        ]);
     }
 
     private function debugLog(AgentContext $context, string $message, array $data = []): void

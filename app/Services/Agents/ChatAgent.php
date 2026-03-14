@@ -450,6 +450,33 @@ class ChatAgent extends BaseAgent
     {
         $message = $context->body ?? '';
 
+        // Multi-image support (D9.3): handle multiple images in one message
+        if (is_array($context->media) && count($context->media) > 1) {
+            $contentBlocks = [];
+            foreach ($context->media as $mediaItem) {
+                $url = $mediaItem['url'] ?? null;
+                $mime = $mediaItem['mimetype'] ?? 'image/jpeg';
+                if (!$url || !in_array($mime, self::SUPPORTED_IMAGE_TYPES)) continue;
+
+                $data = $this->downloadMedia($url);
+                if ($data) {
+                    $contentBlocks[] = [
+                        'type' => 'image',
+                        'source' => [
+                            'type' => 'base64',
+                            'media_type' => $mime,
+                            'data' => $data,
+                        ],
+                    ];
+                }
+            }
+            if (!empty($contentBlocks)) {
+                $prompt = $context->body ?? "Analyse ces " . count($contentBlocks) . " images ensemble. Compare-les et decris ce que tu vois.";
+                $contentBlocks[] = ['type' => 'text', 'text' => $prompt];
+                return $contentBlocks;
+            }
+        }
+
         if ($context->hasMedia && $context->mediaUrl) {
             $mimetype = $context->mimetype ?? '';
 

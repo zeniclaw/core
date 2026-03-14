@@ -1,0 +1,18 @@
+<?php
+
+namespace App\Events;
+
+use App\Models\AgentSession;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class SessionStarted
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public readonly AgentSession $session,
+        public readonly string $channel,
+        public readonly string $peerId,
+    ) {}
+}

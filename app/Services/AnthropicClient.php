@@ -181,6 +181,11 @@ class AnthropicClient
 
                 if (!$error['retryable'] || $attempt >= $maxRetries) {
                     $this->recordFailure();
+                    // Cooldown this API key on rate limit (D5 key rotation)
+                    if ($error['type'] === 'rate_limit') {
+                        $retryAfterSec = (int) ($response->header('Retry-After') ?? 60);
+                        $this->cooldownApiKey($headers['x-api-key'] ?? null, $retryAfterSec);
+                    }
                     return $response;
                 }
 
@@ -711,6 +716,189 @@ class AnthropicClient
         ]);
 
         return null;
+    }
+
+    /**
+     * Get the API key for Anthropic with rotation support (D5 enhanced).
+     * Supports multiple keys: anthropic_api_key, anthropic_api_key_2, anthropic_api_key_3
+     * Rotates to next key when one is rate-limited.
+     */
+    private function getApiKey(): ?string
+    {
+        $keys = array_filter([
+            AppSetting::get('anthropic_api_key'),
+            AppSetting::get('anthropic_api_key_2'),
+            AppSetting::get('anthropic_api_key_3'),
+        ]);
+
+        if (empty($keys)) return null;
+        if (count($keys) === 1) return $keys[0];
+
+        // Check which keys are on cooldown
+        foreach ($keys as $key) {
+            $cooldownKey = 'api_key_cooldown:' . md5($key);
+            if (!Cache::has($cooldownKey)) {
+                return $key;
+            }
+        }
+
+        // All on cooldown — return the one with earliest expiry
+        return $keys[0];
+    }
+
+    /**
+     * Put an API key on cooldown (after rate limit).
+     */
+    private function cooldownApiKey(?string $apiKey, int $seconds = 60): void
+    {
+        if (!$apiKey) return;
+        Cache::put('api_key_cooldown:' . md5($apiKey), true, $seconds);
+    }
+
+    /**
+     * Stream a chat response from the Anthropic API (D1.4 enhanced).
+     * Yields content blocks as they arrive.
+     *
+     * @param array $messages
+     * @param string $model
+     * @param string $systemPrompt
+     * @param array $tools
+     * @param int $maxTokens
+     * @return \Generator yields ['type' => 'text_delta'|'tool_use'|'done'|'error', 'data' => ...]
+     */
+    public function chatStream(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): \Generator
+    {
+        $apiKey = $this->getApiKey();
+        if (!$apiKey) {
+            yield ['type' => 'error', 'data' => 'No API key configured'];
+            return;
+        }
+
+        $headers = $this->buildHeaders($apiKey);
+        if (!$headers) {
+            yield ['type' => 'error', 'data' => 'Failed to build headers'];
+            return;
+        }
+
+        $body = [
+            'model' => $model,
+            'max_tokens' => $maxTokens,
+            'messages' => $messages,
+            'stream' => true,
+        ];
+
+        if ($systemPrompt) {
+            $body['system'] = $systemPrompt;
+        }
+        if (!empty($tools)) {
+            $body['tools'] = $tools;
+        }
+
+        $timeout = $this->getAdaptiveTimeout($model, false, $maxTokens);
+
+        try {
+            $headerStrings = array_map(
+                fn($k, $v) => "$k: $v",
+                array_keys($headers),
+                $headers
+            );
+
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => implode("\r\n", $headerStrings),
+                    'content' => json_encode($body),
+                    'timeout' => $timeout,
+                    'ignore_errors' => true,
+                ],
+            ]);
+
+            $stream = @fopen("{$this->baseUrl}/messages", 'r', false, $context);
+            if (!$stream) {
+                yield ['type' => 'error', 'data' => 'Failed to open stream'];
+                return;
+            }
+
+            $currentToolBlock = null;
+            $currentToolInput = '';
+            $stopReason = 'end_turn';
+            $usage = null;
+
+            while (!feof($stream)) {
+                $line = fgets($stream);
+                if ($line === false) {
+                    break;
+                }
+                $line = trim($line);
+
+                if (empty($line)) {
+                    continue;
+                }
+                if (!str_starts_with($line, 'data: ')) {
+                    continue;
+                }
+
+                $json = substr($line, 6);
+                if ($json === '[DONE]') {
+                    break;
+                }
+
+                $event = json_decode($json, true);
+                if (!$event) {
+                    continue;
+                }
+
+                $type = $event['type'] ?? '';
+
+                switch ($type) {
+                    case 'content_block_start':
+                        $block = $event['content_block'] ?? [];
+                        if (($block['type'] ?? '') === 'tool_use') {
+                            $currentToolBlock = $block;
+                            $currentToolInput = '';
+                        }
+                        break;
+
+                    case 'content_block_delta':
+                        $delta = $event['delta'] ?? [];
+                        if (($delta['type'] ?? '') === 'text_delta') {
+                            yield ['type' => 'text_delta', 'data' => $delta['text'] ?? ''];
+                        } elseif (($delta['type'] ?? '') === 'input_json_delta') {
+                            $currentToolInput .= $delta['partial_json'] ?? '';
+                        }
+                        break;
+
+                    case 'content_block_stop':
+                        if ($currentToolBlock) {
+                            $currentToolBlock['input'] = json_decode($currentToolInput, true) ?? [];
+                            yield ['type' => 'tool_use', 'data' => $currentToolBlock];
+                            $currentToolBlock = null;
+                            $currentToolInput = '';
+                        }
+                        break;
+
+                    case 'message_delta':
+                        $usage = $event['usage'] ?? null;
+                        $stopReason = $event['delta']['stop_reason'] ?? 'end_turn';
+                        break;
+
+                    case 'message_stop':
+                        yield ['type' => 'done', 'data' => [
+                            'stop_reason' => $stopReason,
+                            'usage' => $usage,
+                        ]];
+                        break;
+
+                    case 'error':
+                        yield ['type' => 'error', 'data' => $event['error']['message'] ?? 'Unknown stream error'];
+                        break;
+                }
+            }
+
+            fclose($stream);
+        } catch (\Throwable $e) {
+            yield ['type' => 'error', 'data' => $e->getMessage()];
+        }
     }
 
     /**

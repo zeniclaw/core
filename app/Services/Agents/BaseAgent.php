@@ -482,6 +482,33 @@ PROMPT;
                     'required' => ['code', 'language'],
                 ],
             ],
+            // ── Audio Transcription Tool (D9.3) ─────────────────────────
+            [
+                'name' => 'transcribe_audio',
+                'description' => 'Transcrire un fichier audio en texte (speech-to-text). Utilise whisper.cpp local ou OpenAI Whisper. Utile quand l\'utilisateur envoie un message vocal ou un fichier audio a transcrire.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'audio_path' => ['type' => 'string', 'description' => 'Chemin vers le fichier audio a transcrire'],
+                        'mimetype' => ['type' => 'string', 'description' => 'Type MIME de l\'audio (ex: audio/ogg, audio/mpeg, audio/wav)', 'default' => 'audio/ogg'],
+                    ],
+                    'required' => ['audio_path'],
+                ],
+            ],
+            // ── Video Analysis Tool (D9.4) ──────────────────────────────
+            [
+                'name' => 'analyze_video',
+                'description' => 'Analyser une video en extrayant des frames cles et en les soumettant a Claude Vision. Fournir le chemin vers un fichier video.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'video_path' => ['type' => 'string', 'description' => 'Chemin vers le fichier video a analyser'],
+                        'question' => ['type' => 'string', 'description' => 'Question specifique sur la video (optionnel)'],
+                        'num_frames' => ['type' => 'integer', 'description' => 'Nombre de frames a extraire (2-8, defaut 4)'],
+                    ],
+                    'required' => ['video_path'],
+                ],
+            ],
         ];
     }
 
@@ -498,6 +525,8 @@ PROMPT;
             'create_audio' => $this->baseCreateAudio($input, $context),
             'create_image' => $this->baseCreateImage($input, $context),
             'run_code' => $this->baseRunCode($input, $context),
+            'analyze_video' => $this->baseAnalyzeVideo($input, $context),
+            'transcribe_audio' => $this->baseTranscribeAudio($input, $context),
             default => null,
         };
     }
@@ -600,6 +629,12 @@ PROMPT;
             return json_encode(['error' => 'Missing query parameter']);
         }
 
+        // Try hybrid search (semantic + keyword) if embeddings available
+        if (\App\Services\EmbeddingService::isAvailable()) {
+            return $this->semanticMemorySearch($query, $context);
+        }
+
+        // Fallback to keyword search
         $memories = \App\Models\ConversationMemory::forUser($context->from)
             ->active()
             ->notExpired()
@@ -620,7 +655,57 @@ PROMPT;
             'created_at' => $m->created_at->format('d/m/Y H:i'),
         ])->toArray();
 
-        return json_encode(['results' => $results, 'count' => count($results)]);
+        return json_encode(['results' => $results, 'count' => count($results), 'search_type' => 'keyword']);
+    }
+
+    /**
+     * Semantic memory search using embeddings (D4.5).
+     * Combines keyword matching with vector similarity for best results.
+     */
+    private function semanticMemorySearch(string $query, AgentContext $context): string
+    {
+        $memories = \App\Models\ConversationMemory::forUser($context->from)
+            ->active()
+            ->notExpired()
+            ->orderByDesc('created_at')
+            ->limit(100) // Get more candidates for semantic ranking
+            ->get();
+
+        if ($memories->isEmpty()) {
+            return json_encode(['results' => [], 'message' => "Aucun souvenir trouve pour: {$query}"]);
+        }
+
+        $items = $memories->map(fn($m) => [
+            'id' => $m->id,
+            'text' => $m->content,
+            'fact_type' => $m->fact_type,
+            'tags' => $m->tags,
+            'created_at' => $m->created_at->format('d/m/Y H:i'),
+        ])->toArray();
+
+        $embedding = new \App\Services\EmbeddingService();
+        $results = $embedding->hybridSearch($query, $items);
+
+        if (empty($results)) {
+            return json_encode(['results' => [], 'message' => "Aucun souvenir semantiquement proche de: {$query}"]);
+        }
+
+        // Clean up results for output
+        $cleaned = array_map(fn($r) => [
+            'id' => $r['id'],
+            'fact_type' => $r['fact_type'],
+            'content' => $r['text'],
+            'tags' => $r['tags'],
+            'created_at' => $r['created_at'],
+            'relevance_score' => $r['score'],
+            'semantic_score' => $r['semantic_score'],
+        ], $results);
+
+        return json_encode([
+            'results' => $cleaned,
+            'count' => count($cleaned),
+            'search_type' => 'hybrid_semantic',
+        ]);
     }
 
     // ── Spawn SubAgent Tool ──────────────────────────────────────
@@ -849,6 +934,105 @@ PROMPT;
         return json_encode($result);
     }
 
+    // ── Video Analysis Tool (D9.4) ─────────────────────────────
+
+    private function baseAnalyzeVideo(array $input, AgentContext $context): string
+    {
+        $videoPath = $input['video_path'] ?? '';
+        $question = $input['question'] ?? null;
+        $numFrames = min(max((int)($input['num_frames'] ?? 4), 2), 8);
+
+        if (!$videoPath || !file_exists($videoPath)) {
+            return json_encode(['error' => 'Fichier video non trouve: ' . $videoPath]);
+        }
+
+        if (!\App\Services\VideoService::isAvailable()) {
+            return json_encode(['error' => 'Analyse video non disponible (ffmpeg requis).']);
+        }
+
+        $videoService = new \App\Services\VideoService();
+        $extraction = $videoService->extractFrames($videoPath, $numFrames);
+
+        if (!$extraction['success']) {
+            return json_encode(['error' => $extraction['error'] ?? 'Echec extraction frames']);
+        }
+
+        // Send frames to Claude Vision for analysis
+        $contentBlocks = $videoService->buildVisionBlocks($extraction['frames'], $question);
+
+        $response = $this->claude->chatWithToolUse(
+            [['role' => 'user', 'content' => $contentBlocks]],
+            \App\Services\ModelResolver::balanced(),
+            'Tu analyses des frames extraites d\'une video. Decris ce que tu vois avec precision.',
+            [],
+            4096
+        );
+
+        $analysis = '';
+        if ($response) {
+            foreach (($response['content'] ?? []) as $block) {
+                if ($block['type'] === 'text') $analysis .= $block['text'];
+            }
+        }
+
+        // Cleanup frame files
+        foreach ($extraction['frames'] as $frame) {
+            if (isset($frame['path'])) @unlink($frame['path']);
+        }
+
+        $this->log($context, 'Video analyzed', [
+            'duration' => $extraction['duration'],
+            'frames' => $extraction['frame_count'],
+        ]);
+
+        return json_encode([
+            'success' => true,
+            'analysis' => $analysis,
+            'duration_seconds' => $extraction['duration'],
+            'frames_analyzed' => $extraction['frame_count'],
+        ]);
+    }
+
+    // ── Audio Transcription Tool (D9.3) ────────────────────────
+
+    private function baseTranscribeAudio(array $input, AgentContext $context): string
+    {
+        $audioPath = $input['audio_path'] ?? '';
+        $mimetype = $input['mimetype'] ?? 'audio/ogg';
+
+        if (!$audioPath || !file_exists($audioPath)) {
+            return json_encode(['error' => 'Fichier audio non trouve: ' . $audioPath]);
+        }
+
+        if (!\App\Services\WhisperService::isAvailable()) {
+            return json_encode(['error' => 'Transcription non disponible (aucun provider configure).']);
+        }
+
+        $audioBytes = file_get_contents($audioPath);
+        if ($audioBytes === false || strlen($audioBytes) === 0) {
+            return json_encode(['error' => 'Impossible de lire le fichier audio.']);
+        }
+
+        // Safety: max 25MB
+        if (strlen($audioBytes) > 25 * 1024 * 1024) {
+            return json_encode(['error' => 'Fichier audio trop volumineux (max 25 Mo).']);
+        }
+
+        $whisper = new \App\Services\WhisperService();
+        $text = $whisper->transcribe($audioBytes, $mimetype);
+
+        if ($text) {
+            $this->log($context, 'Audio transcribed', ['length' => mb_strlen($text)]);
+            return json_encode([
+                'success' => true,
+                'transcription' => $text,
+                'length' => mb_strlen($text),
+            ]);
+        }
+
+        return json_encode(['error' => 'Echec de la transcription audio.']);
+    }
+
     // ── Inter-Agent Circuit Breaker (D6.5) ──────────────────────
 
     private static function isInterAgentCircuitOpen(string $targetAgent): bool
@@ -949,6 +1133,8 @@ Tu fais partie d'un ecosysteme d'agents specialises. Tu as acces a ces outils de
 - create_audio: Convertir du texte en fichier audio (TTS)
 - create_image: Generer une image a partir d'une description (DALL-E)
 - run_code: Executer du code dans un sandbox isole (python, php, bash, node)
+- transcribe_audio: Transcrire un fichier audio en texte (speech-to-text)
+- analyze_video: Analyser une video via extraction de frames + Claude Vision
 
 REGLES DE COLLABORATION:
 1. Si tu as besoin de donnees que tu n'as pas, utilise web_search ou web_fetch AVANT de repondre
