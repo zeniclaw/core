@@ -365,6 +365,9 @@ class DevAgent extends BaseAgent
             return "Aucun projet actif. Selectionne d'abord un projet.";
         }
 
+        // Persist active project so follow-up messages ("fait pareil pour...") keep context
+        $context->session->update(['active_project_id' => $project->id]);
+
         // Pass the full original message so Claude can extract all info (API keys, URLs, etc.)
         $fullMessage = $context->body ?? $query;
         return $this->runApiAgent($project, $fullMessage, [], $context);
