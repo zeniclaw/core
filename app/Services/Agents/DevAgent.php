@@ -510,7 +510,7 @@ PROMPT;
                 // to format it — never trust the LLM's own formatted message
                 // (it hallucinates/replaces real data with invented names)
                 if (!empty($collectedData)) {
-                    return $this->finalizeApiResponse($project, $query, $collectedData);
+                    return $this->finalizeApiResponse($project, $query, $collectedData, $context);
                 }
 
                 // No API data collected — this is a config/info reply, trust it
@@ -575,7 +575,7 @@ PROMPT;
         }
 
         // Max iterations reached — ask Claude to summarize what it has
-        return $this->finalizeApiResponse($project, $query, $collectedData);
+        return $this->finalizeApiResponse($project, $query, $collectedData, $context);
     }
 
     private function executeRawApiCall(array $parsed): array
@@ -705,7 +705,7 @@ PROMPT;
      * the LLM only decide layout/grouping — never touch the actual values.
      * If JSON parsing fails, fall back to LLM formatting with strict rules.
      */
-    private function finalizeApiResponse(Project $project, string $query, array $collectedData): string
+    private function finalizeApiResponse(Project $project, string $query, array $collectedData, ?AgentContext $context = null): string
     {
         // Step 1: Try to extract structured records from all API responses
         $allRecords = [];
