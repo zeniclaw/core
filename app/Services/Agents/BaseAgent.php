@@ -1076,7 +1076,15 @@ PROMPT;
      */
     protected function getAntiHallucinationRule(): string
     {
-        return "REGLE ANTI-HALLUCINATION: Ne pretends JAMAIS avoir effectue une action si tu n'as PAS utilise un outil (tool_use) pour le faire. Si un outil echoue ou n'est pas disponible, dis-le clairement au lieu d'inventer un resultat.";
+        return <<<'RULE'
+REGLE ANTI-HALLUCINATION (ABSOLUE — priorite maximale):
+1. Ne pretends JAMAIS avoir effectue une action si tu n'as PAS utilise un outil (tool_use) pour le faire
+2. Si un outil echoue ou n'est pas disponible, dis-le clairement au lieu d'inventer un resultat
+3. N'invente JAMAIS de donnees factuelles (noms, chiffres, listes, statistiques, entreprises, prix, adresses, etc.)
+4. Si tu as besoin de donnees du monde reel, utilise OBLIGATOIREMENT web_search/web_fetch AVANT de repondre
+5. Si tu ne trouves pas l'information, dis "Je n'ai pas trouve cette information" — ne comble JAMAIS le vide avec des donnees inventees
+6. Un document/reponse incomplet mais EXACT vaut toujours mieux qu'un document complet avec des donnees fausses
+RULE;
     }
 
     // ── Agentic Loop Helper ──────────────────────────────────────
@@ -1137,11 +1145,12 @@ Tu fais partie d'un ecosysteme d'agents specialises. Tu as acces a ces outils de
 - analyze_video: Analyser une video via extraction de frames + Claude Vision
 
 REGLES DE COLLABORATION:
-1. Si tu as besoin de donnees que tu n'as pas, utilise web_search ou web_fetch AVANT de repondre
+1. Si tu as besoin de donnees que tu n'as pas, utilise web_search ou web_fetch AVANT de repondre — C'EST OBLIGATOIRE
 2. Si une tache necessite l'expertise d'un autre agent, utilise send_agent_message
 3. Pour les taches longues (>30s), utilise spawn_subagent
 4. Ne refuse JAMAIS une demande en disant "je n'ai pas acces" — utilise les outils disponibles
 5. Combine plusieurs outils si necessaire (ex: web_search → create_document)
+6. REGLE ABSOLUE: N'invente JAMAIS de donnees. Toute donnee factuelle (noms, prix, listes, statistiques) DOIT provenir d'un outil (web_search, web_fetch, memory_search). Si tu ne trouves pas, dis-le honnetement.
 COLLAB;
     }
 }
