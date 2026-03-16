@@ -195,7 +195,13 @@ if [ -n "$TOKEN" ]; then
 else
     git pull origin main
 fi
-success "Code updated"
+
+# Clean untracked files that may have been generated locally (e.g. by auto-improve)
+# This prevents rogue files from breaking the app after update
+info "Cleaning untracked files..."
+git clean -fd --exclude=.env --exclude=storage/ --exclude=node_modules/ 2>/dev/null || true
+git checkout -- . 2>/dev/null || true
+success "Code updated and cleaned"
 
 # 2. Read new version
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")

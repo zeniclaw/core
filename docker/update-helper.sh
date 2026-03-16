@@ -16,6 +16,10 @@ else
     git pull origin main
 fi
 
+# Clean untracked files that may have been generated locally (e.g. by auto-improve)
+git clean -fd --exclude=.env --exclude=storage/ --exclude=node_modules/ 2>/dev/null || true
+git checkout -- . 2>/dev/null || true
+
 # Read version from Dockerfile
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
 echo "VERSION=$VERSION"

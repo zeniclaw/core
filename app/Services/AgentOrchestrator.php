@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AgentLog;
+use App\Services\AgentManager;
 use App\Models\Project;
 use App\Services\Agents\AgentInterface;
 use App\Services\Agents\AgentResult;
@@ -73,11 +74,19 @@ class AgentOrchestrator
 
             $fqcn = $namespace . $className;
 
-            if (!class_exists($fqcn)) {
-                continue;
-            }
-
             try {
+                // Syntax-check the file before loading to prevent fatal parse errors
+                // from rogue files (e.g. created by auto-improve on disk but not in git)
+                $syntaxCheck = @exec(sprintf('php -l %s 2>&1', escapeshellarg($file)), $output, $exitCode);
+                if ($exitCode !== 0) {
+                    Log::warning("AgentOrchestrator: syntax error in {$className}, skipping", ['file' => $file]);
+                    continue;
+                }
+
+                if (!class_exists($fqcn)) {
+                    continue;
+                }
+
                 $reflection = new \ReflectionClass($fqcn);
                 if ($reflection->isAbstract() || !$reflection->isSubclassOf(BaseAgent::class)) {
                     continue;
@@ -110,9 +119,14 @@ class AgentOrchestrator
                 if (in_array($className, ['BaseAgent', 'RouterAgent'])) continue;
 
                 $fqcn = $namespace . $className;
-                if (!class_exists($fqcn)) continue;
 
                 try {
+                    // Syntax-check before loading
+                    @exec(sprintf('php -l %s 2>&1', escapeshellarg($file)), $output, $exitCode);
+                    if ($exitCode !== 0) continue;
+
+                    if (!class_exists($fqcn)) continue;
+
                     $reflection = new \ReflectionClass($fqcn);
                     if ($reflection->isAbstract() || !$reflection->isSubclassOf(BaseAgent::class)) continue;
 
@@ -214,15 +228,10 @@ class AgentOrchestrator
             \App\Events\AfterRouting::dispatch($context, $routing);
 
             // Log routing decision
-            AgentLog::create([
-                'agent_id' => $context->agent->id,
-                'level' => 'info',
-                'message' => 'Router decision',
-                'context' => [
-                    'from' => $context->from,
-                    'body' => mb_substr($context->body ?? '', 0, 100),
-                    'routing' => $routing,
-                ],
+            AgentManager::log($context->agent->id, 'orchestrator', 'Router decision', [
+                'from'    => $context->from,
+                'body'    => mb_substr($context->body ?? '', 0, 100),
+                'routing' => $routing,
             ]);
 
             // Override model if the agent has a specific sub-agent model configured
@@ -578,14 +587,9 @@ class AgentOrchestrator
             if ($isNew) {
                 $awaitingProject->update(['status' => 'rejected']);
 
-                AgentLog::create([
-                    'agent_id' => $context->agent->id,
-                    'level' => 'info',
-                    'message' => 'Awaiting validation auto-cancelled — new intent detected',
-                    'context' => [
-                        'project_id' => $awaitingProject->id,
-                        'new_message' => mb_substr($context->body, 0, 100),
-                    ],
+                AgentManager::log($context->agent->id, 'orchestrator', 'Awaiting validation auto-cancelled — new intent detected', [
+                    'project_id'  => $awaitingProject->id,
+                    'new_message' => mb_substr($context->body, 0, 100),
                 ]);
 
                 return null;
@@ -671,12 +675,7 @@ class AgentOrchestrator
 
         // Handle handoff
         if ($result->action === 'handoff' && $result->handoffTo) {
-            AgentLog::create([
-                'agent_id' => $context->agent->id,
-                'level' => 'info',
-                'message' => "Handoff: {$agentName} → {$result->handoffTo}",
-                'context' => $result->metadata,
-            ]);
+            AgentManager::log($context->agent->id, 'orchestrator', "Handoff: {$agentName} → {$result->handoffTo}", $result->metadata ?? []);
 
             return $this->dispatch($context, $result->handoffTo, $depth + 1);
         }
