@@ -26,6 +26,7 @@ class PreferencesManager
                 'date_format' => $pref->date_format,
                 'unit_system' => $pref->unit_system,
                 'communication_style' => $pref->communication_style,
+                'theme' => $pref->theme,
                 'notification_enabled' => $pref->notification_enabled,
                 'phone' => $pref->phone,
                 'email' => $pref->email,
