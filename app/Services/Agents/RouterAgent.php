@@ -55,7 +55,7 @@ class RouterAgent
         '/\b(pendu|hangman|quiz|quizz|trivia|qcm|challenge|enigme|devinette|riddle|anagramme|20\s*questions|startgame)\b/iu'
             => ['game_master', 'fast', 'simple', 'auto'],
         // Preferences / profile → user_preferences
-        '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences)/iu'
+        '/^(set\s+(language|timezone|date_format|unit_system|communication_style|notification|phone|email)\b|show\s+prefer|mes\s+pr[eé]f[eé]rences|mon\s+profil|my\s+profile|my\s+preferences|import\s+prefer|export\s+prefer|reset\s+prefer|historique\s+prefer|preference\s+history|mode\s+(formel|concis|decontracte|detaille)|passe\s+en\s+(anglais|francais|espagnol)|switch\s+to\s+(english|french|spanish)|fuseaux?\s+disponibles|available\s+timezones)/iu'
             => ['user_preferences', 'fast', 'simple', 'confirm'],
         // Content curation → content_curator
         '/\b(digest|trending|tendance|follow\s+\w+|veille|curation|mes\s+bookmarks?|resume\s+quotidien|daily\s+digest)\b/iu'
