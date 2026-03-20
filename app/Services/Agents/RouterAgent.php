@@ -274,13 +274,13 @@ REGLES:
 ════════════════════════════════════════
 
 SELECTION DU MODELE:
-- Simple → "claude-haiku-4-5-20251001" / "simple"
-- Medium → "claude-sonnet-4-20250514" / "medium"
-- Complex → "claude-opus-4-20250514" / "complex"
-- dev → toujours haiku / simple
+- Simple → "claude-sonnet-4-6" / "simple"
+- Medium → "claude-sonnet-4-6" / "medium"
+- Complex → "claude-opus-4-6" / "complex"
+- dev → toujours sonnet / simple
 - code_review → toujours sonnet / medium
 - analysis → sonnet ou opus selon complexite
-- Tous les autres → haiku / simple
+- Tous les autres → sonnet / simple
 
 AUTONOMIE:
 - "auto" = LECTURE: lister, voir, afficher, montrer, verifier, check, status, info, diagnostic

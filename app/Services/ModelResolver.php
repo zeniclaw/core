@@ -17,16 +17,18 @@ use App\Models\AppSetting;
 class ModelResolver
 {
     private const DEFAULTS = [
-        'fast'     => 'claude-haiku-4-5-20251001',
-        'balanced' => 'claude-sonnet-4-20250514',
-        'powerful' => 'claude-opus-4-20250514',
+        'fast'     => 'claude-sonnet-4-6',
+        'balanced' => 'claude-sonnet-4-6',
+        'powerful' => 'claude-opus-4-6',
     ];
 
     public const AVAILABLE_MODELS = [
         // Cloud (Anthropic)
         'claude-haiku-4-5-20251001'  => 'Claude Haiku 4.5 (rapide, economique)',
-        'claude-sonnet-4-20250514'   => 'Claude Sonnet 4 (equilibre)',
-        'claude-opus-4-20250514'     => 'Claude Opus 4 (puissant)',
+        'claude-sonnet-4-6'         => 'Claude Sonnet 4.6 (equilibre, rapide)',
+        'claude-sonnet-4-20250514'   => 'Claude Sonnet 4 (ancien)',
+        'claude-opus-4-6'           => 'Claude Opus 4.6 (puissant)',
+        'claude-opus-4-20250514'     => 'Claude Opus 4 (ancien)',
         // On-prem (Ollama/vLLM) — ultra-light
         'qwen2.5:0.5b'              => 'Qwen 2.5 0.5B (on-prem, ultra-rapide, ~0.4 Go)',
         'qwen2.5:1.5b'              => 'Qwen 2.5 1.5B (on-prem, rapide, ~1 Go)',
