@@ -28,7 +28,7 @@ class InteractiveQuizAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Quizz ludiques avec scoring, catégories variées, difficultés, classement, maîtrise, coaching IA et question du jour';
+        return 'Quizz ludiques avec scoring, catégories variées, difficultés, classement, maîtrise, coaching IA, question du jour, insights et échauffement';
     }
 
     public function keywords(): array
@@ -83,18 +83,31 @@ class InteractiveQuizAgent extends BaseAgent
             'quiz next', 'next quiz', 'quiz suivant', 'quoi faire quiz', 'quiz quoi faire',
             'quiz focus', 'focus quiz', 'quiz révision', 'révision quiz', 'quiz retravailler', 'quiz erreurs passées',
             'quiz quickstats', 'quickstats quiz', 'quiz qstats', 'stats rapide quiz', 'quiz stats rapide',
+            'quiz milestone', 'milestone quiz', 'quiz jalons', 'jalons quiz', 'quiz objectifs long',
+            'quiz performance', 'performance quiz', 'quiz heatmap', 'heatmap quiz', 'quiz tableau',
+            'quiz forces', 'forces quiz', 'quiz strengths', 'mes forces', 'points forts quiz', 'quiz points forts',
+            'quiz parcours', 'parcours quiz', 'quiz journey', 'journey quiz', 'mon parcours quiz', 'bilan parcours',
+            'quiz snapshot', 'snapshot quiz', 'quiz snap', 'quiz aperçu', 'aperçu quiz',
+            'quiz progression', 'progression quiz', 'quiz chain', 'quiz chaîne', 'quiz graduel', 'graduel quiz',
+            'quiz weakmix', 'weakmix quiz', 'quiz mix faible', 'quiz renforcement', 'renforcement quiz', 'quiz faiblesse',
+            'quiz catranking', 'catranking quiz', 'quiz classement catégories', 'ranking catégories', 'quiz ranking cat',
+            'quiz plan', 'plan quiz', 'quiz study', 'plan étude', 'plan révision', 'quiz semaine',
+            'quiz insight', 'insight quiz', 'quiz habitudes', 'habitudes quiz', 'quiz patterns', 'mes habitudes quiz',
+            'quiz warmup', 'warmup quiz', 'quiz échauffement', 'échauffement quiz', 'quiz warm-up',
+            'quiz rival', 'rival quiz', 'quiz adversaire', 'adversaire quiz', 'mon rival', 'rival le plus proche',
+            'quiz debrief', 'debrief quiz', 'quiz bilan apprentissage', 'quiz résumé apprentissage',
         ];
     }
 
     public function version(): string
     {
-        return '1.24.0';
+        return '1.31.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         $body = mb_strtolower($context->body ?? '');
-        return (bool) preg_match('/\b(quiz|quizz|trivia|challenge|qcm|devinette|leaderboard|classement|marathon|suggest|perso|daily|quotidien|partager|expliquer|share|chrono|objectif|goal|rang|rank|progress|progression|tip|conseil|astuce|reprendre|resume|curiosit|fun|faits|mini|flash|badge|badges|trophée|trophees|récompense|hebdo|weekly|aujourd\'?hui|journée|résumé|record|correction|erreurs|trending|tendances?|populaire|catstat|coach|coaching|timing|vitesse|rapidité|favori|fav|préféré|favorite|historique|random|aléatoire|hasard|surprise|export|exporter|bilan|diffstats|niveaux?|maîtrise|mastery|duel|duels|défis?|recomman\w*|revanche|rematch|calendrier|calendar|compare[r]?|r[eé]cap|defi|comeback|am[eé]lioration|next|suivant|quoi\s*faire|focus|r[eé]vision|quickstats|qstats)\b/iu', $body);
+        return (bool) preg_match('/\b(quiz|quizz|trivia|challenge|qcm|devinette|leaderboard|classement|marathon|suggest|perso|daily|quotidien|partager|expliquer|share|chrono|objectif|goal|rang|rank|progress|progression|tip|conseil|astuce|reprendre|resume|curiosit|fun|faits|mini|flash|badge|badges|trophée|trophees|récompense|hebdo|weekly|aujourd\'?hui|journée|résumé|record|correction|erreurs|trending|tendances?|populaire|catstat|coach|coaching|timing|vitesse|rapidité|favori|fav|préféré|favorite|historique|random|aléatoire|hasard|surprise|export|exporter|bilan|diffstats|niveaux?|maîtrise|mastery|duel|duels|défis?|recomman\w*|revanche|rematch|calendrier|calendar|compare[r]?|r[eé]cap|defi|comeback|am[eé]lioration|next|suivant|quoi\s*faire|focus|r[eé]vision|quickstats|qstats|forces|strengths|points\s*forts|parcours|journey|snapshot|snap|aper[cç]u|chain|chaîne|graduel|weakmix|renforcement|faiblesse|catranking|ranking\s*cat|plan\s*[eé]tude|plan\s*r[eé]vision|study|insight|habitudes?|patterns?|warmup|warm-up|[eé]chauffement|rival|adversaire|debrief|bilan\s*apprentissage)\b/iu', $body);
     }
 
     public function handle(AgentContext $context): AgentResult
@@ -124,6 +137,11 @@ class InteractiveQuizAgent extends BaseAgent
     {
         $body  = trim($context->body ?? '');
         $lower = mb_strtolower($body);
+
+        // Edge case: completely empty message with no active quiz
+        if ($body === '' && !$this->getActiveQuiz($context)) {
+            return $this->handleHelp($context);
+        }
 
         // Check for active quiz first
         $activeQuiz = $this->getActiveQuiz($context);
@@ -367,9 +385,69 @@ class InteractiveQuizAgent extends BaseAgent
             return $this->handleComeback($context);
         }
 
+        // Milestone — achievement milestones with progress bars
+        if (preg_match('/^\/quiz\s+(milestone|jalons?|objectifs?long)\b/iu', $lower) || preg_match('/\bquiz\s+(milestone|jalons?)\b/iu', $lower)) {
+            return $this->handleMilestone($context);
+        }
+
+        // Performance — category performance heatmap
+        if (preg_match('/^\/quiz\s+(performance|heatmap|tableau)\b/iu', $lower) || preg_match('/\bquiz\s+(performance|heatmap)\b/iu', $lower)) {
+            return $this->handlePerformanceMap($context);
+        }
+
+        // Strengths — top strongest categories
+        if (preg_match('/^\/quiz\s+(forces|strengths|points?\s*forts?)\b/iu', $lower) || preg_match('/\bquiz\s+(forces|strengths|points?\s*forts?)\b|\bmes\s+forces\b/iu', $lower)) {
+            return $this->handleStrengths($context);
+        }
+
+        // Journey — AI narrative of quiz journey
+        if (preg_match('/^\/quiz\s+(parcours|journey)\b/iu', $lower) || preg_match('/\bquiz\s+(parcours|journey)\b|\bmon\s+parcours\s+quiz\b|\bbilan\s+parcours\b/iu', $lower)) {
+            return $this->handleJourneyReport($context);
+        }
+
         // Next — smart context-aware suggestion
         if (preg_match('/^\/quiz\s+(next|suivant|quoi\s*faire)\b/iu', $lower) || preg_match('/\bquiz\s+(next|suivant|quoi\s*faire)\b/iu', $lower)) {
             return $this->handleNext($context);
+        }
+
+        // Progression chain — easy→medium→hard progressive quiz
+        if (preg_match('/^\/quiz\s+(progression|chain|chaîne|graduel)\b/iu', $lower) || preg_match('/\bquiz\s+(progression|chain|chaîne|graduel)\b/iu', $lower)) {
+            return $this->handleProgressionChain($context);
+        }
+
+        // Weak mix — quiz mixing questions from user's weakest categories
+        if (preg_match('/^\/quiz\s+(weakmix|mix\s*faible|faiblesse|renforcement)\b/iu', $lower) || preg_match('/\bquiz\s+(weakmix|mix\s*faible|renforcement)\b/iu', $lower)) {
+            return $this->handleWeakMix($context);
+        }
+
+        // Category ranking — all categories ranked strongest to weakest with visual bars
+        if (preg_match('/^\/quiz\s+(catranking|ranking\s*cat|classement\s*cat)/iu', $lower) || preg_match('/\bquiz\s+(catranking|ranking\s*cat)\b/iu', $lower)) {
+            return $this->handleCategoryRanking($context);
+        }
+
+        // Study plan — AI-generated weekly study plan
+        if (preg_match('/^\/quiz\s+(plan|study|plan\s*[eé]tude|plan\s*r[eé]vision)\b/iu', $lower) || preg_match('/\bquiz\s+(plan\s*[eé]tude|plan\s*r[eé]vision)\b/iu', $lower)) {
+            return $this->handleStudyPlan($context);
+        }
+
+        // Insight — AI-generated analysis of quiz habits and patterns
+        if (preg_match('/^\/quiz\s+(insight|habitudes?|patterns?)\b/iu', $lower) || preg_match('/\bquiz\s+(insight|habitudes?)\b/iu', $lower)) {
+            return $this->handleInsight($context);
+        }
+
+        // Warm-up — 2 easy questions to get started
+        if (preg_match('/^\/quiz\s+(warmup|warm-up|[eé]chauffement|echauffement)\b/iu', $lower) || preg_match('/\bquiz\s+(warmup|warm-up|[eé]chauffement)\b/iu', $lower)) {
+            return $this->handleWarmup($context);
+        }
+
+        // Rival — show nearest competitors on the leaderboard
+        if (preg_match('/^\/quiz\s+(rival|adversaire)\b/iu', $lower) || preg_match('/\bquiz\s+(rival|adversaire)\b|\bmon\s+rival\b/iu', $lower)) {
+            return $this->handleRival($context);
+        }
+
+        // Debrief — AI learning debrief after a quiz
+        if (preg_match('/^\/quiz\s+(debrief|bilan\s*apprentissage|r[eé]sum[eé]\s*apprentissage)\b/iu', $lower) || preg_match('/\bquiz\s+(debrief)\b/iu', $lower)) {
+            return $this->handleDebrief($context);
         }
 
         // AI-generated quiz on a custom topic — must come AFTER other commands to avoid false matches
@@ -660,7 +738,17 @@ class InteractiveQuizAgent extends BaseAgent
         }
 
         $remaining = 4 - $eliminateCount;
-        return implode("\n", $lines) . "\nIl reste {$remaining} options.";
+        $hintText = implode("\n", $lines) . "\nIl reste {$remaining} options.";
+
+        // On hard difficulty, add a thematic clue based on the question text
+        if ($difficulty === 'hard' && isset($question['question'])) {
+            $keywords = array_filter(explode(' ', $question['question']), fn($w) => mb_strlen($w) > 4);
+            if (count($keywords) >= 2) {
+                $hintText .= "\n🔎 _Concentre-toi sur le mot-clé de la question._";
+            }
+        }
+
+        return $hintText;
     }
 
     /**
@@ -709,6 +797,16 @@ class InteractiveQuizAgent extends BaseAgent
             ->update(['status' => 'abandoned']);
 
         $quizData  = QuizEngine::generateQuiz($category, $count);
+
+        if (empty($quizData['questions'])) {
+            $reply  = "⚠️ *Quiz* — Aucune question disponible";
+            $reply .= $category ? " pour cette catégorie.\n" : ".\n";
+            $reply .= "🔄 Essaie une autre catégorie avec /quiz categories";
+            $this->sendText($context->from, $reply);
+            $this->log($context, 'Quiz generation returned empty', ['category' => $category, 'count' => $count]);
+            return AgentResult::reply($reply, ['action' => 'quiz_empty_questions']);
+        }
+
         $questions = array_map(function (array $q) {
             $q['hints_used']    = 0;
             $q['user_answered'] = false;
@@ -736,9 +834,36 @@ class InteractiveQuizAgent extends BaseAgent
         $diffLabel = $this->getDifficultyLabel($difficulty);
         $modeLabel = $quickMode ? ' ⚡ Rapide' : '';
 
+        // Show user's past performance in this category (if any)
+        $pastPerf = '';
+        if ($quizData['category'] && !in_array($quizData['category'], ['mix', 'daily', 'custom', 'correction', 'defi-jour'])) {
+            $bestScore = QuizScore::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->where('category', $quizData['category'])
+                ->selectRaw('MAX(score * 100.0 / total_questions) as best_pct, COUNT(*) as played')
+                ->first();
+            if ($bestScore && $bestScore->played > 0) {
+                $bestPct = round($bestScore->best_pct);
+                $pastPerf = "📊 _Record : {$bestPct}% ({$bestScore->played} quiz joués)_\n";
+            }
+        }
+
+        // Show daily streak if active
+        $streakLine = '';
+        $dailyStreak = $this->computeDailyStreak($context);
+        if ($dailyStreak >= 2) {
+            $streakLine = "🔥 _Série : {$dailyStreak} jours consécutifs !_\n";
+        }
+
         $intro  = "🎯 *Quiz {$quizData['category_label']}*{$modeLabel}\n";
         $intro .= "━━━━━━━━━━━━━━━━\n";
         $intro .= "{$diffLabel} — {$quiz->getTotalQuestions()} questions\n";
+        if ($pastPerf) {
+            $intro .= $pastPerf;
+        }
+        if ($streakLine) {
+            $intro .= $streakLine;
+        }
         $intro .= "💡 *indice* → indice (-1 pt) | *passer* → sauter la question\n\n";
 
         $reply = $intro . $questionText;
@@ -757,6 +882,19 @@ class InteractiveQuizAgent extends BaseAgent
 
     private function handleAnswer(AgentContext $context, Quiz $quiz, string $answer): AgentResult
     {
+        // Detect stale quiz (>30 min since last activity)
+        $lastActivity = $quiz->updated_at ?? $quiz->started_at;
+        if ($lastActivity && now()->diffInMinutes($lastActivity) > 30) {
+            $minutesAgo = now()->diffInMinutes($lastActivity);
+            $staleNote = "⏰ _Tu étais parti(e) depuis {$minutesAgo} min — bon retour !_\n\n";
+            $currentQ = $quiz->getCurrentQuestion();
+            if ($currentQ) {
+                $questionText = QuizEngine::formatQuestion($currentQ, $quiz->current_question_index + 1, $quiz->getTotalQuestions());
+                $reminder = $staleNote . "📝 *Rappel de la question en cours :*\n\n" . $questionText;
+                $this->sendText($context->from, $reminder);
+            }
+        }
+
         $currentQuestion = $quiz->getCurrentQuestion();
 
         if (!$currentQuestion) {
@@ -769,8 +907,19 @@ class InteractiveQuizAgent extends BaseAgent
         }
 
         if (!$this->isValidAnswerFormat($answer, $currentQuestion)) {
+            // Detect emoji-only or very short gibberish input
+            $stripped = preg_replace('/[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\s]/u', '', $answer);
+            $isEmojiOnly = mb_strlen(trim($stripped)) === 0 && mb_strlen(trim($answer)) > 0;
+
             $questionText = QuizEngine::formatQuestion($currentQuestion, $quiz->current_question_index + 1, $quiz->getTotalQuestions());
-            $reply  = "❓ *Réponse non reconnue.* Réponds avec *A*, *B*, *C* ou *D*\n";
+
+            if ($isEmojiOnly) {
+                $reply  = "😄 Sympa l'emoji ! Mais je comprends uniquement *A*, *B*, *C* ou *D*.\n";
+            } elseif (mb_strlen(trim($answer)) > 100) {
+                $reply  = "📝 Ta réponse est trop longue ! Réponds simplement avec *A*, *B*, *C* ou *D*.\n";
+            } else {
+                $reply  = "❓ *Réponse non reconnue.* Réponds avec *A*, *B*, *C* ou *D*\n";
+            }
             $reply .= "(ou *passer* pour sauter, *stop* pour abandonner)\n\n";
             $reply .= $questionText;
             $this->sendText($context->from, $reply);
@@ -835,6 +984,24 @@ class InteractiveQuizAgent extends BaseAgent
             }
         }
 
+        // Recovery encouragement: correct answer after 2+ wrong answers
+        $recoveryMsg = '';
+        if ($isCorrect && $idx >= 2) {
+            $prevWrong = 0;
+            for ($ri = $idx - 1; $ri >= 0; $ri--) {
+                if (($questions[$ri]['user_answered'] ?? false)
+                    && !($questions[$ri]['user_correct'] ?? false)
+                    && !($questions[$ri]['user_skipped'] ?? false)) {
+                    $prevWrong++;
+                } else {
+                    break;
+                }
+            }
+            if ($prevWrong >= 2) {
+                $recoveryMsg = "💪 *Beau comeback !* Tu as retrouvé le bon rythme !\n";
+            }
+        }
+
         $timeLabel = '';
         if ($responseTimeSecs !== null) {
             $timeEmoji = $responseTimeSecs <= 8 ? '⚡' : ($responseTimeSecs <= 25 ? '⏱' : '🐢');
@@ -846,6 +1013,7 @@ class InteractiveQuizAgent extends BaseAgent
                 ? "✅ *Correct !* (0 pt — indice utilisé){$timeLabel}\n"
                 : "✅ *Correct !* +1 pt{$timeLabel}\n";
             $feedback .= $streakBonus;
+            $feedback .= $recoveryMsg;
         } else {
             $letters    = ['A', 'B', 'C', 'D'];
             $choiceIdx  = array_search($userChoice, $letters);
@@ -857,6 +1025,15 @@ class InteractiveQuizAgent extends BaseAgent
         }
 
         $feedback .= "Score : {$newCorrect}/{$newIndex}\n";
+
+        // Mid-quiz progress indicator at halfway mark
+        $totalQ = $quiz->getTotalQuestions();
+        $halfwayIdx = (int) ceil($totalQ / 2);
+        if ($newIndex === $halfwayIdx && $totalQ >= 4) {
+            $halfPct = $totalQ > 0 ? round(($newCorrect / $newIndex) * 100) : 0;
+            $bar = str_repeat('▓', (int) round($newIndex / $totalQ * 10)) . str_repeat('░', 10 - (int) round($newIndex / $totalQ * 10));
+            $feedback .= "\n📊 _Mi-parcours [{$bar}] — {$halfPct}% de bonnes réponses_\n";
+        }
 
         // Adaptive difficulty hint after 3 consecutive wrong answers
         if ($wrongStreak >= 3 && $quiz->difficulty !== 'easy') {
@@ -914,9 +1091,20 @@ class InteractiveQuizAgent extends BaseAgent
                 $timingLine  = "⚡ Plus rapide : {$fastestTime}s | Moy. : {$avgTime}s/question\n";
             }
 
+            // Motivational message based on score percentage
+            $nearMiss = ($newCorrect === $quiz->getTotalQuestions() - 1);
+            $perfMsg = match (true) {
+                $pct === 100  => "🏆 *PARFAIT !* Sans faute, impressionnant !",
+                $nearMiss     => "🔥 *SO CLOSE !* Plus qu'une seule erreur pour le sans-faute !",
+                $pct >= 80    => "🌟 *Excellent !* Tu maîtrises bien le sujet !",
+                $pct >= 60    => "👏 *Bien joué !* Continue comme ça !",
+                $pct >= 40    => "💪 *Pas mal !* Tu progresses, persévère !",
+                default       => "📚 *Continue d'apprendre !* Chaque erreur est une leçon.",
+            };
+
             $reply  = $feedback . "\n";
             $reply .= "━━━━━━━━━━━━━━━━\n";
-            $reply .= "🏁 *Quiz terminé !*\n\n";
+            $reply .= "🏁 *Quiz terminé !* {$perfMsg}\n\n";
             $reply .= "{$scoreText}\n";
             if ($breakdown) {
                 $reply .= "📋 {$breakdown}\n";
@@ -1772,7 +1960,10 @@ class InteractiveQuizAgent extends BaseAgent
         $reply .= "• `/quiz resume` — ▶️ Reprendre ton quiz en cours\n";
         $reply .= "• `/quiz mini` — ⚡ Quiz express ultra-rapide (2 questions)\n";
         $reply .= "• `/quiz random` — 🎲 Quiz surprise (catégorie pas jouée récemment)\n";
-        $reply .= "• `/quiz focus [cat]` — 🔁 Révision (questions ratées récemment)\n\n";
+        $reply .= "• `/quiz focus [cat]` — 🔁 Révision (questions ratées récemment)\n";
+        $reply .= "• `/quiz progression [cat]` — 📈 Quiz progressif (facile→moyen→difficile)\n";
+        $reply .= "• `/quiz weakmix` — 🎯 Mix ciblé sur tes 3 catégories les plus faibles\n";
+        $reply .= "• `/quiz warmup` — 🏋️ Échauffement (2 questions faciles)\n\n";
         $reply .= "*Pendant le quiz :*\n";
         $reply .= "• Réponds avec *A*, *B*, *C* ou *D*\n";
         $reply .= "• `indice` — Obtenir un indice (-1 pt)\n";
@@ -1797,12 +1988,19 @@ class InteractiveQuizAgent extends BaseAgent
         $reply .= "• `/quiz quickstats` — ⚡ Stats rapides en 1 message\n";
         $reply .= "• `/quiz export` — 📋 Bilan complet (stats, badges, niveau)\n";
         $reply .= "• `/quiz calendrier` — 📅 Calendrier mensuel d'activité\n";
-        $reply .= "• `/quiz compare <cat1> <cat2>` — 📊 Comparer 2 catégories\n\n";
+        $reply .= "• `/quiz compare <cat1> <cat2>` — 📊 Comparer 2 catégories\n";
+        $reply .= "• `/quiz milestone` — 🎯 Jalons et objectifs à long terme\n";
+        $reply .= "• `/quiz performance` — 📊 Carte de performance (heatmap)\n";
+        $reply .= "• `/quiz catranking` — 📊 Classement de toutes tes catégories\n\n";
         $reply .= "*Comparer & Progresser :*\n";
         $reply .= "• `/quiz coach` — 🎓 Coaching IA — plan d'amélioration personnalisé\n";
+        $reply .= "• `/quiz forces` — 💪 Tes top 3 catégories les plus fortes\n";
+        $reply .= "• `/quiz parcours` — 🗺️ Récit IA de ton parcours quiz complet\n";
         $reply .= "• `/quiz timing` — ⏱ Analyse de tes temps de réponse\n";
+        $reply .= "• `/quiz plan` — 📋 Plan d'étude IA pour la semaine\n";
         $reply .= "• `/quiz vs @+336XXXXXXXX` — ⚔️ Comparer tes stats avec un ami\n";
-        $reply .= "• `/quiz tip [catégorie]` — 💡 Conseils IA pour progresser\n\n";
+        $reply .= "• `/quiz tip [catégorie]` — 💡 Conseils IA pour progresser\n";
+        $reply .= "• `/quiz insight` — 🔮 Analyse IA de tes habitudes et patterns\n\n";
         $reply .= "*Défier un ami :*\n";
         $reply .= "• `challenge @+336XXXXXXXX` — Défi !\n";
         $reply .= "• `/quiz duel` — ⚔️ Résultats de tes duels (W/L/D)\n";
@@ -1822,12 +2020,11 @@ class InteractiveQuizAgent extends BaseAgent
         $reply .= "*Récap & Défis :*\n";
         $reply .= "• `/quiz recap` — 📋 Récap hebdo IA (bilan de ta semaine)\n";
         $reply .= "• `/quiz defi` — 🏅 Défi du Jour (difficulté adaptée + classement communauté)\n\n";
-        $reply .= "*Nouveau en v1.24 :*\n";
-        $reply .= "• `/quiz focus [cat]` — 🔁 Quiz de révision (questions ratées récemment)\n";
-        $reply .= "• `/quiz quickstats` — 📊 Stats rapides en un coup d'œil\n";
-        $reply .= "• Indices améliorés : 2 options éliminées en mode Facile (50/50)\n";
-        $reply .= "• Prompts IA améliorés : quiz plus variés, explications plus mémorisables\n";
-        $reply .= "• Protection anti-injection renforcée sur les quiz IA";
+        $reply .= "*Nouveau en v1.31 :*\n";
+        $reply .= "• `/quiz rival` — ⚔️ Tes rivaux les plus proches au classement\n";
+        $reply .= "• `/quiz debrief` — 📝 Bilan d'apprentissage IA après un quiz\n";
+        $reply .= "• Message de comeback quand tu te relèves après des erreurs\n";
+        $reply .= "• Série quotidienne affichée au lancement d'un quiz";
 
         $this->sendText($context->from, $reply);
 
@@ -1980,6 +2177,7 @@ class InteractiveQuizAgent extends BaseAgent
 
         $model        = $this->resolveModel($context);
         $wrongCount   = count($wrongQuestions);
+        $sharedCtx    = $this->getSharedContextForPrompt($context->from);
         $systemPrompt = "Tu es un assistant pédagogique concis pour un quiz WhatsApp. "
             . "Tu vas recevoir exactement {$wrongCount} question(s) avec leur bonne réponse et parfois la réponse incorrecte de l'utilisateur. "
             . "Pour CHACUNE, donne UNE explication courte et mémorisable (1-2 phrases MAX) "
@@ -2003,11 +2201,16 @@ class InteractiveQuizAgent extends BaseAgent
             . "— Sois factuel, précis, évite les généralités. "
             . "— Si la mauvaise réponse de l'utilisateur est une confusion courante, mentionne la différence clé. "
             . "— Termine chaque explication par un emoji pertinent (🧠💡🌍📚🔬🏛️) pour rendre mémorisable. "
-            . "— N'invente JAMAIS de fait. Si tu n'es pas sûr, indique 'à vérifier' plutôt que d'affirmer.";
+            . "— N'invente JAMAIS de fait. Si tu n'es pas sûr, indique 'à vérifier' plutôt que d'affirmer."
+            . "— Adapte le niveau de langage : si la question est simple, reste accessible ; si elle est technique, sois précis.";
 
         try {
+            $userMsg = "Quiz catégorie : {$catLabel}\nExplique pourquoi ces réponses de quiz sont correctes :\n\n{$questionsList}";
+            if ($sharedCtx) {
+                $userMsg .= "\n\nContexte utilisateur (adapte ton langage) :\n{$sharedCtx}";
+            }
             $llmResponse = $this->claude->chat(
-                "Explique pourquoi ces réponses de quiz sont correctes :\n\n{$questionsList}",
+                $userMsg,
                 $model,
                 $systemPrompt,
                 800
@@ -2024,6 +2227,16 @@ class InteractiveQuizAgent extends BaseAgent
             if (!empty($expMatches[1])) {
                 foreach ($expMatches[1] as $idx => $num) {
                     $explanations[(int) $num - 1] = trim(preg_replace('/\n+/', ' ', $expMatches[2][$idx]));
+                }
+            }
+            // Fallback: if regex parsing failed but LLM responded, split by double newlines
+            if (empty($explanations) && mb_strlen($llmResponse) > 10) {
+                $lines = preg_split('/\n{2,}/', trim($llmResponse));
+                foreach ($lines as $idx => $line) {
+                    $line = trim(preg_replace('/^\d+[\.\)]\s*/', '', trim($line)));
+                    if (mb_strlen($line) > 5 && $idx < $wrongCount) {
+                        $explanations[$idx] = preg_replace('/\n+/', ' ', $line);
+                    }
                 }
             }
         }
@@ -2044,11 +2257,13 @@ class InteractiveQuizAgent extends BaseAgent
         }
 
         if (!$llmResponse) {
-            $reply .= "⚠️ _L'IA n'a pas pu générer les explications. Réessaie avec /quiz explain._\n\n";
+            $reply .= "⚠️ _L'IA n'a pas pu générer les explications détaillées._\n";
+            $reply .= "_Les bonnes réponses sont affichées ci-dessus. Réessaie avec /quiz explain._\n\n";
         }
 
         $reply .= "🔄 /quiz — Nouveau quiz\n";
-        $reply .= "🔁 /quiz rejouer — Même catégorie";
+        $reply .= "🔁 /quiz rejouer — Même catégorie\n";
+        $reply .= "🔁 /quiz focus — Réviser les questions ratées";
 
         $this->sendText($context->from, $reply);
         $this->log($context, 'Explain viewed', ['quiz_id' => $lastQuiz->id, 'wrong_count' => count($wrongQuestions)]);
@@ -2129,7 +2344,17 @@ class InteractiveQuizAgent extends BaseAgent
         $topic = mb_substr(trim($topic), 0, 120); // Safety: limit topic length
         $topic = preg_replace('/[\x00-\x1F\x7F]/u', '', $topic); // Strip control chars
         // Strip potential prompt injection patterns
-        $topic = preg_replace('/\b(ignore|oublie|forget|system|prompt|instruction|r[eè]gle)\b.*[:\.]/iu', '', $topic);
+        $topic = preg_replace('/\b(ignore|oublie|forget|system|prompt|instruction|r[eè]gle|override|bypass|inject|role|assistant|human|user|pretend|act\s+as|you\s+are|tu\s+es|simulate|jailbreak|DAN|disregard)\b.*[:\.]/iu', '', $topic);
+        // Strip markdown/formatting injection attempts
+        $topic = preg_replace('/[`\[\]{}<>\\\\]/u', '', $topic);
+        // Strip URLs that could lead to external content injection
+        $topic = preg_replace('/https?:\/\/\S+/iu', '', $topic);
+        // Strip base64-like patterns and hex encoding tricks
+        $topic = preg_replace('/\b[A-Za-z0-9+\/]{20,}={0,2}\b/', '', $topic);
+        // Strip repeated special chars that could be encoding tricks
+        $topic = preg_replace('/(.)\1{4,}/u', '$1$1', $topic);
+        // Strip Unicode homoglyph/zero-width character tricks
+        $topic = preg_replace('/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{FEFF}]/u', '', $topic);
         $topic = trim($topic);
 
         if (mb_strlen($topic) < 2) {
@@ -2200,8 +2425,11 @@ class InteractiveQuizAgent extends BaseAgent
         $questions = $this->parseAIQuestions($llmResponse, $topic);
 
         if (count($questions) < 2) {
-            $reply  = "⚠️ *Quiz IA* — Je n'ai pas pu générer assez de questions sur ce sujet.\n";
-            $reply .= "Essaie un sujet plus précis, ou lance /quiz pour un quiz classique !";
+            $reply  = "⚠️ *Quiz IA* — Je n'ai pas pu générer assez de questions sur « {$topic} ».\n\n";
+            $reply .= "💡 *Astuces :*\n";
+            $reply .= "• Essaie un sujet plus large (ex: `/quiz ia animaux` au lieu d'une espèce rare)\n";
+            $reply .= "• Vérifie l'orthographe du sujet\n";
+            $reply .= "• Lance `/quiz` pour un quiz classique !";
             $this->sendText($context->from, $reply);
             $this->log($context, 'AI quiz parse failed', ['topic' => $topic, 'parsed_count' => count($questions)]);
             return AgentResult::reply($reply, ['action' => 'ai_quiz_parse_fail']);
@@ -3765,8 +3993,14 @@ class InteractiveQuizAgent extends BaseAgent
             . "1. Refais 3 quiz en Géographie (/quiz geo) — ta catégorie la plus faible\n"
             . "2. Revois tes erreurs avec /quiz wrong avant chaque nouvelle session\n"
             . "3. Maintiens ta série en jouant /quiz daily chaque matin\n\n"
+            . "Commandes disponibles pour tes suggestions :\n"
+            . "/quiz [catégorie], /quiz facile, /quiz difficile, /quiz perso, /quiz wrong, "
+            . "/quiz focus [cat], /quiz daily, /quiz mini, /quiz chrono, /quiz tip [cat]\n\n"
             . "RÈGLES ABSOLUES : Réponds en FRANÇAIS. Sois encourageant et honnête. "
             . "Cite des commandes exactes (/quiz ...). Maximum 160 mots total. "
+            . "Adapte les priorités au niveau du joueur : débutant (<40%) = focus sur la régularité et le facile, "
+            . "intermédiaire (40-70%) = diversifier les catégories et revoir les erreurs, "
+            . "avancé (>70%) = viser la maîtrise et les défis chronométrés. "
             . "Aucun texte hors du format. "
             . "ZÉRO HALLUCINATION : base ton analyse UNIQUEMENT sur les données fournies. "
             . "Ne mentionne JAMAIS de catégorie, score ou statistique qui n'apparaît pas dans le profil.";
@@ -3784,11 +4018,25 @@ class InteractiveQuizAgent extends BaseAgent
         }
 
         if (!$llmResponse) {
-            $reply  = "⚠️ *Coach IA* — L'IA n'a pas pu générer le coaching.\n";
-            $reply .= "Réessaie dans un instant avec `/quiz coach` !";
+            // Fallback: provide basic static coaching when LLM is unavailable
+            $weakCat   = $catScores->first();
+            $weakLabel = $weakCat ? ($categories[$weakCat->category] ?? $weakCat->category) : null;
+
+            $reply  = "🎓 *Coach Quiz — Mode Rapide*\n";
+            $reply .= "━━━━━━━━━━━━━━━━\n\n";
+            $reply .= "📊 *Tes stats :* {$quizzesPlayed} quiz, {$avgPct}% moy.\n\n";
+            $reply .= "🎯 *Suggestions :*\n";
+            if ($weakLabel && $weakCat->avg_pct < 60) {
+                $reply .= "1. Travaille *{$weakLabel}* ({$weakCat->avg_pct}%) — `/quiz {$weakCat->category}`\n";
+            } else {
+                $reply .= "1. Explore de nouvelles catégories — `/quiz random`\n";
+            }
+            $reply .= "2. Révise tes erreurs — `/quiz wrong`\n";
+            $reply .= "3. Maintiens ta série quotidienne — `/quiz daily`\n\n";
+            $reply .= "_⚠️ L'analyse IA complète n'est pas disponible. Réessaie avec `/quiz coach`._";
             $this->sendText($context->from, $reply);
-            $this->log($context, 'Coach LLM failed', ['quizzes_played' => $quizzesPlayed]);
-            return AgentResult::reply($reply, ['action' => 'coach_llm_fail']);
+            $this->log($context, 'Coach LLM failed — fallback used', ['quizzes_played' => $quizzesPlayed]);
+            return AgentResult::reply($reply, ['action' => 'coach_llm_fail_fallback']);
         }
 
         $reply  = "🎓 *Coach Quiz Personnalisé*\n";
@@ -5356,7 +5604,16 @@ class InteractiveQuizAgent extends BaseAgent
             $reply .= "{$arrow} vs semaine précédente : " . ($diff >= 0 ? '+' : '') . "{$diff}%\n";
         }
         $reply .= "\n";
-        $reply .= $llmResponse ? trim($llmResponse) . "\n\n" : "⚠️ _L'IA n'a pas pu générer l'analyse. Réessaie avec /quiz recap._\n\n";
+        if ($llmResponse) {
+            $reply .= trim($llmResponse) . "\n\n";
+        } else {
+            // Static fallback when LLM is unavailable
+            $topCatWeek = $catBreakdown->sortByDesc('avg')->keys()->first();
+            $topLabel   = $topCatWeek ? ($categories[$topCatWeek] ?? $topCatWeek) : null;
+            $reply .= "💪 *Point fort* : " . ($topLabel ? "Meilleur score en {$topLabel}" : "{$bestScore}% meilleur score") . "\n";
+            $reply .= "📈 *Objectif* : Joue au moins " . max($totalQuizzes + 2, 5) . " quiz la semaine prochaine !\n\n";
+            $reply .= "_⚠️ L'analyse IA détaillée n'est pas disponible. Réessaie avec /quiz recap._\n\n";
+        }
         $reply .= "━━━━━━━━━━━━━━━━\n";
         $reply .= "🎓 /quiz coach — Coaching IA\n📊 /quiz mystats — Statistiques complètes\n";
         $reply .= "🏅 /quiz mastery — Niveaux de maîtrise\n🔄 /quiz — Lancer un quiz";
@@ -5914,7 +6171,7 @@ class InteractiveQuizAgent extends BaseAgent
         if ($streak > 0) {
             $streakBar = str_repeat('🔥', min($streak, 7));
             if ($streak > 7) {
-                $streakBar .= " +{$streak-7}";
+                $streakBar .= ' +' . ($streak - 7);
             }
         }
 
@@ -5946,5 +6203,1337 @@ class InteractiveQuizAgent extends BaseAgent
         $this->log($context, 'QuickStats viewed', ['total_quizzes' => $totalQuizzes, 'avg_pct' => $avgPct]);
 
         return AgentResult::reply($reply, ['action' => 'quickstats', 'total_quizzes' => $totalQuizzes]);
+    }
+
+    /**
+     * Milestone — achievement milestones with progress bars.
+     * Shows progress toward long-term goals (quizzes played, categories mastered, streaks, perfect scores).
+     * Usage: /quiz milestone
+     */
+    private function handleMilestone(AgentContext $context): AgentResult
+    {
+        $stats      = QuizScore::getUserStats($context->from, $context->agent->id);
+        $played     = (int) $stats['quizzes_played'];
+        $avgPct     = (float) $stats['avg_percentage'];
+        $streak     = $this->computeDailyStreak($context);
+        $categories = QuizEngine::getCategories();
+
+        // Count perfect scores (100%)
+        $perfectCount = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereRaw('score = total_questions')
+            ->where('total_questions', '>', 0)
+            ->count();
+
+        // Count mastered categories (avg >= 80% with >= 3 quizzes)
+        $masteredCats = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, COUNT(*) as played, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct')
+            ->groupBy('category')
+            ->havingRaw('COUNT(*) >= 3 AND ROUND(AVG(score * 100.0 / total_questions)) >= 80')
+            ->count();
+
+        $totalCats = count(array_filter(array_keys($categories), fn($k) => !in_array($k, ['daily', 'mix', 'custom', 'correction', 'defi-jour'])));
+
+        // Define milestones: [label, current, target, emoji]
+        $milestones = [
+            ['Quiz joués', $played, 10, '🎮'],
+            ['Quiz joués', $played, 50, '🎮'],
+            ['Quiz joués', $played, 100, '🎮'],
+            ['Quiz joués', $played, 250, '🎮'],
+            ['Scores parfaits', $perfectCount, 5, '💯'],
+            ['Scores parfaits', $perfectCount, 20, '💯'],
+            ['Catégories maîtrisées', $masteredCats, 3, '🎓'],
+            ['Catégories maîtrisées', $masteredCats, $totalCats, '🎓'],
+            ['Série quotidienne', $streak, 7, '🔥'],
+            ['Série quotidienne', $streak, 30, '🔥'],
+        ];
+
+        // Filter: show next unachieved + last achieved per type
+        $shown = [];
+        $byType = [];
+        foreach ($milestones as $m) {
+            $type = $m[0];
+            $byType[$type][] = $m;
+        }
+        foreach ($byType as $type => $items) {
+            $lastAchieved = null;
+            $firstPending = null;
+            foreach ($items as $item) {
+                if ($item[1] >= $item[2]) {
+                    $lastAchieved = $item;
+                } elseif (!$firstPending) {
+                    $firstPending = $item;
+                }
+            }
+            if ($lastAchieved) {
+                $shown[] = array_merge($lastAchieved, [true]);
+            }
+            if ($firstPending) {
+                $shown[] = array_merge($firstPending, [false]);
+            }
+        }
+
+        $reply  = "🎯 *Jalons & Objectifs*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+
+        foreach ($shown as $m) {
+            [$label, $current, $target, $emoji, $achieved] = $m;
+            if ($achieved) {
+                $reply .= "✅ {$emoji} *{$label}* — {$target} ✓\n";
+            } else {
+                $progress   = min($current, $target);
+                $barLen     = 10;
+                $filled     = $target > 0 ? (int) round(($progress / $target) * $barLen) : 0;
+                $empty      = $barLen - $filled;
+                $bar        = str_repeat('█', $filled) . str_repeat('░', $empty);
+                $pctDone    = $target > 0 ? round(($progress / $target) * 100) : 0;
+                $reply .= "{$emoji} *{$label}* — {$progress}/{$target}\n";
+                $reply .= "   {$bar} {$pctDone}%\n";
+            }
+        }
+
+        $reply .= "\n━━━━━━━━━━━━━━━━\n";
+        $reply .= "🔄 /quiz — Jouer pour progresser\n";
+        $reply .= "🏅 /quiz badges — Tes badges débloqués\n";
+        $reply .= "📊 /quiz mystats — Stats détaillées";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Milestone viewed', ['played' => $played, 'perfect' => $perfectCount, 'mastered' => $masteredCats]);
+
+        return AgentResult::reply($reply, ['action' => 'milestone', 'played' => $played]);
+    }
+
+    /**
+     * Snapshot — instant compact performance card (no LLM).
+     * Key metrics at a glance: total quizzes, avg score, streak, top category, trend.
+     * Usage: /quiz snapshot  |  /quiz snap  |  /quiz aperçu
+     */
+    private function handleSnapshot(AgentContext $context): AgentResult
+    {
+        $stats = QuizScore::getUserStats($context->from, $context->agent->id);
+        $played = (int) ($stats['quizzes_played'] ?? 0);
+
+        if ($played < 1) {
+            $reply  = "📸 *Snapshot*\n\n";
+            $reply .= "Aucune donnée disponible.\n";
+            $reply .= "Joue ton premier quiz pour voir ton snapshot !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'snapshot_empty']);
+        }
+
+        $avgPct  = (int) round((float) ($stats['avg_percentage'] ?? 0));
+        $bestPct = (int) round((float) ($stats['best_score'] ?? 0));
+        $streak  = $this->computeDailyStreak($context);
+
+        // Top category by avg score
+        $topCat = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct, COUNT(*) as played')
+            ->groupBy('category')
+            ->having('played', '>=', 2)
+            ->orderByDesc('avg_pct')
+            ->first();
+
+        $categories = QuizEngine::getCategories();
+        $topLabel   = $topCat ? ($categories[$topCat->category] ?? $topCat->category) : null;
+
+        // Level indicator
+        $levelEmoji = match (true) {
+            $avgPct >= 80 => '🏆',
+            $avgPct >= 60 => '🌟',
+            $avgPct >= 40 => '📈',
+            default       => '🌱',
+        };
+
+        // Recent trend (last 5 vs previous 5)
+        $recentScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderByDesc('completed_at')
+            ->limit(10)
+            ->get();
+
+        $trendLine = '';
+        if ($recentScores->count() >= 6) {
+            $half   = (int) floor($recentScores->count() / 2);
+            $older  = $recentScores->slice($half)->avg(fn($s) => $s->total_questions > 0 ? ($s->score / $s->total_questions) * 100 : 0);
+            $recent = $recentScores->slice(0, $half)->avg(fn($s) => $s->total_questions > 0 ? ($s->score / $s->total_questions) * 100 : 0);
+            $diff   = (int) round(($recent ?? 0) - ($older ?? 0));
+            if ($diff > 0) {
+                $trendLine = "📈 Tendance : *+{$diff}%* en progression\n";
+            } elseif ($diff < -3) {
+                $trendLine = "📉 Tendance : *{$diff}%* — reviens en force !\n";
+            } else {
+                $trendLine = "➡️ Tendance : *stable*\n";
+            }
+        }
+
+        // Today's activity
+        $todayCount = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereDate('completed_at', now()->toDateString())
+            ->count();
+
+        $reply  = "📸 *Snapshot — Ton profil en un clin d'œil*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+        $reply .= "{$levelEmoji} *{$played}* quiz joués | Moy. *{$avgPct}%* | Best *{$bestPct}%*\n";
+        if ($streak > 0) {
+            $reply .= "🔥 Série : *{$streak}* jour" . ($streak > 1 ? 's' : '') . " consécutifs\n";
+        }
+        if ($topLabel && $topCat) {
+            $reply .= "⭐ Meilleure catégorie : *{$topLabel}* ({$topCat->avg_pct}%)\n";
+        }
+        if ($trendLine) {
+            $reply .= $trendLine;
+        }
+        if ($todayCount > 0) {
+            $reply .= "📅 Aujourd'hui : *{$todayCount}* quiz joué" . ($todayCount > 1 ? 's' : '') . "\n";
+        }
+
+        // Mini score bar
+        $filled = (int) round(($avgPct / 100) * 10);
+        $bar    = str_repeat('█', $filled) . str_repeat('░', 10 - $filled);
+        $reply .= "\n{$bar} *{$avgPct}%*\n\n";
+
+        $reply .= "📊 /quiz mystats — Stats détaillées\n";
+        $reply .= "💪 /quiz forces — Tes points forts\n";
+        $reply .= "🎓 /quiz coach — Coaching personnalisé\n";
+        $reply .= "🔄 /quiz — Lancer un quiz";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Snapshot viewed', ['played' => $played, 'avg_pct' => $avgPct, 'streak' => $streak]);
+
+        return AgentResult::reply($reply, ['action' => 'snapshot', 'played' => $played, 'avg_pct' => $avgPct]);
+    }
+
+    /**
+     * Strengths — show top 3 strongest categories with stats and encouragement.
+     * Complement to getWeakestCategory/handleSuggest (which focus on weaknesses).
+     * Usage: /quiz forces  |  /quiz strengths  |  mes forces
+     */
+    private function handleStrengths(AgentContext $context): AgentResult
+    {
+        $categories = QuizEngine::getCategories();
+
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour', 'focus'])
+            ->selectRaw('category, COUNT(*) as played, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct, MAX(score * 100.0 / total_questions) as best_pct')
+            ->groupBy('category')
+            ->having('played', '>=', 2)
+            ->orderByDesc('avg_pct')
+            ->limit(5)
+            ->get();
+
+        if ($catScores->isEmpty()) {
+            $reply  = "💪 *Mes Points Forts*\n\n";
+            $reply .= "Pas encore assez de données (2 quiz min. par catégorie).\n";
+            $reply .= "Joue quelques quiz pour découvrir tes forces !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz\n";
+            $reply .= "🎲 /quiz random — Quiz surprise";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'strengths_empty']);
+        }
+
+        $reply  = "💪 *Mes Points Forts*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+
+        $medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+        $topCount = min(3, $catScores->count());
+
+        foreach ($catScores->take($topCount) as $i => $cs) {
+            $label = $categories[$cs->category] ?? $cs->category;
+            $pct   = (int) $cs->avg_pct;
+            $best  = (int) $cs->best_pct;
+            $medal = $medals[$i] ?? '⭐';
+
+            $filled = (int) round(($pct / 100) * 5);
+            $bar    = str_repeat('█', $filled) . str_repeat('░', 5 - $filled);
+
+            $reply .= "{$medal} *{$label}*\n";
+            $reply .= "   {$bar} *{$pct}%* moy. | {$best}% max | {$cs->played} quiz\n";
+
+            if ($i === 0) {
+                if ($pct >= 90) {
+                    $reply .= "   _Expert absolu ! Tu maîtrises ce sujet._ 🏆\n";
+                } elseif ($pct >= 75) {
+                    $reply .= "   _Excellent niveau, continue comme ça !_ 🌟\n";
+                } else {
+                    $reply .= "   _Ta meilleure catégorie — encore de la marge !_ 📈\n";
+                }
+            }
+            $reply .= "\n";
+        }
+
+        // Global strength score
+        $totalPlayed = $catScores->sum('played');
+        $globalAvg   = (int) round($catScores->avg('avg_pct'));
+
+        $strengthLevel = match (true) {
+            $globalAvg >= 85 => '🏆 Maître du Quiz',
+            $globalAvg >= 70 => '🌟 Joueur Confirmé',
+            $globalAvg >= 55 => '📈 En Progression',
+            default          => '💪 Débutant Motivé',
+        };
+
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "📊 Niveau global : *{$strengthLevel}* ({$globalAvg}% moy.)\n";
+        $reply .= "🎮 {$totalPlayed} quiz dans tes top catégories\n\n";
+        $reply .= "🎯 /quiz suggest — Catégorie à améliorer\n";
+        $reply .= "🎓 /quiz mastery — Niveaux de maîtrise\n";
+        $reply .= "🔄 /quiz — Jouer maintenant";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Strengths viewed', ['top_category' => $catScores->first()->category, 'global_avg' => $globalAvg]);
+
+        return AgentResult::reply($reply, ['action' => 'strengths', 'top_categories' => $topCount, 'global_avg' => $globalAvg]);
+    }
+
+    /**
+     * Journey Report — AI-generated narrative summary of the user's entire quiz journey.
+     * Tells the story of their progression from first quiz to now with milestones and insights.
+     * Usage: /quiz parcours  |  /quiz journey
+     */
+    private function handleJourneyReport(AgentContext $context): AgentResult
+    {
+        $stats = QuizScore::getUserStats($context->from, $context->agent->id);
+
+        if ((int) $stats['quizzes_played'] < 5) {
+            $reply  = "🗺️ *Mon Parcours Quiz*\n\n";
+            $reply .= "Tu n'as pas encore assez de données (5 quiz minimum).\n";
+            $reply .= "Continue à jouer pour débloquer ton parcours !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz\n";
+            $reply .= "📅 /quiz daily — Question du jour";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'journey_no_data']);
+        }
+
+        $this->sendText($context->from, "🗺️ *Génération de ton parcours quiz...* Un instant !");
+
+        $categories = QuizEngine::getCategories();
+        $quizzesPlayed = (int) $stats['quizzes_played'];
+        $avgPct        = (float) $stats['avg_percentage'];
+        $bestPct       = (float) $stats['best_score'];
+
+        // First quiz date
+        $firstQuiz = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderBy('completed_at')
+            ->first();
+        $firstDate = $firstQuiz ? $firstQuiz->completed_at->format('d/m/Y') : '?';
+
+        // Days active
+        $daysActive = $firstQuiz ? (int) $firstQuiz->completed_at->diffInDays(now()) + 1 : 1;
+
+        // Category stats
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, COUNT(*) as played, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct')
+            ->groupBy('category')
+            ->orderByDesc('avg_pct')
+            ->get();
+
+        $catSummary = '';
+        foreach ($catScores as $cs) {
+            $label      = $categories[$cs->category] ?? $cs->category;
+            $catSummary .= "- {$label}: {$cs->played} quiz, {$cs->avg_pct}% moy.\n";
+        }
+
+        // Perfect scores count
+        $perfectCount = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereRaw('score = total_questions')
+            ->where('total_questions', '>', 0)
+            ->count();
+
+        $dailyStreak = $this->computeDailyStreak($context);
+
+        // Early vs recent performance
+        $earlyScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderBy('completed_at')
+            ->limit(5)
+            ->get();
+        $earlyAvg = ($eq = $earlyScores->sum('total_questions')) > 0
+            ? (int) round(($earlyScores->sum('score') / $eq) * 100) : 0;
+
+        $recentScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderByDesc('completed_at')
+            ->limit(5)
+            ->get();
+        $recentAvg = ($rq = $recentScores->sum('total_questions')) > 0
+            ? (int) round(($recentScores->sum('score') / $rq) * 100) : 0;
+
+        $progression = $recentAvg - $earlyAvg;
+
+        $profileStr = "Parcours quiz du joueur:\n"
+            . "- Premier quiz: {$firstDate} ({$daysActive} jours d'activité)\n"
+            . "- Total quiz joués: {$quizzesPlayed}\n"
+            . "- Moyenne globale: {$avgPct}%\n"
+            . "- Meilleur score: {$bestPct}%\n"
+            . "- Quiz parfaits (100%): {$perfectCount}\n"
+            . "- Série quotidienne actuelle: {$dailyStreak} jour(s)\n"
+            . "- Catégories explorées: {$catScores->count()}\n"
+            . "- Moyenne premiers 5 quiz: {$earlyAvg}%\n"
+            . "- Moyenne 5 derniers quiz: {$recentAvg}% (évolution: " . ($progression >= 0 ? "+{$progression}" : "{$progression}") . "%)\n"
+            . ($catSummary ? "\nPar catégorie:\n{$catSummary}" : '');
+
+        $model        = $this->resolveModel($context);
+        $systemPrompt = "Tu es un narrateur de parcours quiz pour WhatsApp. "
+            . "Raconte l'histoire du parcours quiz de ce joueur de façon engageante et motivante. "
+            . "Format STRICT — commence immédiatement :\n\n"
+            . "📖 *Ton Histoire* : [2-3 phrases narratives sur le parcours, du premier quiz à maintenant]\n\n"
+            . "🏆 *Moments Forts* :\n"
+            . "• [réalisation marquante 1]\n"
+            . "• [réalisation marquante 2]\n\n"
+            . "🔮 *Prochaine Étape* : [1 suggestion encourageante et concrète avec commande /quiz]\n\n"
+            . "RÈGLES ABSOLUES : Français uniquement. Maximum 120 mots. "
+            . "Sois narratif et personnel (utilise 'tu'). "
+            . "Cite des commandes /quiz concrètes. "
+            . "ZÉRO HALLUCINATION : base-toi UNIQUEMENT sur les données fournies. "
+            . "Ne mentionne JAMAIS de catégorie ou statistique qui n'apparaît pas dans le profil.";
+
+        try {
+            $llmResponse = $this->claude->chat(
+                "Raconte le parcours quiz de ce joueur de façon engageante :\n\n{$profileStr}",
+                $model,
+                $systemPrompt,
+                500
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('InteractiveQuizAgent journey LLM error', ['error' => $e->getMessage()]);
+            $llmResponse = null;
+        }
+
+        $reply  = "🗺️ *Mon Parcours Quiz*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+        $reply .= "📅 Depuis le *{$firstDate}* ({$daysActive} jours)\n";
+        $reply .= "🎮 *{$quizzesPlayed}* quiz joués | ⭐ *{$avgPct}%* moy.\n";
+        $reply .= "🏅 *{$bestPct}%* meilleur score | 💯 *{$perfectCount}* quiz parfaits\n";
+        $reply .= "📂 *{$catScores->count()}* catégories explorées\n";
+
+        if ($progression !== 0) {
+            $arrow = $progression > 0 ? '📈' : '📉';
+            $reply .= "{$arrow} Progression : " . ($progression >= 0 ? '+' : '') . "{$progression}% (début → maintenant)\n";
+        }
+
+        $reply .= "\n";
+        $reply .= $llmResponse ? trim($llmResponse) . "\n\n" : "⚠️ _L'IA n'a pas pu générer le récit. Réessaie avec /quiz parcours._\n\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "💪 /quiz forces — Tes points forts\n";
+        $reply .= "🎓 /quiz coach — Coaching IA personnalisé\n";
+        $reply .= "📋 /quiz recap — Récap hebdomadaire\n";
+        $reply .= "🔄 /quiz — Jouer maintenant";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Journey report viewed', ['quizzes' => $quizzesPlayed, 'days_active' => $daysActive, 'progression' => $progression]);
+
+        return AgentResult::reply($reply, ['action' => 'journey_report', 'quizzes' => $quizzesPlayed, 'days_active' => $daysActive]);
+    }
+
+    private function handlePerformanceMap(AgentContext $context): AgentResult
+    {
+        $categories = QuizEngine::getCategories();
+
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, COUNT(*) as played, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct, MAX(score * 100.0 / total_questions) as best_pct')
+            ->groupBy('category')
+            ->get()
+            ->keyBy('category');
+
+        if ($catScores->isEmpty()) {
+            $reply  = "📊 *Carte de Performance*\n\n";
+            $reply .= "Aucune donnée disponible.\n";
+            $reply .= "Joue quelques quiz pour voir ta carte !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'performance_empty']);
+        }
+
+        $reply  = "📊 *Carte de Performance*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+
+        // Sort by avg_pct descending
+        $sorted = $catScores->sortByDesc('avg_pct');
+
+        foreach ($sorted as $key => $cs) {
+            $label = $categories[$key] ?? $key;
+            $pct   = (int) $cs->avg_pct;
+            $best  = (int) $cs->best_pct;
+
+            // Color-coded performance indicator
+            $indicator = match (true) {
+                $pct >= 80 => '🟢',
+                $pct >= 60 => '🟡',
+                $pct >= 40 => '🟠',
+                default    => '🔴',
+            };
+
+            // Mini bar (5 blocks)
+            $filled = (int) round(($pct / 100) * 5);
+            $bar    = str_repeat('█', $filled) . str_repeat('░', 5 - $filled);
+
+            $reply .= "{$indicator} *{$label}*\n";
+            $reply .= "   {$bar} *{$pct}%* moy. | {$best}% max | {$cs->played} quiz\n";
+        }
+
+        // Show unplayed categories
+        $playedCats  = $catScores->keys()->all();
+        $unplayed    = array_diff_key($categories, array_flip($playedCats));
+        // Filter out special categories
+        $unplayed    = array_filter($unplayed, fn($v, $k) => !in_array($k, ['daily', 'mix', 'custom', 'correction', 'defi-jour']), ARRAY_FILTER_USE_BOTH);
+
+        if (!empty($unplayed)) {
+            $reply .= "\n⬜ *Pas encore jouées :*\n";
+            $unplayedLabels = array_values($unplayed);
+            $reply .= "   " . implode(', ', array_slice($unplayedLabels, 0, 6));
+            if (count($unplayedLabels) > 6) {
+                $reply .= ' +' . (count($unplayedLabels) - 6) . ' autres';
+            }
+            $reply .= "\n";
+        }
+
+        // Legend
+        $reply .= "\n_🟢 ≥80% | 🟡 ≥60% | 🟠 ≥40% | 🔴 <40%_\n\n";
+        $reply .= "🎯 /quiz perso — Quiz dans ta catégorie faible\n";
+        $reply .= "🎓 /quiz mastery — Niveaux de maîtrise\n";
+        $reply .= "🎯 /quiz milestone — Jalons et objectifs";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'PerformanceMap viewed', ['categories_played' => count($catScores)]);
+
+        return AgentResult::reply($reply, ['action' => 'performance_map', 'categories' => count($catScores)]);
+    }
+
+    /**
+     * Progression Chain — Start a progressive quiz that goes easy→medium→hard
+     * across 3 rounds (3+5+7 = 15 questions total) in the same category.
+     */
+    private function handleProgressionChain(AgentContext $context): AgentResult
+    {
+        $body  = trim($context->body ?? '');
+        $lower = mb_strtolower($body);
+
+        // Try to extract category from command
+        $category = null;
+        if (preg_match('/(?:progression|chain|chaîne|graduel)\s+(\w+)/iu', $body, $m)) {
+            $category = QuizEngine::resolveCategory($m[1]);
+        }
+
+        // Abandon any existing active quiz
+        Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->update(['status' => 'abandoned']);
+
+        // Generate questions for all 3 difficulty levels
+        $easyData   = QuizEngine::generateQuiz($category, 3);
+        $mediumData = QuizEngine::generateQuiz($category, 5);
+        $hardData   = QuizEngine::generateQuiz($category, 7);
+
+        // Use the category from whichever generation succeeded
+        $resolvedCategory = $easyData['category'] ?? $mediumData['category'] ?? $hardData['category'] ?? 'mix';
+        $catLabel = $easyData['category_label'] ?? $mediumData['category_label'] ?? 'Mix';
+
+        $allQuestions = array_merge(
+            $easyData['questions'] ?? [],
+            $mediumData['questions'] ?? [],
+            $hardData['questions'] ?? []
+        );
+
+        if (count($allQuestions) < 5) {
+            $reply  = "⚠️ *Quiz Progression* — Pas assez de questions disponibles.\n";
+            $reply .= "🔄 Essaie une autre catégorie avec `/quiz progression histoire`";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'progression_empty']);
+        }
+
+        // Tag each question with its difficulty tier for display
+        $prepared = [];
+        $easyCount  = count($easyData['questions'] ?? []);
+        $mediumCount = count($mediumData['questions'] ?? []);
+        foreach ($allQuestions as $i => $q) {
+            $q['hints_used']    = 0;
+            $q['user_answered'] = false;
+            $q['user_correct']  = false;
+            $q['user_skipped']  = false;
+            if ($i < $easyCount) {
+                $q['difficulty'] = 'easy';
+            } elseif ($i < $easyCount + $mediumCount) {
+                $q['difficulty'] = 'medium';
+            } else {
+                $q['difficulty'] = 'hard';
+            }
+            $prepared[] = $q;
+        }
+
+        $quiz = Quiz::create([
+            'user_phone'             => $context->from,
+            'agent_id'               => $context->agent->id,
+            'category'               => $resolvedCategory,
+            'difficulty'             => 'medium', // overall label
+            'questions'              => $prepared,
+            'current_question_index' => 0,
+            'correct_answers'        => 0,
+            'status'                 => 'playing',
+            'started_at'             => now(),
+        ]);
+
+        $this->setQuestionShownAt($quiz, 0);
+        $firstQuestion = $quiz->fresh()->getCurrentQuestion();
+        $questionText  = QuizEngine::formatQuestion($firstQuestion, 1, $quiz->getTotalQuestions());
+
+        $total = $quiz->getTotalQuestions();
+        $intro  = "📈 *Quiz Progression — {$catLabel}*\n";
+        $intro .= "━━━━━━━━━━━━━━━━\n";
+        $intro .= "🟢 Facile → 🟡 Moyen → 🔴 Difficile\n";
+        $intro .= "{$total} questions — la difficulté augmente !\n";
+        $intro .= "💡 *indice* → indice (-1 pt) | *passer* → sauter\n\n";
+        $intro .= "🟢 *Échauffement — Facile*\n\n";
+
+        $reply = $intro . $questionText;
+
+        $this->setPendingContext($context, 'quiz_answer', ['quiz_id' => $quiz->id], 30);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Progression chain started', [
+            'category'   => $resolvedCategory,
+            'total'      => $total,
+            'easy'       => $easyCount,
+            'medium'     => $mediumCount,
+            'hard'       => count($hardData['questions'] ?? []),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'progression_start', 'category' => $resolvedCategory, 'total' => $total]);
+    }
+
+    /**
+     * Weak Mix — Generate a quiz mixing questions from the user's 3 weakest categories.
+     * Perfect for targeted revision of weak spots.
+     */
+    private function handleWeakMix(AgentContext $context): AgentResult
+    {
+        $categories = QuizEngine::getCategories();
+
+        // Fetch user's per-category stats
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, AVG(score * 100.0 / total_questions) as avg_pct, COUNT(*) as played')
+            ->groupBy('category')
+            ->having('played', '>=', 1)
+            ->orderBy('avg_pct')
+            ->limit(3)
+            ->get();
+
+        if ($catScores->isEmpty()) {
+            $reply  = "🎯 *Quiz Renforcement*\n\n";
+            $reply .= "Tu n'as pas encore assez de données.\n";
+            $reply .= "Joue quelques quiz dans différentes catégories d'abord !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz\n";
+            $reply .= "📊 /quiz categories — Voir les catégories";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'weakmix_no_data']);
+        }
+
+        // Abandon any existing active quiz
+        Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->update(['status' => 'abandoned']);
+
+        // Generate 2 questions from each weak category (up to 3 categories = 6 questions)
+        $allQuestions   = [];
+        $weakCatLabels  = [];
+        $questionsPerCat = max(2, (int) ceil(6 / $catScores->count()));
+
+        foreach ($catScores as $cs) {
+            $catData = QuizEngine::generateQuiz($cs->category, $questionsPerCat);
+            if (!empty($catData['questions'])) {
+                $allQuestions = array_merge($allQuestions, $catData['questions']);
+                $weakCatLabels[] = $categories[$cs->category] ?? $cs->category;
+            }
+        }
+
+        if (count($allQuestions) < 3) {
+            $reply  = "⚠️ *Quiz Renforcement* — Pas assez de questions disponibles.\n";
+            $reply .= "🔄 Joue plus de quiz dans différentes catégories d'abord !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'weakmix_insufficient']);
+        }
+
+        // Shuffle to mix categories
+        shuffle($allQuestions);
+        $allQuestions = array_slice($allQuestions, 0, 6);
+
+        $prepared = array_map(function (array $q) {
+            $q['hints_used']    = 0;
+            $q['user_answered'] = false;
+            $q['user_correct']  = false;
+            $q['user_skipped']  = false;
+            return $q;
+        }, $allQuestions);
+
+        $quiz = Quiz::create([
+            'user_phone'             => $context->from,
+            'agent_id'               => $context->agent->id,
+            'category'               => 'mix',
+            'difficulty'             => 'medium',
+            'questions'              => $prepared,
+            'current_question_index' => 0,
+            'correct_answers'        => 0,
+            'status'                 => 'playing',
+            'started_at'             => now(),
+        ]);
+
+        $this->setQuestionShownAt($quiz, 0);
+        $firstQuestion = $quiz->fresh()->getCurrentQuestion();
+        $questionText  = QuizEngine::formatQuestion($firstQuestion, 1, $quiz->getTotalQuestions());
+
+        $catList = implode(', ', $weakCatLabels);
+        $intro  = "🎯 *Quiz Renforcement — Points faibles*\n";
+        $intro .= "━━━━━━━━━━━━━━━━\n";
+        $intro .= "📂 Mix de tes catégories les plus faibles :\n";
+        $intro .= "   _{$catList}_\n";
+        $intro .= "{$quiz->getTotalQuestions()} questions ciblées pour progresser\n";
+        $intro .= "💡 *indice* → indice (-1 pt) | *passer* → sauter\n\n";
+
+        $reply = $intro . $questionText;
+
+        $this->setPendingContext($context, 'quiz_answer', ['quiz_id' => $quiz->id], 30);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'WeakMix started', [
+            'weak_categories' => $catScores->pluck('category')->all(),
+            'total_questions' => $quiz->getTotalQuestions(),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'weakmix_start', 'weak_categories' => $catScores->pluck('category')->all()]);
+    }
+
+    /**
+     * Category Ranking — Rank all user's categories from strongest to weakest with visual progress bars.
+     */
+    private function handleCategoryRanking(AgentContext $context): AgentResult
+    {
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, AVG(score * 100.0 / total_questions) as avg_pct, COUNT(*) as played, SUM(score) as total_correct, SUM(total_questions) as total_q')
+            ->groupBy('category')
+            ->having('played', '>=', 1)
+            ->orderByDesc('avg_pct')
+            ->get();
+
+        if ($catScores->isEmpty()) {
+            $reply  = "📊 *Classement Catégories*\n\n";
+            $reply .= "Aucune donnée pour le moment.\n";
+            $reply .= "Joue quelques quiz d'abord !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz\n";
+            $reply .= "📂 /quiz categories — Voir les catégories";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'catranking_no_data']);
+        }
+
+        $categories = QuizEngine::getCategories();
+
+        $reply  = "📊 *Classement de tes Catégories*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+
+        $rank = 1;
+        foreach ($catScores as $cs) {
+            $catLabel = $categories[$cs->category] ?? $cs->category;
+            $pct      = round($cs->avg_pct);
+            $played   = (int) $cs->played;
+
+            // Visual progress bar (10 segments)
+            $filled = (int) round($pct / 10);
+            $empty  = 10 - $filled;
+            $bar    = str_repeat('▓', $filled) . str_repeat('░', $empty);
+
+            // Rank medal for top 3
+            $medal = match ($rank) {
+                1 => '🥇',
+                2 => '🥈',
+                3 => '🥉',
+                default => "#{$rank}",
+            };
+
+            // Trend indicator based on performance
+            $trendIcon = $pct >= 80 ? '🔥' : ($pct >= 50 ? '📈' : '📉');
+
+            $reply .= "{$medal} *{$catLabel}*\n";
+            $reply .= "   {$bar} {$pct}% ({$played} quiz) {$trendIcon}\n\n";
+
+            $rank++;
+        }
+
+        // Summary stats
+        $totalPlayed = $catScores->sum('played');
+        $overallPct  = $catScores->count() > 0
+            ? round($catScores->sum(fn ($c) => $c->avg_pct * $c->played) / max(1, $totalPlayed))
+            : 0;
+
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "📈 *Moyenne globale :* {$overallPct}% sur {$catScores->count()} catégories\n";
+
+        // Suggestion
+        $weakest = $catScores->last();
+        if ($weakest) {
+            $weakLabel = $categories[$weakest->category] ?? $weakest->category;
+            $reply .= "💡 _Travaille {$weakLabel} avec /quiz focus {$weakest->category}_";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'CatRanking displayed', ['categories' => $catScores->count()]);
+
+        return AgentResult::reply($reply, ['action' => 'catranking', 'categories' => $catScores->count()]);
+    }
+
+    /**
+     * Study Plan — AI-generated weekly study plan based on user's performance data.
+     */
+    private function handleStudyPlan(AgentContext $context): AgentResult
+    {
+        // Gather user performance data
+        $catScores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['daily', 'mix', 'custom', 'correction', 'defi-jour'])
+            ->selectRaw('category, AVG(score * 100.0 / total_questions) as avg_pct, COUNT(*) as played')
+            ->groupBy('category')
+            ->having('played', '>=', 1)
+            ->orderBy('avg_pct')
+            ->get();
+
+        if ($catScores->isEmpty()) {
+            $reply  = "📋 *Plan d'Étude*\n\n";
+            $reply .= "Pas assez de données pour créer ton plan.\n";
+            $reply .= "Joue au moins 3 quiz dans différentes catégories !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz\n";
+            $reply .= "📂 /quiz categories — Voir les catégories";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'studyplan_no_data']);
+        }
+
+        $this->sendText($context->from, "📋 *Création de ton plan d'étude...* Un instant !");
+
+        $categories  = QuizEngine::getCategories();
+        $totalQuizzes = (int) QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->count();
+
+        // Build profile summary for LLM
+        $profileLines = [];
+        foreach ($catScores as $cs) {
+            $catLabel = $categories[$cs->category] ?? $cs->category;
+            $pct = round($cs->avg_pct);
+            $profileLines[] = "- {$catLabel}: {$pct}% (joué {$cs->played}x)";
+        }
+        $profile = implode("\n", $profileLines);
+
+        // Check streak
+        $streakDays = 0;
+        $checkDate  = now();
+        for ($d = 0; $d < 30; $d++) {
+            $dayStr = $checkDate->copy()->subDays($d)->toDateString();
+            $played = QuizScore::where('user_phone', $context->from)
+                ->where('agent_id', $context->agent->id)
+                ->whereDate('created_at', $dayStr)
+                ->exists();
+            if ($played) {
+                $streakDays++;
+            } elseif ($d > 0) {
+                break;
+            }
+        }
+
+        $overallPct = round($catScores->avg('avg_pct'));
+
+        $model = $this->resolveModel($context);
+        $systemPrompt = "Tu es un planificateur pédagogique expert pour un quiz WhatsApp. "
+            . "Crée un plan d'étude hebdomadaire CONCIS et réaliste basé sur le profil du joueur. "
+            . "Format STRICT — commence immédiatement sans introduction :\n\n"
+            . "📋 *Plan d'Étude — Semaine du " . now()->startOfWeek()->format('d/m') . "*\n"
+            . "━━━━━━━━━━━━━━━━\n\n"
+            . "📅 *Lundi-Mardi :* [action + commande]\n"
+            . "📅 *Mercredi-Jeudi :* [action + commande]\n"
+            . "📅 *Vendredi :* [action + commande]\n"
+            . "📅 *Week-end :* [action fun + commande]\n\n"
+            . "🎯 *Objectif de la semaine :* [1 objectif mesurable]\n\n"
+            . "💡 *Astuce :* [1 conseil mémorable]\n\n"
+            . "Commandes disponibles :\n"
+            . "/quiz [catégorie], /quiz facile, /quiz difficile, /quiz perso, /quiz wrong, "
+            . "/quiz focus [cat], /quiz daily, /quiz mini, /quiz chrono, /quiz marathon, "
+            . "/quiz weakmix, /quiz progression [cat], /quiz tip [cat]\n\n"
+            . "RÈGLES ABSOLUES : Réponds en FRANÇAIS. Maximum 150 mots. "
+            . "Adapte au niveau : débutant (<40%) = régularité et facile, "
+            . "intermédiaire (40-70%) = diversifier et corriger, "
+            . "avancé (>70%) = maîtrise et défis. "
+            . "Cite des commandes /quiz concrètes. Sois réaliste (pas plus de 2 quiz/jour). "
+            . "ZÉRO HALLUCINATION : base-toi UNIQUEMENT sur les données fournies.";
+
+        $userMsg = "Profil du joueur :\n"
+            . "- Total quiz joués : {$totalQuizzes}\n"
+            . "- Moyenne globale : {$overallPct}%\n"
+            . "- Série active : {$streakDays} jour(s)\n"
+            . "- Performance par catégorie :\n{$profile}\n\n"
+            . "Génère le plan d'étude hebdomadaire.";
+
+        $sharedCtx = $this->getSharedContextForPrompt($context->from);
+        if ($sharedCtx !== '') {
+            $userMsg .= "\n\nContexte utilisateur :\n{$sharedCtx}";
+        }
+
+        try {
+            $llmResponse = $this->claude->chat($userMsg, $model, $systemPrompt, 600);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('InteractiveQuizAgent StudyPlan LLM error', ['error' => $e->getMessage()]);
+            $llmResponse = null;
+        }
+
+        if ($llmResponse) {
+            $reply = trim($llmResponse);
+        } else {
+            // Fallback: generate a basic plan without LLM
+            $weakest = $catScores->first();
+            $weakLabel = $categories[$weakest->category] ?? $weakest->category;
+            $strongest = $catScores->last();
+            $strongLabel = $categories[$strongest->category] ?? $strongest->category;
+
+            $reply  = "📋 *Plan d'Étude — Semaine du " . now()->startOfWeek()->format('d/m') . "*\n";
+            $reply .= "━━━━━━━━━━━━━━━━\n\n";
+            $reply .= "📅 *Lundi-Mardi :* Renforce {$weakLabel} avec /quiz focus {$weakest->category}\n";
+            $reply .= "📅 *Mercredi-Jeudi :* Revois tes erreurs avec /quiz wrong\n";
+            $reply .= "📅 *Vendredi :* Quiz chrono pour la vitesse /quiz chrono\n";
+            $reply .= "📅 *Week-end :* Quiz fun sur un nouveau sujet /quiz ia <sujet>\n\n";
+            $reply .= "🎯 *Objectif :* Jouer au moins 1 quiz/jour pour maintenir ta série\n\n";
+            $reply .= "💡 *Astuce :* Commence par /quiz daily chaque matin pour garder le rythme !";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'StudyPlan generated', [
+            'total_quizzes' => $totalQuizzes,
+            'overall_pct' => $overallPct,
+            'streak' => $streakDays,
+            'llm_used' => $llmResponse !== null,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'studyplan', 'llm_used' => $llmResponse !== null]);
+    }
+
+    /**
+     * Insight — AI-generated analysis of user's quiz habits and patterns.
+     */
+    private function handleInsight(AgentContext $context): AgentResult
+    {
+        $scores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get();
+
+        if ($scores->count() < 5) {
+            $reply  = "🔮 *Quiz Insight*\n\n";
+            $reply .= "Pas assez de données pour générer un insight.\n";
+            $reply .= "Joue au moins 5 quiz pour débloquer cette fonctionnalité !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'insight_no_data']);
+        }
+
+        $this->sendText($context->from, "🔮 *Analyse de tes habitudes...* Un instant !");
+
+        // Compute patterns
+        $categories = QuizEngine::getCategories();
+        $totalPlayed = $scores->count();
+
+        // Time-of-day analysis
+        $hourBuckets = ['matin (6h-12h)' => 0, 'après-midi (12h-18h)' => 0, 'soir (18h-00h)' => 0, 'nuit (00h-6h)' => 0];
+        foreach ($scores as $s) {
+            $hour = (int) $s->created_at->format('H');
+            if ($hour >= 6 && $hour < 12) {
+                $hourBuckets['matin (6h-12h)']++;
+            } elseif ($hour >= 12 && $hour < 18) {
+                $hourBuckets['après-midi (12h-18h)']++;
+            } elseif ($hour >= 18) {
+                $hourBuckets['soir (18h-00h)']++;
+            } else {
+                $hourBuckets['nuit (00h-6h)']++;
+            }
+        }
+        arsort($hourBuckets);
+        $favTimeSlot = array_key_first($hourBuckets);
+
+        // Category diversity
+        $uniqueCats = $scores->pluck('category')->unique()->count();
+
+        // Performance trend (last 10 vs previous 10)
+        $recent10 = $scores->take(10);
+        $prev10   = $scores->slice(10, 10);
+        $recentAvg = $recent10->count() > 0
+            ? round($recent10->avg(fn($s) => $s->total_questions > 0 ? ($s->score / $s->total_questions) * 100 : 0))
+            : 0;
+        $prevAvg = $prev10->count() > 0
+            ? round($prev10->avg(fn($s) => $s->total_questions > 0 ? ($s->score / $s->total_questions) * 100 : 0))
+            : null;
+
+        // Average time per question
+        $withTime = $scores->filter(fn($s) => $s->time_taken > 0 && $s->total_questions > 0);
+        $avgTimePerQ = $withTime->count() > 0
+            ? round($withTime->avg(fn($s) => $s->time_taken / $s->total_questions))
+            : null;
+
+        // Most played category
+        $topCat = $scores->groupBy('category')
+            ->map(fn($g) => $g->count())
+            ->sortDesc()
+            ->keys()
+            ->first();
+        $topCatLabel = $categories[$topCat] ?? $topCat;
+
+        // Best day of week
+        $dayBuckets = $scores->groupBy(fn($s) => $s->created_at->locale('fr')->dayName)
+            ->map(fn($g) => $g->count())
+            ->sortDesc();
+        $bestDay = $dayBuckets->keys()->first();
+
+        // Build data for LLM
+        $profileData = "Quiz joués : {$totalPlayed}\n"
+            . "Catégories explorées : {$uniqueCats}\n"
+            . "Catégorie préférée : {$topCatLabel}\n"
+            . "Créneau préféré : {$favTimeSlot}\n"
+            . "Jour préféré : {$bestDay}\n"
+            . "Moyenne récente (10 derniers) : {$recentAvg}%\n";
+
+        if ($prevAvg !== null) {
+            $trend = $recentAvg - $prevAvg;
+            $trendSign = $trend >= 0 ? '+' : '';
+            $profileData .= "Tendance : {$trendSign}{$trend}% vs les 10 précédents\n";
+        }
+        if ($avgTimePerQ !== null) {
+            $profileData .= "Temps moyen par question : {$avgTimePerQ}s\n";
+        }
+
+        $model = $this->resolveModel($context);
+        $systemPrompt = "Tu es un analyste de données ludique pour un quiz WhatsApp. "
+            . "Génère un insight personnalisé CONCIS et motivant basé sur les habitudes du joueur. "
+            . "Format STRICT — commence immédiatement sans introduction :\n\n"
+            . "🔮 *Quiz Insight*\n"
+            . "━━━━━━━━━━━━━━━━\n\n"
+            . "🕐 *Ton créneau :* [observation sur quand le joueur joue le plus]\n\n"
+            . "📈 *Ta tendance :* [observation sur la progression]\n\n"
+            . "🎯 *Ton profil :* [1 phrase décrivant le type de joueur — explorateur, spécialiste, régulier...]\n\n"
+            . "💡 *Conseil personnalisé :* [1 conseil basé sur les patterns observés, avec commande /quiz]\n\n"
+            . "RÈGLES ABSOLUES : Réponds en FRANÇAIS. Maximum 100 mots. Sois bienveillant et motivant. "
+            . "ZÉRO HALLUCINATION : base-toi UNIQUEMENT sur les données fournies.";
+
+        $userMsg = "Données du joueur :\n{$profileData}\nGénère l'insight personnalisé.";
+
+        $sharedCtx = $this->getSharedContextForPrompt($context->from);
+        if ($sharedCtx !== '') {
+            $userMsg .= "\n\nContexte utilisateur :\n{$sharedCtx}";
+        }
+
+        try {
+            $llmResponse = $this->claude->chat($userMsg, $model, $systemPrompt, 400);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('InteractiveQuizAgent Insight LLM error', ['error' => $e->getMessage()]);
+            $llmResponse = null;
+        }
+
+        if ($llmResponse) {
+            $reply = trim($llmResponse);
+        } else {
+            // Fallback without LLM
+            $reply  = "🔮 *Quiz Insight*\n";
+            $reply .= "━━━━━━━━━━━━━━━━\n\n";
+            $reply .= "🕐 *Ton créneau :* Tu joues surtout le {$favTimeSlot}\n\n";
+            $reply .= "📈 *Ta tendance :* Moyenne récente de {$recentAvg}%";
+            if ($prevAvg !== null) {
+                $diff = $recentAvg - $prevAvg;
+                $reply .= $diff >= 0 ? " (+{$diff}% 📈)" : " ({$diff}% 📉)";
+            }
+            $reply .= "\n\n";
+            $reply .= "🎯 *Ta catégorie préférée :* {$topCatLabel}\n\n";
+            $reply .= "💡 *Conseil :* Essaie /quiz random pour explorer de nouvelles catégories !";
+        }
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Insight generated', [
+            'total_played' => $totalPlayed,
+            'fav_time' => $favTimeSlot,
+            'recent_avg' => $recentAvg,
+            'llm_used' => $llmResponse !== null,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'insight', 'llm_used' => $llmResponse !== null]);
+    }
+
+    /**
+     * Warm-up — Quick 2 easy questions from random categories as a warm-up before a real quiz.
+     */
+    private function handleWarmup(AgentContext $context): AgentResult
+    {
+        // Abandon any existing active quiz
+        Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->update(['status' => 'abandoned']);
+
+        $quizData = QuizEngine::generateQuiz(null, 2, 'easy');
+
+        // Fallback if generateQuiz doesn't support difficulty parameter
+        if (empty($quizData['questions'])) {
+            $quizData = QuizEngine::generateQuiz(null, 2);
+        }
+
+        if (empty($quizData['questions'])) {
+            $reply  = "⚠️ *Échauffement* — Aucune question disponible.\n";
+            $reply .= "🔄 /quiz — Lancer un quiz normal";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'warmup_empty']);
+        }
+
+        $questions = array_map(function (array $q) {
+            $q['hints_used']    = 0;
+            $q['user_answered'] = false;
+            $q['user_correct']  = false;
+            $q['user_skipped']  = false;
+            return $q;
+        }, array_slice($quizData['questions'], 0, 2));
+
+        $quiz = Quiz::create([
+            'user_phone'             => $context->from,
+            'agent_id'               => $context->agent->id,
+            'category'               => 'warmup',
+            'difficulty'             => 'easy',
+            'questions'              => $questions,
+            'current_question_index' => 0,
+            'correct_answers'        => 0,
+            'status'                 => 'playing',
+            'started_at'             => now(),
+        ]);
+
+        $this->setQuestionShownAt($quiz, 0);
+        $firstQuestion = $quiz->fresh()->getCurrentQuestion();
+        $questionText  = QuizEngine::formatQuestion($firstQuestion, 1, count($questions));
+
+        $reply  = "🏋️ *Échauffement Quiz*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "🟢 Facile — 2 questions pour se mettre en jambes !\n";
+        $reply .= "_Après l'échauffement, lance un vrai quiz avec_ /quiz\n\n";
+        $reply .= $questionText;
+
+        $this->setPendingContext($context, 'quiz_answer', ['quiz_id' => $quiz->id], 30);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Warmup started', ['questions' => count($questions)]);
+
+        return AgentResult::reply($reply, ['action' => 'warmup_start']);
+    }
+
+    /**
+     * Rival — Find and display the user's closest competitors on the leaderboard.
+     * Shows the user just above and below to create a motivational "rival" dynamic.
+     * Usage: /quiz rival
+     */
+    private function handleRival(AgentContext $context): AgentResult
+    {
+        $allScores = QuizScore::where('agent_id', $context->agent->id)
+            ->selectRaw('user_phone, SUM(score) as total_score, COUNT(*) as quizzes_played, ROUND(AVG(score * 100.0 / total_questions)) as avg_pct')
+            ->groupBy('user_phone')
+            ->orderByDesc('total_score')
+            ->get();
+
+        if ($allScores->count() < 2) {
+            $reply  = "⚔️ *Quiz Rival*\n\n";
+            $reply .= "Pas assez de joueurs pour trouver un rival.\n";
+            $reply .= "Invite tes amis à jouer pour débloquer cette fonctionnalité !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'rival_no_data']);
+        }
+
+        $userIdx = $allScores->search(fn($s) => $s->user_phone === $context->from);
+
+        if ($userIdx === false) {
+            $reply  = "⚔️ *Quiz Rival*\n\n";
+            $reply .= "Tu n'as pas encore de scores enregistrés.\n";
+            $reply .= "Joue un quiz pour apparaître au classement !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'rival_no_score']);
+        }
+
+        $userEntry = $allScores[$userIdx];
+        $userRank  = $userIdx + 1;
+        $totalPlayers = $allScores->count();
+
+        $reply  = "⚔️ *Tes Rivaux Quiz*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+
+        // Show user above (rival to beat)
+        if ($userIdx > 0) {
+            $above = $allScores[$userIdx - 1];
+            $gap   = $above->total_score - $userEntry->total_score;
+            $abovePhone = mb_substr($above->user_phone, -4);
+            $reply .= "🔺 *Rival à battre :* #{$userIdx}\n";
+            $reply .= "   •••{$abovePhone} — {$above->total_score} pts ({$above->avg_pct}% moy.)\n";
+            $reply .= "   📏 _Écart : {$gap} pts à combler_\n\n";
+        } else {
+            $reply .= "👑 *Tu es #1 !* Personne au-dessus de toi !\n\n";
+        }
+
+        // Show user
+        $reply .= "🎯 *Toi :* #{$userRank} / {$totalPlayers}\n";
+        $reply .= "   {$userEntry->total_score} pts ({$userEntry->avg_pct}% moy.) — {$userEntry->quizzes_played} quiz\n\n";
+
+        // Show user below (rival who chases)
+        if ($userIdx < $allScores->count() - 1) {
+            $below = $allScores[$userIdx + 1];
+            $gapBelow = $userEntry->total_score - $below->total_score;
+            $belowPhone = mb_substr($below->user_phone, -4);
+            $belowRank = $userIdx + 2;
+            $reply .= "🔻 *Te poursuit :* #{$belowRank}\n";
+            $reply .= "   •••{$belowPhone} — {$below->total_score} pts ({$below->avg_pct}% moy.)\n";
+            $reply .= "   📏 _Avance : {$gapBelow} pts_\n\n";
+        } else {
+            $reply .= "🔻 Personne ne te suit (encore) !\n\n";
+        }
+
+        // Motivational tip based on position
+        if ($userIdx > 0) {
+            $above = $allScores[$userIdx - 1];
+            $gap   = $above->total_score - $userEntry->total_score;
+            if ($gap <= 5) {
+                $reply .= "🔥 _Ton rival est à portée ! Un bon quiz peut tout changer._\n";
+            } elseif ($gap <= 15) {
+                $reply .= "💪 _Quelques quiz et tu le dépasses. Continue !_\n";
+            } else {
+                $reply .= "📈 _L'écart est jouable. Régularité = victoire._\n";
+            }
+        }
+
+        $reply .= "\n🏆 /quiz leaderboard — Classement complet\n";
+        $reply .= "🔄 /quiz — Lancer un quiz";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Rival viewed', ['rank' => $userRank, 'total_players' => $totalPlayers]);
+
+        return AgentResult::reply($reply, ['action' => 'rival', 'rank' => $userRank]);
+    }
+
+    /**
+     * Debrief — AI-generated learning debrief from the last completed quiz.
+     * Unlike "explain" which focuses on wrong answers, debrief gives a holistic
+     * learning summary: what was mastered, what to review, and a fun takeaway.
+     * Usage: /quiz debrief
+     */
+    private function handleDebrief(AgentContext $context): AgentResult
+    {
+        $quiz = Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'completed')
+            ->latest()
+            ->first();
+
+        if (!$quiz) {
+            $reply  = "📝 *Quiz Debrief*\n\n";
+            $reply .= "Aucun quiz terminé à débriefer.\n";
+            $reply .= "Lance un quiz d'abord !\n\n";
+            $reply .= "🔄 /quiz — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'debrief_no_quiz']);
+        }
+
+        $questions = $quiz->questions;
+        $total     = count($questions);
+        $correct   = collect($questions)->where('user_correct', true)->count();
+        $skipped   = collect($questions)->where('user_skipped', true)->count();
+        $wrong     = $total - $correct - $skipped;
+        $pct       = $total > 0 ? round(($correct / $total) * 100) : 0;
+
+        $categories = QuizEngine::getCategories();
+        $catLabel   = $categories[$quiz->category] ?? $quiz->category;
+
+        // Build per-question summary for LLM
+        $questionSummary = '';
+        foreach ($questions as $i => $q) {
+            $num     = $i + 1;
+            $status  = ($q['user_skipped'] ?? false) ? 'PASSÉE' : (($q['user_correct'] ?? false) ? 'CORRECTE' : 'FAUSSE');
+            $qText   = mb_substr($q['question'] ?? '', 0, 100);
+            $correctAnswer = $q['options'][$q['answer']] ?? '?';
+            $questionSummary .= "Q{$num}: {$qText} → {$status} (bonne réponse: {$correctAnswer})\n";
+        }
+
+        $this->sendText($context->from, "📝 *Debrief en cours...* Un instant !");
+
+        $model = $this->resolveModel($context);
+        $systemPrompt = "Tu es un tuteur bienveillant qui fait le bilan d'un quiz WhatsApp. "
+            . "Génère un debrief d'apprentissage CONCIS et utile. "
+            . "Format STRICT — commence immédiatement :\n\n"
+            . "📝 *Debrief — {catégorie}*\n"
+            . "━━━━━━━━━━━━━━━━\n\n"
+            . "✅ *Ce que tu maîtrises :* [1-2 phrases sur les thèmes bien compris]\n\n"
+            . "📚 *À revoir :* [1-2 phrases sur les lacunes identifiées, avec des pistes concrètes]\n\n"
+            . "💡 *Le savais-tu ?* [1 fait fascinant lié au quiz pour prolonger l'apprentissage]\n\n"
+            . "🎯 *Prochaine étape :* [1 suggestion avec commande /quiz]\n\n"
+            . "RÈGLES ABSOLUES : Réponds en FRANÇAIS. Maximum 120 mots. Sois encourageant. "
+            . "ZÉRO HALLUCINATION : base-toi UNIQUEMENT sur les données fournies. "
+            . "Ne mentionne JAMAIS de question ou réponse qui n'apparaît pas dans les données.";
+
+        $userMsg = "Quiz terminé — {$catLabel}\n"
+            . "Score : {$correct}/{$total} ({$pct}%)\n"
+            . "Passées : {$skipped}, Fausses : {$wrong}\n\n"
+            . "Détail des questions :\n{$questionSummary}";
+
+        $sharedCtx = $this->getSharedContextForPrompt($context->from);
+        if ($sharedCtx !== '') {
+            $userMsg .= "\n\nContexte utilisateur :\n{$sharedCtx}";
+        }
+
+        try {
+            $llmResponse = $this->claude->chat($userMsg, $model, $systemPrompt, 500);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('InteractiveQuizAgent Debrief LLM error', ['error' => $e->getMessage()]);
+            $llmResponse = null;
+        }
+
+        if ($llmResponse) {
+            $reply = trim($llmResponse);
+        } else {
+            // Fallback without LLM
+            $reply  = "📝 *Debrief — {$catLabel}*\n";
+            $reply .= "━━━━━━━━━━━━━━━━\n\n";
+            $reply .= "📊 Score : {$correct}/{$total} ({$pct}%)\n\n";
+            if ($correct > 0) {
+                $reply .= "✅ *Maîtrisé :* {$correct} question(s) correcte(s) — bien joué !\n\n";
+            }
+            if ($wrong > 0) {
+                $reply .= "📚 *À revoir :* {$wrong} erreur(s) — utilise `/quiz explain` pour les détails\n\n";
+            }
+            if ($skipped > 0) {
+                $reply .= "⏭️ {$skipped} question(s) passée(s) — essaie `/quiz focus` pour t'entraîner\n\n";
+            }
+            $reply .= "🎯 Prochaine étape : `/quiz perso` pour cibler tes faiblesses";
+        }
+
+        $reply .= "\n\n━━━━━━━━━━━━━━━━\n";
+        $reply .= "🧠 /quiz explain — Détail des erreurs\n";
+        $reply .= "🔁 /quiz focus — Réviser les questions ratées\n";
+        $reply .= "🔄 /quiz — Nouveau quiz";
+
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Debrief generated', [
+            'quiz_id' => $quiz->id,
+            'score' => "{$correct}/{$total}",
+            'llm_used' => $llmResponse !== null,
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'debrief', 'llm_used' => $llmResponse !== null]);
     }
 }

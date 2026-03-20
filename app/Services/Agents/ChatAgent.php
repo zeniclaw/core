@@ -122,6 +122,9 @@ class ChatAgent extends BaseAgent
             ]);
         }
 
+        // Set conversation ID for Claude CLI session persistence (OAuth tokens)
+        $this->claude->setCliConversationId($context->from);
+
         // Run the agentic loop — the LLM decides which tools to use
         $loop = new AgenticLoop(maxIterations: $isOnPrem ? 1 : 10, debug: $debug);
         $result = $loop->run(

@@ -6,6 +6,7 @@ use App\Models\AppSetting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Process;
 
 class AnthropicClient
 {
@@ -416,6 +417,237 @@ class AnthropicClient
     }
 
     /**
+     * Check if current API key is an OAuth token (requires Claude CLI proxy).
+     */
+    private function isOAuthToken(?string $apiKey = null): bool
+    {
+        $apiKey = $apiKey ?? AppSetting::get('anthropic_api_key');
+        return $apiKey && str_starts_with($apiKey, 'sk-ant-oat');
+    }
+
+    /**
+     * Map model names to Claude CLI model slugs.
+     */
+    private function cliModelSlug(string $model): string
+    {
+        if (str_contains($model, 'opus')) return 'opus';
+        if (str_contains($model, 'haiku')) return 'haiku';
+        return 'sonnet'; // default
+    }
+
+    /**
+     * Route a chat call through Claude CLI (for OAuth tokens).
+     * Uses Claude Code with full capabilities: web search, multi-turn, session persistence.
+     */
+    private function chatViaCli(string|array $message, string $model, string $systemPrompt = '', int $maxTokens = 0): ?string
+    {
+        $result = $this->executeClaudeCli($message, $model, $systemPrompt);
+        return $result['text'] ?? null;
+    }
+
+    /**
+     * Route a chatWithToolUse call through Claude CLI (for OAuth tokens).
+     * Full Claude Code capabilities: web search, web fetch, multi-turn reasoning.
+     * Sessions are persisted per conversation for context continuity.
+     */
+    private function chatWithToolUseViaCli(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): ?array
+    {
+        // Extract the user message (last user message in the chain)
+        $userMessage = '';
+        foreach (array_reverse($messages) as $msg) {
+            if (($msg['role'] ?? '') === 'user') {
+                $content = $msg['content'] ?? '';
+                if (is_array($content)) {
+                    $userMessage = collect($content)
+                        ->map(fn($b) => match($b['type'] ?? '') {
+                            'text' => $b['text'] ?? '',
+                            'tool_result' => $b['content'] ?? '',
+                            default => '',
+                        })
+                        ->filter()
+                        ->implode("\n");
+                } else {
+                    $userMessage = $content;
+                }
+                break;
+            }
+        }
+
+        if (!$userMessage) return null;
+
+        $result = $this->executeClaudeCli($userMessage, $model, $systemPrompt);
+
+        if (!$result) return null;
+
+        return [
+            'content' => [['type' => 'text', 'text' => $result['text'] ?? '']],
+            'stop_reason' => $result['stop_reason'] ?? 'end_turn',
+            'model' => $result['model'] ?? $model,
+            'usage' => $result['usage'] ?? null,
+        ];
+    }
+
+    /**
+     * Execute Claude CLI with full capabilities.
+     * Supports session resume for conversation continuity.
+     *
+     * @return array{text: string, session_id: string, stop_reason: string, usage: ?array, model: string}|null
+     */
+    private function executeClaudeCli(string|array $message, string $model, string $systemPrompt = ''): ?array
+    {
+        $apiKey = AppSetting::get('anthropic_api_key');
+        if (!$apiKey) return null;
+
+        $textMessage = is_array($message)
+            ? collect($message)->where('type', 'text')->pluck('text')->implode("\n")
+            : $message;
+
+        // Build the prompt with system instructions
+        $fullPrompt = $systemPrompt
+            ? "{$systemPrompt}\n\n---\n\nMessage de l'utilisateur:\n{$textMessage}"
+            : $textMessage;
+
+        $slug = $this->cliModelSlug($model);
+
+        // Check for existing session to resume
+        $sessionId = $this->getCliSessionId();
+
+        if ($sessionId) {
+            // Resume existing session — send new message via --resume
+            $cmd = sprintf(
+                'claude --resume %s -p %s --model %s --output-format json --max-turns 6 --allowedTools "WebSearch,WebFetch" 2>/dev/null',
+                escapeshellarg($sessionId),
+                escapeshellarg($textMessage), // Only user message, system prompt already in session
+                escapeshellarg($slug)
+            );
+        } else {
+            // New session
+            $cmd = sprintf(
+                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools "WebSearch,WebFetch" 2>/dev/null',
+                escapeshellarg($fullPrompt),
+                escapeshellarg($slug)
+            );
+        }
+
+        try {
+            $result = Process::timeout(180) // 3 min max for multi-turn
+                ->env([
+                    'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
+                    'HOME' => '/tmp',
+                ])
+                ->run($cmd);
+
+            if (!$result->successful()) {
+                Log::warning('AnthropicClient::executeClaudeCli failed', [
+                    'exit_code' => $result->exitCode(),
+                    'stderr' => substr($result->errorOutput(), 0, 500),
+                ]);
+
+                // If resume failed (session expired), retry without resume
+                if ($sessionId) {
+                    Log::info('AnthropicClient: session resume failed, starting fresh');
+                    $this->clearCliSessionId();
+                    return $this->executeClaudeCli($message, $model, $systemPrompt);
+                }
+
+                return null;
+            }
+
+            $data = json_decode($result->output(), true);
+            if (!$data) {
+                Log::warning('AnthropicClient::executeClaudeCli invalid JSON', [
+                    'output' => substr($result->output(), 0, 300),
+                ]);
+                return null;
+            }
+
+            if ($data['is_error'] ?? false) {
+                Log::warning('AnthropicClient::executeClaudeCli error', [
+                    'result' => substr($data['result'] ?? '', 0, 300),
+                ]);
+                return null;
+            }
+
+            // Save session ID for future resume
+            if (!empty($data['session_id'])) {
+                $this->saveCliSessionId($data['session_id']);
+            }
+
+            // Track usage
+            if (!empty($data['usage'])) {
+                $this->trackTokenUsage($model, $data['usage']);
+            }
+
+            return [
+                'text' => $data['result'] ?? '',
+                'session_id' => $data['session_id'] ?? null,
+                'stop_reason' => $data['stop_reason'] ?? 'end_turn',
+                'usage' => $data['usage'] ?? null,
+                'model' => $model,
+                'cost' => $data['total_cost_usd'] ?? 0,
+            ];
+        } catch (\Exception $e) {
+            Log::error('AnthropicClient::executeClaudeCli exception', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Get stored CLI session ID for current conversation.
+     * Uses a per-request context key set by the ChatAgent.
+     */
+    private function getCliSessionId(): ?string
+    {
+        $key = $this->cliSessionCacheKey();
+        return $key ? Cache::get($key) : null;
+    }
+
+    /**
+     * Save CLI session ID for conversation continuity.
+     */
+    private function saveCliSessionId(string $sessionId): void
+    {
+        $key = $this->cliSessionCacheKey();
+        if ($key) {
+            // Session expires after 4 hours of inactivity
+            Cache::put($key, $sessionId, now()->addHours(4));
+        }
+    }
+
+    /**
+     * Clear stored CLI session ID (on error/expiry).
+     */
+    private function clearCliSessionId(): void
+    {
+        $key = $this->cliSessionCacheKey();
+        if ($key) {
+            Cache::forget($key);
+        }
+    }
+
+    /**
+     * Build cache key for CLI session based on current conversation context.
+     * Set via setCliConversationId() before API calls.
+     */
+    private function cliSessionCacheKey(): ?string
+    {
+        if (!$this->cliConversationId) return null;
+        return "claude_cli_session:{$this->cliConversationId}";
+    }
+
+    /**
+     * Set the conversation ID for CLI session persistence.
+     * Call this before chat/chatWithToolUse to enable session resume.
+     */
+    public function setCliConversationId(string $conversationId): self
+    {
+        $this->cliConversationId = $conversationId;
+        return $this;
+    }
+
+    private ?string $cliConversationId = null;
+
+    /**
      * Build Anthropic API headers.
      */
     private function buildHeaders(?string $apiKey = null): ?array
@@ -447,6 +679,11 @@ class AnthropicClient
     {
         if ($this->isOnPremModel($model)) {
             return $this->chatOnPrem($message, $model, $systemPrompt, $maxTokens);
+        }
+
+        // OAuth tokens must route through Claude CLI
+        if ($this->isOAuthToken()) {
+            return $this->chatViaCli($message, $model, $systemPrompt, $maxTokens);
         }
 
         // Circuit breaker check
@@ -556,6 +793,11 @@ class AnthropicClient
      */
     public function chatWithToolUse(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): ?array
     {
+        // OAuth tokens must route through Claude CLI
+        if ($this->isOAuthToken()) {
+            return $this->chatWithToolUseViaCli($messages, $model, $systemPrompt, $tools, $maxTokens);
+        }
+
         // On-prem models: try tool_use for supported models, fallback to simple chat
         if ($this->isOnPremModel($model)) {
             if (!empty($tools) && $this->supportsOnPremTools($model)) {

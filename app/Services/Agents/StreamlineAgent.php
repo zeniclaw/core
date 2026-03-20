@@ -63,6 +63,7 @@ class StreamlineAgent extends BaseAgent
             'proposer workflow', 'idee workflow', 'cree automatiquement', 'genere workflow',
             'workflow batch', 'batch workflow', 'lancer plusieurs workflows', 'multi-workflow',
             'enchaîner workflows', 'enchainer workflows', 'plusieurs workflows',
+            'workflow info', 'info workflow', 'fiche workflow', 'resume workflow',
             'workflow notes', 'workflow note', 'note workflow', 'annoter workflow',
             'memo workflow', 'commentaire workflow',
             'workflow health', 'health workflow', 'sante workflow', 'etat workflows',
@@ -97,22 +98,70 @@ class StreamlineAgent extends BaseAgent
             'workflow graph', 'workflow flow', 'graphe workflow', 'visualiser workflow',
             'flux workflow', 'schema workflow', 'flowchart workflow',
             'workflow recent', 'workflows recents', 'derniers workflows',
+            'workflow chain', 'enchainer workflows', 'chain workflow', 'chaine de workflows',
+            'workflow analyze', 'analyser workflow', 'analyse workflow', 'rapport workflow',
+            'workflow snapshot', 'snapshot workflow', 'sauvegarder etat workflow', 'capturer workflow',
+            'workflow restore', 'restaurer snapshot', 'revenir snapshot', 'charger snapshot',
+            'workflow compare-stats', 'comparer workflows', 'comparer stats',
+            'workflow recap', 'recap workflows', 'bilan workflows', 'resume activite',
+            'workflow profile', 'profil workflow', 'fiche workflow detaillee', 'score workflow',
+            'workflow bulk', 'bulk workflow', 'action en masse', 'activer plusieurs workflows',
+            'desactiver plusieurs workflows', 'supprimer plusieurs workflows',
+            'workflow explain', 'expliquer workflow', 'que fait workflow', 'comment marche workflow',
+            'workflow timeline', 'timeline workflow', 'chronologie workflow', 'historique visuel',
+            'activite workflow', 'executions recentes workflow',
         ];
     }
 
     public function version(): string
     {
-        return '1.23.0';
+        return '1.33.0';
     }
 
     public function canHandle(AgentContext $context): bool
     {
         if (!$context->body) return false;
         return $context->routedAgent === 'streamline'
-            || (bool) preg_match('/\b(workflow|chain|pipeline|enchainer|chainer|\/workflow|automatiser|automate|sequence|lancer workflow|mes workflows|creer workflow|gerer workflows)\b/iu', $context->body);
+            || (bool) preg_match('/\b(workflow|chain|pipeline|enchainer|chainer|\/workflow|automatiser|automate|sequence|lancer workflow|mes workflows|creer workflow|gerer workflows|valider workflow|validate workflow|bulk.?tag|taguer tous|etapes automatiques|multi.?workflow)\b/iu', $context->body);
     }
 
     public function handle(AgentContext $context): AgentResult
+    {
+        try {
+            return $this->handleInner($context);
+        } catch (\Throwable $e) {
+            Log::error('StreamlineAgent handle() exception', [
+                'from'  => $context->from,
+                'body'  => mb_substr($context->body ?? '', 0, 300),
+                'error' => $e->getMessage(),
+                'file'  => $e->getFile() . ':' . $e->getLine(),
+                'trace' => mb_substr($e->getTraceAsString(), 0, 1500),
+            ]);
+            $this->log($context, 'EXCEPTION: ' . $e->getMessage(), [
+                'error' => $e->getMessage(),
+                'file'  => basename($e->getFile()) . ':' . $e->getLine(),
+            ], 'error');
+
+            $errMsg = $e->getMessage();
+            $isDbError    = $e instanceof \Illuminate\Database\QueryException;
+            $isRateLimit  = str_contains($errMsg, 'rate_limit') || str_contains($errMsg, '429');
+            $isTimeout    = str_contains($errMsg, 'timed out') || str_contains($errMsg, 'timeout');
+            $isMemory     = str_contains($errMsg, 'memory') || str_contains($errMsg, 'Allowed memory');
+            $isConnection = str_contains($errMsg, 'Connection refused') || str_contains($errMsg, 'Could not resolve host');
+            $reply = match (true) {
+                $isDbError    => "⚠ Erreur temporaire de base de donnees. Reessaie dans quelques instants.",
+                $isRateLimit  => "⚠ Trop de requetes en cours. Attends quelques secondes et reessaie.",
+                $isTimeout    => "⚠ Le traitement a pris trop de temps. Essaie avec un workflow plus simple ou /workflow test-step pour tester etape par etape.",
+                $isMemory     => "⚠ Workflow trop volumineux a traiter. Reduis le nombre d'etapes ou simplifie les instructions.",
+                $isConnection => "⚠ Service externe indisponible. Verifie ta connexion et reessaie.",
+                default       => "⚠ Erreur interne de l'agent workflow. Reessaie ou tape /workflow help.",
+            };
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['error' => $errMsg]);
+        }
+    }
+
+    private function handleInner(AgentContext $context): AgentResult
     {
         $body = trim($context->body ?? '');
 
@@ -132,8 +181,9 @@ class StreamlineAgent extends BaseAgent
             return $this->handleInlineChain($context, $body);
         }
 
-        // Detect workflow-related keywords
-        if (preg_match('/\b(workflow|pipeline)\b/iu', $lower)) {
+        // Detect workflow-related keywords or routed agent
+        if ($context->routedAgent === 'streamline'
+            || preg_match('/\b(workflow|pipeline|automatiser|automate|sequence|enchainer|chainer)\b/iu', $lower)) {
             return $this->handleNaturalLanguage($context, $body);
         }
 
@@ -283,6 +333,25 @@ class StreamlineAgent extends BaseAgent
             return AgentResult::reply('Optimisation annulee. Le workflow reste inchange.');
         }
 
+        if ($type === 'confirm_bulk_delete') {
+            $lower = mb_strtolower(trim($context->body ?? ''));
+            $this->clearPendingContext($context);
+            if (in_array($lower, ['oui', 'yes', 'ok', 'confirme', 'o'])) {
+                $ids = $data['workflow_ids'] ?? [];
+                $deleted = 0;
+                foreach ($ids as $id) {
+                    $wf = Workflow::find($id);
+                    if ($wf && $wf->user_phone === $context->from) {
+                        $wf->delete();
+                        $deleted++;
+                    }
+                }
+                $this->log($context, "Bulk delete: {$deleted} workflows supprime(s)");
+                return AgentResult::reply("🗑 *{$deleted}* workflow(s) supprime(s).");
+            }
+            return AgentResult::reply('Suppression en masse annulee.');
+        }
+
         if ($type === 'save_inline_workflow') {
             $lower = mb_strtolower(trim($context->body ?? ''));
             $this->clearPendingContext($context);
@@ -333,6 +402,7 @@ class StreamlineAgent extends BaseAgent
             'trigger', 'run'                => $this->commandTrigger($context, $arg1, $arg2),
             'delete'                        => $this->commandDelete($context, $arg1),
             'show', 'detail'                => $this->commandShow($context, $arg1),
+            'info'                          => $this->commandInfo($context, $arg1),
             'enable'                        => $this->commandToggle($context, $arg1, true),
             'disable'                       => $this->commandToggle($context, $arg1, false),
             'rename'                        => $this->commandRename($context, $arg1, $arg2),
@@ -378,6 +448,20 @@ class StreamlineAgent extends BaseAgent
             'test-step', 'teststep', 'test' => $this->commandTestStep($context, $arg1, $arg2),
             'disable-step', 'disablestep', 'skip-step' => $this->commandToggleStep($context, $arg1, $arg2, true),
             'enable-step', 'enablestep', 'unskip-step' => $this->commandToggleStep($context, $arg1, $arg2, false),
+            'chain'                         => $this->commandChain($context, implode(' ', array_slice($parts, 2))),
+            'analyze', 'analyse'            => $this->commandAnalyze($context, $arg1),
+            'snapshot'                      => $this->commandSnapshot($context, $arg1, $arg2),
+            'restore'                       => $this->commandRestore($context, $arg1, $arg2),
+            'validate', 'valider', 'check'  => $this->commandValidate($context, $arg1),
+            'bulk-tag', 'bulktag'           => $this->commandBulkTag($context, $arg1, $arg2),
+            'compare-stats', 'comparestats' => $this->commandCompareStats($context, $arg1, $arg2),
+            'recap'                         => $this->commandRecap($context, $arg1),
+            'profile', 'profil', 'fiche'    => $this->commandProfile($context, $arg1),
+            'bulk'                          => $this->commandBulkAction($context, implode(' ', array_slice($parts, 2))),
+            'dependencies', 'deps', 'agents'=> $this->commandDependencies($context),
+            'export-all', 'exportall', 'backup' => $this->commandExportAll($context),
+            'explain', 'expliquer'          => $this->commandExplain($context, $arg1),
+            'timeline', 'chronologie'       => $this->commandTimeline($context, $arg1),
             'help'                          => $this->showHelp($context, $arg1),
             default                         => $this->showHelp($context),
         };
@@ -433,6 +517,21 @@ class StreamlineAgent extends BaseAgent
             return AgentResult::reply(
                 "Nom invalide: \"{$parsed['name']}\". Utilise uniquement des lettres, chiffres, tirets et underscores.\n"
                 . "Exemples valides: morning-brief, daily_check, weekly-review"
+            );
+        }
+
+        // Validate name length
+        if (mb_strlen($parsed['name']) > 50) {
+            return AgentResult::reply(
+                "Nom trop long (" . mb_strlen($parsed['name']) . " car.). Maximum 50 caracteres.\n"
+                . "Choisis un nom plus court et descriptif."
+            );
+        }
+
+        if (mb_strlen($parsed['name']) < 2) {
+            return AgentResult::reply(
+                "Nom trop court. Minimum 2 caracteres.\n"
+                . "Exemples: morning-brief, daily-check, weekly-review"
             );
         }
 
@@ -492,22 +591,22 @@ class StreamlineAgent extends BaseAgent
 
         $activeCount = $workflows->where('is_active', true)->count();
         $header = $isTagFilter
-            ? "Workflows #\"{$tagFilter}\" ({$workflows->count()}):"
+            ? "*Workflows #{$tagFilter}* ({$workflows->count()}):"
             : (!empty($search)
-                ? "Workflows contenant \"{$search}\" ({$workflows->count()}):"
-                : "Tes workflows ({$workflows->count()} · {$activeCount} actif" . ($activeCount > 1 ? 's' : '') . "):");
+                ? "*Workflows* contenant \"{$search}\" ({$workflows->count()}):"
+                : "*Tes workflows* ({$workflows->count()} · {$activeCount} actif" . ($activeCount > 1 ? 's' : '') . "):");
 
         // Sort: pinned first, then by updated_at desc
         $workflows = $workflows->sortByDesc(fn($wf) => $this->isPinned($wf) ? 1 : 0);
 
         $lines = [$header, str_repeat('─', 28)];
         foreach ($workflows->values() as $i => $wf) {
-            $active    = $wf->is_active ? 'ON' : 'OFF';
-            $pinBadge  = $this->isPinned($wf) ? '[PIN] ' : '';
+            $active    = $wf->is_active ? '✅' : '⏸';
+            $pinBadge  = $this->isPinned($wf) ? '📌 ' : '';
             $stepCount = count($wf->steps ?? []);
             $lastRun   = $wf->last_run_at ? $wf->last_run_at->diffForHumans() : 'jamais';
-            $desc      = !empty($wf->description) ? "\n   " . mb_substr($wf->description, 0, 60) : '';
-            $lines[] = ($i + 1) . ". [{$active}] {$pinBadge}{$wf->name}{$desc}";
+            $desc      = !empty($wf->description) ? "\n   _" . mb_substr($wf->description, 0, 60) . "_" : '';
+            $lines[] = ($i + 1) . ". {$active} {$pinBadge}*{$wf->name}*{$desc}";
             $lines[] = "   {$stepCount} etapes · {$wf->run_count} exec. · {$lastRun}";
         }
 
@@ -567,7 +666,62 @@ class StreamlineAgent extends BaseAgent
         }
 
         $input = trim($input);
+
+        // Support --preview flag: show steps before executing
+        if (preg_match('/--preview\b/i', $input)) {
+            $input = trim(preg_replace('/--preview\b/i', '', $input));
+            return $this->commandPreview($context, $workflow, $input ?: null);
+        }
+
         return $this->triggerWorkflow($context, $workflow, $input ?: null);
+    }
+
+    /**
+     * Preview workflow steps before executing.
+     */
+    private function commandPreview(AgentContext $context, Workflow $workflow, ?string $input): AgentResult
+    {
+        $steps = $workflow->steps ?? [];
+        $stepCount = count($steps);
+
+        if ($stepCount === 0) {
+            return AgentResult::reply("Le workflow \"{$workflow->name}\" n'a aucune etape.");
+        }
+
+        $lines = [
+            "*Preview: {$workflow->name}*",
+            str_repeat('─', 25),
+        ];
+
+        if ($input) {
+            $lines[] = "Contexte: _{$input}_";
+            $lines[] = '';
+        }
+
+        foreach ($steps as $i => $step) {
+            $num = $i + 1;
+            $agent = $step['agent'] ?? 'auto';
+            $condition = $step['condition'] ?? 'always';
+            $onError = $step['on_error'] ?? 'stop';
+            $disabled = $step['disabled'] ?? false;
+            $msg = mb_substr($step['message'] ?? '', 0, 80);
+
+            $icon = $disabled ? '⏭' : '▶';
+            $condStr = ($condition !== 'always') ? " [{$condition}]" : '';
+            $errStr = ($onError === 'continue') ? ' (skip on error)' : '';
+
+            $lines[] = "{$icon} *{$num}.* [{$agent}]{$condStr}{$errStr}";
+            $lines[] = "   {$msg}" . (mb_strlen($step['message'] ?? '') > 80 ? '...' : '');
+        }
+
+        $lines[] = '';
+        $lines[] = str_repeat('─', 25);
+        $lines[] = "Lancer: /workflow trigger {$workflow->name}" . ($input ? " {$input}" : '');
+        $lines[] = "Simuler: /workflow dryrun {$workflow->name}";
+
+        $this->log($context, "Preview: {$workflow->name}", ['steps' => $stepCount]);
+
+        return AgentResult::reply(implode("\n", $lines));
     }
 
     /**
@@ -620,48 +774,51 @@ class StreamlineAgent extends BaseAgent
         $lastRun   = $workflow->last_run_at ? $workflow->last_run_at->format('d/m/Y H:i') : 'jamais';
         $createdAt = $workflow->created_at->format('d/m/Y H:i');
 
+        $statusIcon = $workflow->is_active ? '✅' : '⏸';
+        $pinIcon    = $this->isPinned($workflow) ? ' 📌' : '';
+
         $lines = [
-            "Workflow: {$workflow->name}",
+            "*Workflow: {$workflow->name}*{$pinIcon}",
             str_repeat('─', 28),
         ];
 
         if (!empty($workflow->description)) {
-            $lines[] = $workflow->description;
+            $lines[] = "_{$workflow->description}_";
             $lines[] = '';
         }
 
-        $lines[] = "Statut  : {$status}";
-        $lines[] = "Etapes  : {$stepCount}";
-        $lines[] = "Exec.   : {$workflow->run_count}";
-        $lines[] = "Dernier : {$lastRun}";
-        $lines[] = "Cree    : {$createdAt}";
+        $lines[] = "{$statusIcon} Statut  : *{$status}*";
+        $lines[] = "📋 Etapes  : {$stepCount}";
+        $lines[] = "▶ Exec.   : {$workflow->run_count}";
+        $lines[] = "🕐 Dernier : {$lastRun}";
+        $lines[] = "📅 Cree    : {$createdAt}";
         $lines[] = '';
-        $lines[] = "Etapes ({$stepCount}):";
+        $lines[] = "*Etapes ({$stepCount}):*";
 
         foreach (($workflow->steps ?? []) as $i => $step) {
             $agent     = $step['agent'] ?? 'auto';
             $msg       = mb_substr($step['message'] ?? '', 0, 80);
             $condition = (!empty($step['condition']) && $step['condition'] !== 'always')
-                ? " [si:{$step['condition']}]"
+                ? " _[si:{$step['condition']}]_"
                 : '';
             $onError   = (!empty($step['on_error']) && $step['on_error'] !== 'stop')
-                ? " [err:continuer]"
+                ? " _[err:continuer]_"
                 : '';
-            $skipBadge = !empty($step['_skip']) ? " [SKIP]" : '';
-            $lines[] = "  " . ($i + 1) . ". [{$agent}] {$msg}{$condition}{$onError}{$skipBadge}";
+            $skipBadge = !empty($step['_skip']) ? " ⏭ SKIP" : '';
+            $lines[] = "  " . ($i + 1) . ". *[{$agent}]* {$msg}{$condition}{$onError}{$skipBadge}";
         }
 
         // Show note if present
         $note = $workflow->conditions['note'] ?? null;
         if (!empty($note)) {
             $lines[] = '';
-            $lines[] = "Note: " . mb_substr($note, 0, 100) . (mb_strlen($note) > 100 ? '...' : '');
+            $lines[] = "📝 Note: " . mb_substr($note, 0, 100) . (mb_strlen($note) > 100 ? '...' : '');
         }
 
         // Show tags if present
         $tags = $workflow->conditions['tags'] ?? [];
         if (!empty($tags)) {
-            $lines[] = 'Tags: ' . implode(' ', array_map(fn($t) => "#{$t}", $tags));
+            $lines[] = '🏷 Tags: ' . implode(' ', array_map(fn($t) => "#{$t}", $tags));
         }
 
         $lines[] = '';
@@ -669,6 +826,59 @@ class StreamlineAgent extends BaseAgent
         $lines[] = "/workflow edit {$workflow->name} [N] [msg]";
         $lines[] = "/workflow remove-step {$workflow->name} [N]";
         $lines[] = "/workflow duplicate {$workflow->name} [nouveau]";
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Compact info card for a workflow: quick overview with performance metrics.
+     */
+    private function commandInfo(AgentContext $context, string $name): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply('Precise le nom: /workflow info [nom]');
+        }
+
+        [$workflow, $errResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errResult) {
+            return $errResult;
+        }
+
+        $stepCount  = count($workflow->steps ?? []);
+        $statusIcon = $workflow->is_active ? '🟢' : '🔴';
+        $pinIcon    = $this->isPinned($workflow) ? ' 📌' : '';
+        $lastRun    = $workflow->last_run_at ? $workflow->last_run_at->diffForHumans() : 'jamais';
+
+        $conditions = $workflow->conditions ?? [];
+        $durations  = $conditions['durations'] ?? [];
+        $avgTime    = !empty($durations) ? round(array_sum($durations) / count($durations), 1) . 's' : '—';
+        $lastTime   = !empty($durations) ? end($durations) . 's' : '—';
+
+        $agents = collect($workflow->steps ?? [])
+            ->pluck('agent')
+            ->filter()
+            ->unique()
+            ->implode(', ') ?: 'auto';
+
+        $tags = !empty($conditions['tags']) ? ' #' . implode(' #', $conditions['tags']) : '';
+
+        $successRate = $workflow->run_count > 0
+            ? round((($workflow->run_count - ($conditions['fail_count'] ?? 0)) / $workflow->run_count) * 100) . '%'
+            : '—';
+
+        $lines = [
+            "{$statusIcon} *{$workflow->name}*{$pinIcon}{$tags}",
+            "📋 {$stepCount} etapes • ▶ {$workflow->run_count}x • ✅ {$successRate}",
+            "⏱ Moy: {$avgTime} • Dernier: {$lastTime} • {$lastRun}",
+            "🤖 Agents: {$agents}",
+        ];
+
+        if (!empty($workflow->description)) {
+            $lines[] = "_{$workflow->description}_";
+        }
+
+        $lines[] = '';
+        $lines[] = "/workflow show {$workflow->name} • /workflow trigger {$workflow->name}";
 
         return AgentResult::reply(implode("\n", $lines));
     }
@@ -863,19 +1073,23 @@ class StreamlineAgent extends BaseAgent
         $recentlyRun  = $workflows->whereNotNull('last_run_at')->sortByDesc('last_run_at')->first();
         $mostSteps    = $workflows->sortByDesc(fn($wf) => count($wf->steps ?? []))->first();
 
+        $activeRatio = $total > 0 ? (int) round($active / $total * 100) : 0;
+        $activeBar   = str_repeat('█', (int) round($activeRatio / 10)) . str_repeat('░', 10 - (int) round($activeRatio / 10));
+
         $lines = [
-            "Statistiques workflows",
-            str_repeat('─', 24),
-            "Total       : {$total} workflow" . ($total > 1 ? 's' : ''),
-            "Actifs      : {$active}/{$total}",
-            "Inactifs    : " . ($total - $active) . "/{$total}",
-            "Jamais uses : {$neverRun}",
-            "Epingles    : {$pinnedCount}",
-            "Tagues      : {$taggedCount}",
-            "─",
-            "Exec. tot.  : {$totalRuns}",
-            "Etapes tot. : {$totalSteps}",
-            "Moy. etapes : {$avgSteps}/workflow",
+            "*📊 Statistiques workflows*",
+            str_repeat('─', 28),
+            "Actifs: {$activeBar} *{$activeRatio}%* ({$active}/{$total})",
+            "",
+            "📦 Total       : *{$total}* workflow" . ($total > 1 ? 's' : ''),
+            "⏸ Inactifs    : " . ($total - $active),
+            "🆕 Jamais uses : {$neverRun}",
+            "📌 Epingles    : {$pinnedCount}",
+            "🏷 Tagues      : {$taggedCount}",
+            str_repeat('─', 20),
+            "▶️ Exec. tot.  : *{$totalRuns}*",
+            "🔗 Etapes tot. : {$totalSteps}",
+            "📐 Moy. etapes : {$avgSteps}/workflow",
         ];
 
         if ($staleCount > 0) {
@@ -977,8 +1191,20 @@ class StreamlineAgent extends BaseAgent
                 ['workflow_execution' => $executionResult]
             );
         } catch (\Throwable $e) {
-            Log::error("StreamlineAgent: inline chain execution failed", ['error' => $e->getMessage()]);
-            return AgentResult::reply("Erreur lors de l'execution de la chain. Reessaie ou utilise /workflow create pour un workflow permanent.");
+            Log::error("StreamlineAgent: inline chain execution failed", [
+                'error' => $e->getMessage(),
+                'steps' => count($steps),
+                'file'  => basename($e->getFile()) . ':' . $e->getLine(),
+            ]);
+            $this->log($context, 'Inline chain failed', [
+                'error' => mb_substr($e->getMessage(), 0, 200),
+                'steps' => count($steps),
+            ], 'error');
+            return AgentResult::reply(
+                "Erreur lors de l'execution de la chain ({$stepCount} etapes).\n"
+                . "Essaie de simplifier ou cree un workflow permanent:\n"
+                . "/workflow create ma-chain " . implode(' then ', array_slice($steps, 0, 3))
+            );
         }
 
         // Offer to save this chain as a reusable workflow
@@ -994,6 +1220,12 @@ class StreamlineAgent extends BaseAgent
      */
     private function handleNaturalLanguage(AgentContext $context, string $body): AgentResult
     {
+        // Input length guard — truncate excessively long messages to avoid LLM token waste
+        if (mb_strlen($body) > 1000) {
+            $body = mb_substr($body, 0, 1000);
+            Log::info("StreamlineAgent: NLU input truncated", ['from' => $context->from, 'original_len' => mb_strlen($context->body ?? '')]);
+        }
+
         $model         = $this->resolveModel($context);
         $contextMemory = $this->formatContextMemoryForPrompt($context->from, $context);
 
@@ -1002,18 +1234,23 @@ class StreamlineAgent extends BaseAgent
             ? "Workflows existants de l'utilisateur: {$userWorkflows}"
             : "L'utilisateur n'a pas encore de workflow.";
 
+        $workflowCount = Workflow::forUser($context->from)->count();
+
+        try {
         $response = $this->claude->chat(
-            "Message utilisateur: \"{$body}\"\n\n{$workflowContext}\n\n{$contextMemory}",
+            "Message utilisateur: \"{$body}\"\n\n{$workflowContext}\nNombre total de workflows: {$workflowCount}\n\n{$contextMemory}",
             $model,
             "Tu es un assistant specialise dans la creation et gestion de workflows WhatsApp.\n"
             . "Reponds UNIQUEMENT en JSON valide. Aucun markdown, aucun backtick, aucun commentaire.\n\n"
-            . "REGLE ANTI-HALLUCINATION:\n"
+            . "REGLES CRITIQUES:\n"
             . "- N'invente JAMAIS de workflows, noms ou donnees qui n'existent pas\n"
             . "- Si l'intention est ambigue, utilise action=\"help\" plutot que de deviner\n"
-            . "- Le champ \"name\" doit correspondre a un workflow existant ou a un nouveau nom explicitement demande\n\n"
+            . "- Le champ \"name\" doit correspondre a un workflow existant ou a un nouveau nom explicitement demande\n"
+            . "- Pour les actions sur un workflow existant (trigger/show/delete/etc.), le \"name\" DOIT etre un des workflows existants listés ci-dessus\n"
+            . "- Maximum 10 etapes par workflow, 50 workflows par utilisateur\n\n"
             . "Format de reponse:\n"
             . "{\n"
-            . "  \"action\": \"create|list|trigger|delete|show|enable|disable|rename|duplicate|stats|history|dryrun|run-all|summary|step-config|suggest|health|quick|search|export|pin|unpin|reset-stats|notes|batch|tags|template|last|schedule|merge|optimize|swap|undo|dashboard|retry|clean|status|graph|recent|test-step|disable-step|enable-step|help\",\n"
+            . "  \"action\": \"create|list|trigger|delete|show|info|enable|disable|rename|duplicate|stats|history|dryrun|run-all|summary|step-config|suggest|health|quick|search|export|pin|unpin|reset-stats|notes|batch|tags|template|last|schedule|merge|optimize|swap|undo|dashboard|retry|clean|status|graph|recent|test-step|disable-step|enable-step|chain|analyze|snapshot|restore|validate|bulk-tag|compare-stats|recap|profile|bulk-action|dependencies|export-all|help\",\n"
             . "  \"name\": \"nom-en-kebab-case-sans-espaces (requis sauf pour list/help/status/stats/dashboard/health)\",\n"
             . "  \"input\": \"contexte optionnel pour trigger (ex: 'focus finances', 'urgent seulement') — passe a chaque etape\",\n"
             . "  \"steps\": [\n"
@@ -1026,13 +1263,33 @@ class StreamlineAgent extends BaseAgent
             . "  ],\n"
             . "  \"reply\": \"confirmation courte en francais (max 1 phrase)\"\n"
             . "}\n\n"
-            . "Agents disponibles: chat, dev, todo, reminder, event_reminder, finance, music, habit, pomodoro, content_summarizer, code_review, web_search, document, analysis, streamline\n\n"
+            . "Agents disponibles (choisis le plus adapte pour chaque etape):\n"
+            . "- chat : conversation generale, questions, reformulation\n"
+            . "- dev : generation/revision de code, debugging, scripts\n"
+            . "- todo : gestion de taches, listes, rappels de taches\n"
+            . "- reminder : rappels temporels, alarmes, notifications planifiees\n"
+            . "- event_reminder : evenements calendrier, reunions, rendez-vous\n"
+            . "- finance : budgets, depenses, revenus, analyses financieres\n"
+            . "- music : recommandations musicales, playlists, recherche artistes\n"
+            . "- habit : suivi d'habitudes, streaks, objectifs quotidiens\n"
+            . "- pomodoro : sessions de travail, timer, productivite\n"
+            . "- content_summarizer : resume de texte, articles, documents\n"
+            . "- code_review : revue de code, suggestions, bonnes pratiques\n"
+            . "- web_search : recherche web, actualites, informations en ligne\n"
+            . "- document : creation/edition de documents, notes structurees\n"
+            . "- analysis : analyse de donnees, statistiques, insights\n"
+            . "- streamline : sous-workflows, orchestration imbriquee\n"
+            . "- interactive_quiz : quiz interactifs, tests de connaissances\n"
+            . "- content_curator : curation de contenu, veille thematique\n"
+            . "- user_preferences : preferences utilisateur, parametres personnels\n"
+            . "Si l'agent n'est pas evident, laisse null (auto-detection).\n\n"
             . "Actions supportees:\n"
             . "- create : creer un nouveau workflow (necessite name + steps)\n"
             . "- list : lister les workflows existants\n"
             . "- trigger : lancer/executer un workflow (necessite name)\n"
             . "- delete : supprimer un workflow (necessite name)\n"
-            . "- show : afficher les details d'un workflow (necessite name)\n"
+            . "- show : afficher les details complets d'un workflow (necessite name)\n"
+            . "- info : carte compacte avec metriques de performance (necessite name) — prefere info quand l'utilisateur dit 'info', 'resume rapide', 'apercu'\n"
             . "- enable : activer un workflow desactive (necessite name)\n"
             . "- disable : desactiver un workflow actif (necessite name)\n"
             . "- rename : renommer un workflow (necessite name + new_name dans reply)\n"
@@ -1072,6 +1329,18 @@ class StreamlineAgent extends BaseAgent
             . "- test-step : executer une seule etape d'un workflow pour la tester (necessite name, reply=numero de l'etape)\n"
             . "- disable-step : desactiver temporairement une etape sans la supprimer (necessite name, reply=numero de l'etape)\n"
             . "- enable-step : reactiver une etape desactivee (necessite name, reply=numero de l'etape)\n"
+            . "- chain : enchainer plusieurs workflows en sequence (name='nom1 nom2 nom3', max 5)\n"
+            . "- analyze : analyse IA complete d'un workflow (performance, fiabilite, recommandations) — necessite name\n"
+            . "- snapshot : sauvegarder un snapshot nomme de l'etat actuel du workflow (necessite name, reply=nom du snapshot optionnel)\n"
+            . "- restore : restaurer un workflow depuis un snapshot (necessite name, reply=nom du snapshot ou 'list' pour voir les snapshots)\n"
+            . "- validate : verifier l'integrite et la coherence d'un workflow (necessite name) — detecte etapes vides, agents invalides, problemes de conditions\n"
+            . "- bulk-tag : appliquer un tag a plusieurs workflows (name='nom1 nom2 nom3', reply=tag a appliquer)\n"
+            . "- compare-stats : comparer les statistiques de deux workflows cote a cote (name='nom1 nom2')\n"
+            . "- recap : resume d'activite des workflows sur les N derniers jours (name=nombre de jours, defaut 7)\n"
+            . "- profile : fiche detaillee d'un workflow avec score de performance, metriques, recommandations (necessite name)\n"
+            . "- bulk-action : action en masse sur plusieurs workflows (name='action nom1 nom2...', actions: enable/disable/pin/unpin/delete)\n"
+            . "- dependencies : carte des agents utilises par tous les workflows (pas de name requis)\n"
+            . "- export-all : exporter tous les workflows en un seul texte pour backup (pas de name requis)\n"
             . "- help : si l'intention est ambigue ou non reconnue\n\n"
             . "Regles:\n"
             . "- Nom de workflow: kebab-case obligatoire (ex: morning-brief, daily-check, weekly-review)\n"
@@ -1083,6 +1352,7 @@ class StreamlineAgent extends BaseAgent
             . "- Ne jamais inventer ou modifier des workflows non demandes explicitement\n\n"
             . "Exemples d'intentions et actions:\n"
             . "  \"montre-moi le workflow morning\" → {\"action\":\"show\",\"name\":\"morning\"}\n"
+            . "  \"info sur le workflow morning\" → {\"action\":\"info\",\"name\":\"morning\"}\n"
             . "  \"active le workflow daily-check\" → {\"action\":\"enable\",\"name\":\"daily-check\"}\n"
             . "  \"desactive mon workflow weekly\" → {\"action\":\"disable\",\"name\":\"weekly\"}\n"
             . "  \"lance morning-brief\" → {\"action\":\"trigger\",\"name\":\"morning-brief\"}\n"
@@ -1122,33 +1392,77 @@ class StreamlineAgent extends BaseAgent
             . "  \"visualise le flux de daily-check\" → {\"action\":\"graph\",\"name\":\"daily-check\"}\n"
             . "  \"mes workflows recents\" → {\"action\":\"recent\"}\n"
             . "  \"derniers workflows lances\" → {\"action\":\"recent\"}\n"
-            . "  \"saute l'etape 1 du workflow morning\" → {\"action\":\"disable-step\",\"name\":\"morning\",\"reply\":\"1\"}"
+            . "  \"saute l'etape 1 du workflow morning\" → {\"action\":\"disable-step\",\"name\":\"morning\",\"reply\":\"1\"}\n"
+            . "  \"enchaine morning-brief puis daily-check\" → {\"action\":\"chain\",\"name\":\"morning-brief daily-check\"}\n"
+            . "  \"analyse le workflow morning-brief\" → {\"action\":\"analyze\",\"name\":\"morning-brief\"}\n"
+            . "  \"rapport sur daily-check\" → {\"action\":\"analyze\",\"name\":\"daily-check\"}\n"
+            . "  \"sauvegarde l'etat du workflow morning-brief\" → {\"action\":\"snapshot\",\"name\":\"morning-brief\"}\n"
+            . "  \"snapshot morning-brief avant modifications\" → {\"action\":\"snapshot\",\"name\":\"morning-brief\",\"reply\":\"avant-modif\"}\n"
+            . "  \"restaure le snapshot du workflow daily-check\" → {\"action\":\"restore\",\"name\":\"daily-check\",\"reply\":\"list\"}\n"
+            . "  \"reviens au snapshot stable de morning-brief\" → {\"action\":\"restore\",\"name\":\"morning-brief\",\"reply\":\"stable\"}\n"
+            . "  \"verifie le workflow morning-brief\" → {\"action\":\"validate\",\"name\":\"morning-brief\"}\n"
+            . "  \"valide mon workflow daily-check\" → {\"action\":\"validate\",\"name\":\"daily-check\"}\n"
+            . "  \"est-ce que mon workflow est correct\" → {\"action\":\"validate\",\"name\":\"...\"}\n"
+            . "  \"taguer morning-brief et daily-check avec routine\" → {\"action\":\"bulk-tag\",\"name\":\"morning-brief daily-check\",\"reply\":\"routine\"}\n"
+            . "  \"ajoute le tag urgent a tous mes workflows du matin\" → {\"action\":\"bulk-tag\",\"name\":\"morning-brief morning-check\",\"reply\":\"urgent\"}\n"
+            . "  \"compare morning-brief et daily-check\" → {\"action\":\"compare-stats\",\"name\":\"morning-brief daily-check\"}\n"
+            . "  \"lequel est le plus utilise entre morning et evening\" → {\"action\":\"compare-stats\",\"name\":\"morning evening\"}\n"
+            . "  \"recap de mes workflows\" → {\"action\":\"recap\",\"name\":\"7\"}\n"
+            . "  \"resume d'activite des 14 derniers jours\" → {\"action\":\"recap\",\"name\":\"14\"}\n"
+            . "  \"bilan de mes workflows cette semaine\" → {\"action\":\"recap\",\"name\":\"7\"}\n"
+            . "  \"profil du workflow morning-brief\" → {\"action\":\"profile\",\"name\":\"morning-brief\"}\n"
+            . "  \"fiche detaillee de daily-check\" → {\"action\":\"profile\",\"name\":\"daily-check\"}\n"
+            . "  \"score du workflow morning\" → {\"action\":\"profile\",\"name\":\"morning\"}\n"
+            . "  \"active morning-brief et daily-check\" → {\"action\":\"bulk-action\",\"name\":\"enable morning-brief daily-check\"}\n"
+            . "  \"desactive tous ces workflows: old-wf1 old-wf2\" → {\"action\":\"bulk-action\",\"name\":\"disable old-wf1 old-wf2\"}\n"
+            . "  \"quels agents utilisent mes workflows\" → {\"action\":\"dependencies\"}\n"
+            . "  \"carte des agents\" → {\"action\":\"dependencies\"}\n"
+            . "  \"exporte tous mes workflows\" → {\"action\":\"export-all\"}\n"
+            . "  \"backup de mes workflows\" → {\"action\":\"export-all\"}"
         );
-
-        $parsed = json_decode($response, true);
-        if (!$parsed || !isset($parsed['action'])) {
-            // Try to extract JSON from response if wrapped in markdown, backticks, or extra text
-            $cleaned = $response ?? '';
-            $cleaned = preg_replace('/^```(?:json)?\s*/m', '', $cleaned);
-            $cleaned = preg_replace('/\s*```\s*$/m', '', $cleaned);
-            $parsed = json_decode(trim($cleaned), true);
-
-            if (!$parsed || !isset($parsed['action'])) {
-                // Last resort: find the outermost JSON object
-                if (preg_match('/\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/s', $cleaned, $matches)) {
-                    $parsed = json_decode($matches[0], true);
-                }
-            }
+        } catch (\Throwable $e) {
+            Log::error("StreamlineAgent: NLU LLM call failed", [
+                'from'  => $context->from,
+                'error' => $e->getMessage(),
+                'body'  => mb_substr($body, 0, 100),
+            ]);
+            $response = null;
         }
-        if (!$parsed || !isset($parsed['action'])) {
-            Log::warning("StreamlineAgent: NLU JSON parse failed", ['response_preview' => mb_substr($response ?? '', 0, 200)]);
+
+        if ($response === null) {
+            Log::warning("StreamlineAgent: Claude API returned null (service unavailable)", [
+                'user'         => $context->from,
+                'body_preview' => mb_substr($body, 0, 100),
+            ]);
             return AgentResult::reply(
-                "Je n'ai pas compris ta demande de workflow.\n\n"
-                . "Essaie:\n"
-                . "  /workflow create [nom] [etape1] then [etape2]\n"
+                "⚠ Le service IA est temporairement indisponible.\n\n"
+                . "En attendant, utilise les commandes directes:\n"
                 . "  /workflow list\n"
                 . "  /workflow trigger [nom]\n"
                 . "  /workflow help"
+            );
+        }
+
+        $parsed = $this->parseJson($response);
+        if (!$parsed || !isset($parsed['action'])) {
+            Log::warning("StreamlineAgent: NLU JSON parse failed", [
+                'response_preview' => mb_substr($response ?? '', 0, 300),
+                'user'             => $context->from,
+                'body_preview'     => mb_substr($body, 0, 100),
+            ]);
+            $workflowHint = $userWorkflows
+                ? "\n\n*Tes workflows:* {$userWorkflows}"
+                : '';
+            return AgentResult::reply(
+                "Je n'ai pas compris ta demande de workflow.\n\n"
+                . "*Commandes courantes:*\n"
+                . "  /workflow create [nom] [etape1] then [etape2]\n"
+                . "  /workflow list\n"
+                . "  /workflow trigger [nom]\n"
+                . "  /workflow dashboard\n"
+                . "  /workflow help\n\n"
+                . "_Astuce: utilise /workflow help [categorie] pour plus de details._"
+                . $workflowHint
             );
         }
 
@@ -1158,6 +1472,7 @@ class StreamlineAgent extends BaseAgent
             'trigger'     => $this->commandTrigger($context, $parsed['name'] ?? '', $parsed['input'] ?? ''),
             'delete'      => $this->commandDelete($context, $parsed['name'] ?? ''),
             'show'        => $this->commandShow($context, $parsed['name'] ?? ''),
+            'info'        => $this->commandInfo($context, $parsed['name'] ?? ''),
             'enable'      => $this->commandToggle($context, $parsed['name'] ?? '', true),
             'disable'     => $this->commandToggle($context, $parsed['name'] ?? '', false),
             'rename'      => $this->commandRename($context, $parsed['name'] ?? '', $parsed['new_name'] ?? ''),
@@ -1198,7 +1513,22 @@ class StreamlineAgent extends BaseAgent
             'test-step'    => $this->commandTestStep($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
             'disable-step' => $this->commandToggleStep($context, $parsed['name'] ?? '', $parsed['reply'] ?? '', true),
             'enable-step'  => $this->commandToggleStep($context, $parsed['name'] ?? '', $parsed['reply'] ?? '', false),
-            default        => AgentResult::reply($parsed['reply'] ?? $this->getHelpText()),
+            'chain'        => $this->commandChain($context, $parsed['name'] ?? ''),
+            'analyze'      => $this->commandAnalyze($context, $parsed['name'] ?? ''),
+            'snapshot'     => $this->commandSnapshot($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'restore'      => $this->commandRestore($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'validate'      => $this->commandValidate($context, $parsed['name'] ?? ''),
+            'bulk-tag'      => $this->commandBulkTag($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'compare-stats' => $this->handleCompareStatsFromNLU($context, $parsed['name'] ?? ''),
+            'recap'         => $this->commandRecap($context, $parsed['name'] ?? ''),
+            'profile'       => $this->commandProfile($context, $parsed['name'] ?? ''),
+            'bulk-action'   => $this->commandBulkAction($context, $parsed['name'] ?? ''),
+            'explain'       => $this->commandExplain($context, $parsed['name'] ?? ''),
+            'timeline'      => $this->commandTimeline($context, $parsed['name'] ?? ''),
+            'dependencies'  => $this->commandDependencies($context),
+            'export-all'    => $this->commandExportAll($context),
+            'preview'       => $this->commandTrigger($context, $parsed['name'] ?? '', '--preview ' . ($parsed['input'] ?? '')),
+            default         => AgentResult::reply($parsed['reply'] ?? $this->getHelpText()),
         };
     }
 
@@ -1213,13 +1543,27 @@ class StreamlineAgent extends BaseAgent
             return AgentResult::reply($parsed['reply'] ?? 'Aucune etape detectee pour le workflow.');
         }
 
-        // Normalize step fields with defaults
-        $data['steps'] = array_map(function (array $step) {
+        if (count($data['steps']) > 10) {
+            return AgentResult::reply("Un workflow peut contenir au maximum 10 etapes (recu: " . count($data['steps']) . ").\nDecoupe ton workflow en plusieurs plus petits.");
+        }
+
+        $validAgents = ['chat', 'dev', 'todo', 'reminder', 'event_reminder', 'finance', 'music', 'habit', 'pomodoro', 'content_summarizer', 'code_review', 'web_search', 'document', 'analysis', 'streamline', 'interactive_quiz', 'content_curator', 'user_preferences'];
+
+        // Normalize step fields with defaults + validation
+        $data['steps'] = array_map(function (array $step) use ($validAgents) {
+            $agent = $step['agent'] ?? null;
+            if ($agent && !in_array($agent, $validAgents, true)) {
+                $agent = null; // Fallback to auto-detection for invalid agent
+            }
             return [
-                'message'   => $step['message'] ?? '',
-                'agent'     => $step['agent'] ?? null,
-                'condition' => $step['condition'] ?? 'always',
-                'on_error'  => $step['on_error'] ?? 'stop',
+                'message'   => trim($step['message'] ?? '') ?: 'Action a definir',
+                'agent'     => $agent,
+                'condition' => in_array($step['condition'] ?? '', ['always', 'success', 'contains', 'not_contains'], true)
+                    || str_starts_with($step['condition'] ?? '', 'contains:')
+                    || str_starts_with($step['condition'] ?? '', 'not_contains:')
+                    ? ($step['condition'] ?? 'always')
+                    : 'always',
+                'on_error'  => in_array($step['on_error'] ?? '', ['stop', 'continue'], true) ? $step['on_error'] : 'stop',
             ];
         }, $data['steps']);
 
@@ -1876,8 +2220,8 @@ class StreamlineAgent extends BaseAgent
     private function triggerWorkflow(AgentContext $context, Workflow $workflow, ?string $input = null): AgentResult
     {
         $stepCount = count($workflow->steps ?? []);
-        $inputHint = $input ? " (contexte: " . mb_substr($input, 0, 40) . ")" : '';
-        $this->sendText($context->from, "Lancement du workflow \"{$workflow->name}\" ({$stepCount} etape" . ($stepCount > 1 ? 's' : '') . "){$inputHint}...");
+        $inputHint = $input ? " (contexte: _" . mb_substr($input, 0, 40) . "_)" : '';
+        $this->sendText($context->from, "▶️ *Lancement:* \"{$workflow->name}\" ({$stepCount} etape" . ($stepCount > 1 ? 's' : '') . "){$inputHint}...");
         $this->log($context, "Workflow triggered: {$workflow->name}", ['id' => $workflow->id, 'input' => $input]);
 
         // If input is provided, create a temporary copy with context-injected steps
@@ -1893,24 +2237,80 @@ class StreamlineAgent extends BaseAgent
             $workflowToRun->steps = $injectedSteps;
         }
 
+        $startTime = microtime(true);
+
         try {
             $orchestrator    = new AgentOrchestrator();
             $executor        = new WorkflowExecutor($orchestrator);
             $executionResult = $executor->execute($workflowToRun, $context);
 
+            $elapsed = round(microtime(true) - $startTime, 1);
+            $this->log($context, "Workflow completed: {$workflow->name}", [
+                'id'       => $workflow->id,
+                'duration' => $elapsed,
+                'steps'    => $stepCount,
+            ]);
+
+            // Track execution duration in conditions for analytics
+            try {
+                $conditions = $workflow->conditions ?? [];
+                $conditions['last_duration'] = $elapsed;
+                $durations = $conditions['durations'] ?? [];
+                $durations[] = $elapsed;
+                $conditions['durations'] = array_slice($durations, -10); // keep last 10
+                $workflow->update(['conditions' => $conditions]);
+            } catch (\Throwable) {
+                // Non-critical, ignore
+            }
+
             return AgentResult::reply(
                 WorkflowExecutor::formatResults($executionResult),
-                ['workflow_execution' => $executionResult]
+                ['workflow_execution' => $executionResult, 'duration' => $elapsed]
             );
         } catch (\Throwable $e) {
+            $elapsed = round(microtime(true) - $startTime, 1);
+            $errorMsg = $e->getMessage();
             Log::error("StreamlineAgent: workflow execution failed", [
                 'workflow' => $workflow->name,
-                'error'    => $e->getMessage(),
+                'error'    => $errorMsg,
+                'duration' => $elapsed,
+                'file'     => basename($e->getFile()) . ':' . $e->getLine(),
             ]);
-            return AgentResult::reply(
-                "Erreur lors de l'execution du workflow \"{$workflow->name}\".\n"
-                . "Verifie /workflow show {$workflow->name} et reessaie. Si le probleme persiste, contacte le support."
-            );
+            $this->log($context, "Workflow failed: {$workflow->name}", [
+                'error'    => mb_substr($errorMsg, 0, 200),
+                'duration' => $elapsed,
+            ], 'error');
+
+            $isTimeout = stripos($errorMsg, 'timeout') !== false
+                || stripos($errorMsg, 'timed out') !== false
+                || $e instanceof \Illuminate\Http\Client\ConnectionException;
+            $isDbError = $e instanceof \Illuminate\Database\QueryException;
+
+            $wfName = $workflow->name;
+            if ($isTimeout) {
+                $reply = "⚠ *Timeout* — \"{$wfName}\" a expire apres {$elapsed}s.\n"
+                    . str_repeat('─', 24) . "\n"
+                    . "Certaines etapes sont peut-etre trop longues.\n\n"
+                    . "*Actions suggerees:*\n"
+                    . "  /workflow validate {$wfName}\n"
+                    . "  /workflow test-step {$wfName} [N]\n"
+                    . "  /workflow dryrun {$wfName}";
+            } elseif ($isDbError) {
+                $reply = "⚠ *Erreur BDD* — \"{$wfName}\" (apres {$elapsed}s)\n"
+                    . str_repeat('─', 24) . "\n"
+                    . "Erreur temporaire de base de donnees.\n\n"
+                    . "Reessaie: /workflow retry {$wfName}";
+            } else {
+                $reply = "⚠ *Erreur* — \"{$wfName}\" (apres {$elapsed}s)\n"
+                    . str_repeat('─', 24) . "\n"
+                    . mb_substr($errorMsg, 0, 120) . "\n\n"
+                    . "*Actions suggerees:*\n"
+                    . "  /workflow show {$wfName}\n"
+                    . "  /workflow validate {$wfName}\n"
+                    . "  /workflow test-step {$wfName} [N]";
+            }
+
+            return AgentResult::reply($reply);
         }
     }
 
@@ -1935,9 +2335,10 @@ class StreamlineAgent extends BaseAgent
             $this->log($context, "Workflow cree: {$workflow->name}", ['id' => $workflow->id, 'steps' => $stepCount]);
 
             return AgentResult::reply(
-                "Workflow \"{$workflow->name}\" cree avec {$stepCount} etape" . ($stepCount > 1 ? 's' : '') . ".\n"
-                . "Lance-le avec: /workflow trigger {$workflow->name}\n"
-                . "Details: /workflow show {$workflow->name}"
+                "✅ Workflow *\"{$workflow->name}\"* cree avec *{$stepCount}* etape" . ($stepCount > 1 ? 's' : '') . ".\n\n"
+                . "▶️ /workflow trigger {$workflow->name}\n"
+                . "📋 /workflow show {$workflow->name}\n"
+                . "🧪 /workflow dryrun {$workflow->name}"
             );
         } catch (\Throwable $e) {
             Log::error("StreamlineAgent: failed to create workflow", [
@@ -2034,6 +2435,29 @@ class StreamlineAgent extends BaseAgent
             return $partialMatches->first();
         }
 
+        // 4. Levenshtein fuzzy match for typos (max distance 2, only if unique best match)
+        if ($partialMatches->isEmpty()) {
+            $allWorkflows = Workflow::forUser($userPhone)->pluck('name');
+            $bestMatch    = null;
+            $bestDist     = 3; // threshold
+
+            foreach ($allWorkflows as $wfName) {
+                $dist = levenshtein($lowerName, mb_strtolower($wfName));
+                if ($dist < $bestDist) {
+                    $bestDist  = $dist;
+                    $bestMatch = $wfName;
+                } elseif ($dist === $bestDist) {
+                    $bestMatch = null; // ambiguous
+                }
+            }
+
+            if ($bestMatch) {
+                return Workflow::forUser($userPhone)
+                    ->whereRaw('LOWER(name) = ?', [mb_strtolower($bestMatch)])
+                    ->first();
+            }
+        }
+
         // Multiple matches or no match at all: return null (caller should use findWorkflowOrAmbiguous)
         return null;
     }
@@ -2062,8 +2486,20 @@ class StreamlineAgent extends BaseAgent
             ->get();
 
         if ($matches->count() === 0) {
+            // Try Levenshtein suggestion
+            $allNames  = Workflow::forUser($userPhone)->pluck('name');
+            $suggest   = null;
+            $bestDist  = 4;
+            foreach ($allNames as $wfName) {
+                $dist = levenshtein($lowerName, mb_strtolower($wfName));
+                if ($dist < $bestDist) {
+                    $bestDist = $dist;
+                    $suggest  = $wfName;
+                }
+            }
+            $hint = $suggest ? "\nTu voulais peut-etre: *{$suggest}* ?" : '';
             return [null, AgentResult::reply(
-                "Workflow \"{$name}\" introuvable.\n"
+                "Workflow \"{$name}\" introuvable.{$hint}\n"
                 . "Utilise /workflow list pour voir tes workflows."
             )];
         }
@@ -3023,13 +3459,14 @@ class StreamlineAgent extends BaseAgent
             $status    = $workflow->is_active ? 'Actif' : 'Inactif';
             $lastRun   = $workflow->last_run_at ? $workflow->last_run_at->format('d/m/Y H:i') : 'jamais';
 
+            $statusIcon = $workflow->is_active ? '✅' : '⏸';
+
             return AgentResult::reply(
-                "Workflow: {$workflow->name}\n"
+                "*📖 Resume — {$workflow->name}*\n"
                 . str_repeat('─', 26) . "\n\n"
                 . trim($summary) . "\n\n"
                 . str_repeat('─', 26) . "\n"
-                . "{$stepCount} etape" . ($stepCount > 1 ? 's' : '') . " · {$status} · {$workflow->run_count} exec.\n"
-                . "Dernier: {$lastRun}\n\n"
+                . "{$statusIcon} {$stepCount} etape" . ($stepCount > 1 ? 's' : '') . " · {$workflow->run_count} exec. · Dernier: {$lastRun}\n\n"
                 . "/workflow trigger {$workflow->name}  — lancer\n"
                 . "/workflow show {$workflow->name}     — details"
             );
@@ -3385,51 +3822,51 @@ class StreamlineAgent extends BaseAgent
         $total       = $workflows->count();
         $healthScore = $total > 0 ? (int) round(count($healthy) / $total * 100) : 100;
 
-        $scoreEmoji = $healthScore >= 80 ? 'OK' : ($healthScore >= 50 ? '~' : '!');
+        $scoreEmoji = $healthScore >= 80 ? '🟢' : ($healthScore >= 50 ? '🟡' : '🔴');
 
         $lines = [
-            "Sante des workflows — {$scoreEmoji} {$healthScore}%",
+            "*🏥 Sante des workflows* — {$scoreEmoji} {$healthScore}%",
             str_repeat('─', 30),
-            "{$total} workflows · " . count($healthy) . " sains · {$totalIssues} probleme" . ($totalIssues > 1 ? 's' : ''),
+            "*{$total}* workflows · " . count($healthy) . " sains · {$totalIssues} probleme" . ($totalIssues > 1 ? 's' : ''),
         ];
 
         if (!empty($broken)) {
             $lines[] = '';
-            $lines[] = "[BROKEN] Sans etapes (" . count($broken) . "):";
+            $lines[] = "🔴 *Sans etapes* (" . count($broken) . "):";
             foreach ($broken as $wf) {
-                $lines[] = "  · {$wf->name} — supprimable: /workflow delete {$wf->name}";
+                $lines[] = "  · {$wf->name} — /workflow delete {$wf->name}";
             }
         }
 
         if (!empty($unused)) {
             $lines[] = '';
-            $lines[] = "[UNUSED] Jamais lances depuis +7j (" . count($unused) . "):";
+            $lines[] = "⚠ *Jamais lances* depuis +7j (" . count($unused) . "):";
             foreach ($unused as $wf) {
                 $ageDays = $wf->created_at->diffInDays($now);
-                $lines[] = "  · {$wf->name} (cree il y a {$ageDays}j) — /workflow trigger {$wf->name}";
+                $lines[] = "  · *{$wf->name}* (cree il y a {$ageDays}j) — /workflow trigger {$wf->name}";
             }
         }
 
         if (!empty($stale)) {
             $lines[] = '';
-            $lines[] = "[STALE] Non executes depuis +30j (" . count($stale) . "):";
+            $lines[] = "🕰 *Dormants* +30j (" . count($stale) . "):";
             foreach ($stale as $wf) {
                 $staleDays = $wf->last_run_at->diffInDays($now);
-                $lines[] = "  · {$wf->name} (dernier: il y a {$staleDays}j) — /workflow trigger {$wf->name}";
+                $lines[] = "  · *{$wf->name}* (dernier: il y a {$staleDays}j) — /workflow trigger {$wf->name}";
             }
         }
 
         if (!empty($disabled)) {
             $lines[] = '';
-            $lines[] = "[OFF] Desactives (" . count($disabled) . "):";
+            $lines[] = "⏸ *Desactives* (" . count($disabled) . "):";
             foreach ($disabled as $wf) {
-                $lines[] = "  · {$wf->name} — /workflow enable {$wf->name}";
+                $lines[] = "  · *{$wf->name}* — /workflow enable {$wf->name}";
             }
         }
 
         if ($totalIssues === 0) {
             $lines[] = '';
-            $lines[] = "Tous tes workflows sont actifs et en bonne sante.";
+            $lines[] = "✅ Tous tes workflows sont actifs et en bonne sante.";
         }
 
         $lines[] = '';
@@ -4790,22 +5227,31 @@ class StreamlineAgent extends BaseAgent
         $healthy  = $total > 0 ? (int) round(($total - $broken->count() - $stale->count()) / $total * 100) : 100;
         $healthBar = str_repeat('█', (int) round($healthy / 10)) . str_repeat('░', 10 - (int) round($healthy / 10));
 
+        // Average execution time from tracked durations
+        $avgDuration = '';
+        $allDurations = $workflows->flatMap(fn($wf) => $wf->conditions['durations'] ?? []);
+        if ($allDurations->isNotEmpty()) {
+            $avg = round($allDurations->avg(), 1);
+            $avgDuration = " · Moy: {$avg}s";
+        }
+
+        $healthIcon = $healthy >= 80 ? '🟢' : ($healthy >= 50 ? '🟡' : '🔴');
         $lines = [
-            "Dashboard Workflows",
+            "*📋 Dashboard Workflows*",
             str_repeat('═', 30),
             "",
-            "Sante: {$healthBar} {$healthy}%",
-            "Total: {$total} · Actifs: {$active} · Exec: {$totalRuns}",
+            "{$healthIcon} Sante: {$healthBar} *{$healthy}%*",
+            "📊 Total: *{$total}* · Actifs: *{$active}* · Exec: *{$totalRuns}*{$avgDuration}",
         ];
 
         // Pinned workflows (quick access)
         if ($pinned->isNotEmpty()) {
             $lines[] = '';
-            $lines[] = "Epingles:";
+            $lines[] = "*📍 Epingles:*";
             foreach ($pinned->take(3) as $wf) {
                 $stepCount = count($wf->steps ?? []);
                 $lastRun   = $wf->last_run_at ? $wf->last_run_at->diffForHumans() : 'jamais';
-                $lines[]   = "  ★ {$wf->name} ({$stepCount} et. · {$lastRun})";
+                $lines[]   = "  ★ *{$wf->name}* ({$stepCount} et. · {$lastRun})";
             }
         }
 
@@ -4813,10 +5259,10 @@ class StreamlineAgent extends BaseAgent
         $recent = $workflows->whereNotNull('last_run_at')->sortByDesc('last_run_at')->take(3);
         if ($recent->isNotEmpty()) {
             $lines[] = '';
-            $lines[] = "Recents:";
+            $lines[] = "*🕐 Recents:*";
             foreach ($recent as $wf) {
                 $ago = $wf->last_run_at->diffForHumans();
-                $lines[] = "  · {$wf->name} — {$ago} ({$wf->run_count}x)";
+                $lines[] = "  · *{$wf->name}* — {$ago} ({$wf->run_count}x)";
             }
         }
 
@@ -4824,9 +5270,10 @@ class StreamlineAgent extends BaseAgent
         $top = $workflows->where('run_count', '>', 0)->sortByDesc('run_count')->take(3);
         if ($top->isNotEmpty() && $top->first()->run_count > 1) {
             $lines[] = '';
-            $lines[] = "Top:";
+            $lines[] = "*🏆 Top:*";
             foreach ($top->values() as $i => $wf) {
-                $lines[] = "  " . ($i + 1) . ". {$wf->name} — {$wf->run_count} exec.";
+                $medal = match ($i) { 0 => '🥇', 1 => '🥈', 2 => '🥉', default => '' };
+                $lines[] = "  {$medal} *{$wf->name}* — {$wf->run_count} exec.";
             }
         }
 
@@ -4837,25 +5284,39 @@ class StreamlineAgent extends BaseAgent
             $parts = [];
             if ($broken->isNotEmpty()) $parts[] = $broken->count() . " sans etapes";
             if ($stale->isNotEmpty()) $parts[] = $stale->count() . " inactifs >30j";
-            $lines[] = "Problemes: " . implode(', ', $parts) . " → /workflow health";
+            $lines[] = "⚠️ *Problemes:* " . implode(', ', $parts) . " → /workflow health";
         }
 
         // Scheduled workflows
         $scheduled = $workflows->filter(fn($wf) => !empty($wf->conditions['schedule'] ?? null));
         if ($scheduled->isNotEmpty()) {
             $lines[] = '';
-            $lines[] = "Planifies: " . $scheduled->count();
+            $lines[] = "*⏰ Planifies:* " . $scheduled->count();
             foreach ($scheduled->take(2) as $wf) {
                 $desc = $wf->conditions['schedule']['description'] ?? '?';
-                $lines[] = "  ⏰ {$wf->name} — {$desc}";
+                $lines[] = "  ⏰ *{$wf->name}* — {$desc}";
             }
+        }
+
+        // Execution trend (last 7 days vs previous 7 days)
+        $recentlyExecuted = $workflows->filter(fn($wf) =>
+            $wf->last_run_at && $wf->last_run_at->gte(now()->subDays(7))
+        )->count();
+        $olderExecuted = $workflows->filter(fn($wf) =>
+            $wf->last_run_at && $wf->last_run_at->gte(now()->subDays(14)) && $wf->last_run_at->lt(now()->subDays(7))
+        )->count();
+        if ($recentlyExecuted > 0 || $olderExecuted > 0) {
+            $trend = $recentlyExecuted > $olderExecuted ? '📈' : ($recentlyExecuted < $olderExecuted ? '📉' : '➡️');
+            $lines[] = '';
+            $lines[] = "{$trend} *Tendance 7j:* {$recentlyExecuted} exec. (vs {$olderExecuted} sem. precedente)";
         }
 
         $lines[] = '';
         $lines[] = str_repeat('═', 30);
-        $lines[] = "/workflow last     — relancer dernier";
-        $lines[] = "/workflow quick [x] — chercher & lancer";
-        $lines[] = "/workflow stats    — stats detaillees";
+        $lines[] = "/workflow last      — relancer dernier";
+        $lines[] = "/workflow quick [x]  — chercher & lancer";
+        $lines[] = "/workflow profile [x] — fiche detaillee";
+        $lines[] = "/workflow stats     — stats detaillees";
 
         return AgentResult::reply(implode("\n", $lines));
     }
@@ -5286,6 +5747,386 @@ class StreamlineAgent extends BaseAgent
     }
 
     /**
+     * Save a named snapshot of a workflow's current state.
+     * Usage: /workflow snapshot [name] [snapshot-label?]
+     */
+    private function commandSnapshot(AgentContext $context, string $name, string $label = ''): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply(
+                "Usage: /workflow snapshot [nom] [label?]\n\n"
+                . "Exemples:\n"
+                . "  /workflow snapshot morning-brief\n"
+                . "  /workflow snapshot morning-brief avant-modif"
+            );
+        }
+
+        [$workflow, $errorResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errorResult) return $errorResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nUtilise /workflow list pour voir tes workflows.");
+        }
+
+        $label = trim($label);
+        if (empty($label)) {
+            $label = 'snap-' . now()->format('Ymd-His');
+        }
+
+        $label = mb_strtolower(preg_replace('/[^a-zA-Z0-9\-_]/', '-', $label));
+        $label = trim($label, '-');
+        if (empty($label)) {
+            $label = 'snap-' . now()->format('Ymd-His');
+        }
+
+        $conditions = $workflow->conditions ?? [];
+        $snapshots = $conditions['snapshots'] ?? [];
+
+        // Limit to 5 snapshots per workflow
+        if (count($snapshots) >= 5) {
+            array_shift($snapshots);
+        }
+
+        $snapshots[$label] = [
+            'steps'      => $workflow->steps ?? [],
+            'is_active'  => $workflow->is_active,
+            'created_at' => now()->toIso8601String(),
+        ];
+
+        $conditions['snapshots'] = $snapshots;
+
+        try {
+            $workflow->update(['conditions' => $conditions]);
+            $this->log($context, "Snapshot saved: {$workflow->name}/{$label}", [
+                'workflow_id' => $workflow->id,
+                'label'       => $label,
+                'steps'       => count($workflow->steps ?? []),
+            ]);
+
+            $snapshotCount = count($snapshots);
+            return AgentResult::reply(
+                "Snapshot \"{$label}\" sauvegarde pour \"{$workflow->name}\".\n"
+                . "({$snapshotCount}/5 snapshots)\n\n"
+                . "Restaurer: /workflow restore {$workflow->name} {$label}\n"
+                . "Voir tous: /workflow restore {$workflow->name} list"
+            );
+        } catch (\Throwable $e) {
+            Log::error("StreamlineAgent: snapshot failed", [
+                'error'    => $e->getMessage(),
+                'workflow' => $workflow->name,
+            ]);
+            return AgentResult::reply("Erreur lors de la sauvegarde du snapshot. Reessaie.");
+        }
+    }
+
+    /**
+     * Restore a workflow from a named snapshot.
+     * Usage: /workflow restore [name] [snapshot-label|list]
+     */
+    private function commandRestore(AgentContext $context, string $name, string $label = ''): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply(
+                "Usage: /workflow restore [nom] [label|list]\n\n"
+                . "Exemples:\n"
+                . "  /workflow restore morning-brief list\n"
+                . "  /workflow restore morning-brief avant-modif"
+            );
+        }
+
+        [$workflow, $errorResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errorResult) return $errorResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nUtilise /workflow list pour voir tes workflows.");
+        }
+
+        $conditions = $workflow->conditions ?? [];
+        $snapshots = $conditions['snapshots'] ?? [];
+
+        if (empty($snapshots)) {
+            return AgentResult::reply(
+                "Aucun snapshot pour \"{$workflow->name}\".\n\n"
+                . "Creer un snapshot: /workflow snapshot {$workflow->name} [label]"
+            );
+        }
+
+        $label = mb_strtolower(trim($label));
+
+        // List snapshots
+        if (empty($label) || $label === 'list' || $label === 'liste') {
+            $lines = [
+                "*Snapshots — {$workflow->name}*",
+                str_repeat('─', 25),
+            ];
+            foreach ($snapshots as $sLabel => $snap) {
+                $stepCount = count($snap['steps'] ?? []);
+                $date = isset($snap['created_at']) ? \Carbon\Carbon::parse($snap['created_at'])->diffForHumans() : '?';
+                $lines[] = "  · *{$sLabel}* — {$stepCount} etapes · {$date}";
+            }
+            $lines[] = '';
+            $lines[] = "/workflow restore {$workflow->name} [label]";
+            return AgentResult::reply(implode("\n", $lines));
+        }
+
+        // Find snapshot by label (exact or partial match)
+        $snapshot = $snapshots[$label] ?? null;
+        if (!$snapshot) {
+            foreach ($snapshots as $sLabel => $snap) {
+                if (str_contains($sLabel, $label)) {
+                    $snapshot = $snap;
+                    $label = $sLabel;
+                    break;
+                }
+            }
+        }
+
+        if (!$snapshot) {
+            $available = implode(', ', array_keys($snapshots));
+            return AgentResult::reply(
+                "Snapshot \"{$label}\" introuvable pour \"{$workflow->name}\".\n"
+                . "Disponibles: {$available}\n\n"
+                . "Voir: /workflow restore {$workflow->name} list"
+            );
+        }
+
+        try {
+            $this->backupSteps($workflow);
+            $oldStepCount = count($workflow->steps ?? []);
+            $newSteps = $snapshot['steps'] ?? [];
+            $workflow->update([
+                'steps'     => $newSteps,
+                'is_active' => $snapshot['is_active'] ?? $workflow->is_active,
+            ]);
+
+            $this->log($context, "Snapshot restored: {$workflow->name}/{$label}", [
+                'workflow_id' => $workflow->id,
+                'label'       => $label,
+                'old_steps'   => $oldStepCount,
+                'new_steps'   => count($newSteps),
+            ]);
+
+            return AgentResult::reply(
+                "Snapshot \"{$label}\" restaure pour \"{$workflow->name}\".\n"
+                . "Etapes: {$oldStepCount} → " . count($newSteps) . "\n\n"
+                . "Voir: /workflow show {$workflow->name}\n"
+                . "Annuler: /workflow undo {$workflow->name}"
+            );
+        } catch (\Throwable $e) {
+            Log::error("StreamlineAgent: restore failed", [
+                'error'    => $e->getMessage(),
+                'workflow' => $workflow->name,
+                'label'    => $label,
+            ]);
+            return AgentResult::reply("Erreur lors de la restauration du snapshot. Reessaie.");
+        }
+    }
+
+    /**
+     * Validate a workflow's integrity: empty steps, invalid agents, condition issues.
+     */
+    private function commandValidate(AgentContext $context, string $name): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply(
+                "*Validation de workflow*\n\n"
+                . "Verifie les problemes courants: etapes vides, agents invalides, doublons, conditions, etc.\n\n"
+                . "Utilisation: /workflow validate [nom]\n"
+                . "Exemple: /workflow validate morning-brief"
+            );
+        }
+
+        [$workflow, $errResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errResult) return $errResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nVerifie avec /workflow list");
+        }
+
+        $steps  = $workflow->steps ?? [];
+        $issues = [];
+        $warnings = [];
+
+        if (empty($steps)) {
+            $issues[] = "Le workflow n'a aucune etape";
+        }
+
+        $knownAgents = [
+            'chat', 'dev', 'todo', 'reminder', 'event_reminder', 'finance', 'music',
+            'habit', 'pomodoro', 'content_summarizer', 'code_review', 'web_search',
+            'document', 'analysis', 'streamline', 'interactive_quiz', 'content_curator',
+            'user_preferences', 'recipe', 'flashcard', 'budget_tracker', 'project',
+            'daily_brief', 'smart_meeting', 'mood_check', 'game_master', 'hangman',
+            'time_blocker', 'screenshot', 'voice_command', 'collaborative_task', 'assistant',
+        ];
+
+        $validConditions = ['always', 'success'];
+
+        foreach ($steps as $i => $step) {
+            $num = $i + 1;
+            $msg = trim($step['message'] ?? '');
+
+            if (empty($msg)) {
+                $issues[] = "Etape {$num}: message vide";
+            } elseif (mb_strlen($msg) < 5) {
+                $warnings[] = "Etape {$num}: message tres court (\"{$msg}\")";
+            }
+
+            $agent = $step['agent'] ?? null;
+            if ($agent !== null && !in_array($agent, $knownAgents, true)) {
+                $issues[] = "Etape {$num}: agent \"{$agent}\" inconnu";
+            }
+
+            $condition = $step['condition'] ?? 'always';
+            if (!in_array($condition, $validConditions, true) && !str_starts_with($condition, 'contains:') && !str_starts_with($condition, 'not_contains:')) {
+                $issues[] = "Etape {$num}: condition \"{$condition}\" invalide";
+            }
+
+            if ($condition === 'success' && $i === 0) {
+                $warnings[] = "Etape 1: condition \"success\" n'a pas de sens sur la premiere etape";
+            }
+
+            $onError = $step['on_error'] ?? 'stop';
+            if (!in_array($onError, ['stop', 'continue'], true)) {
+                $issues[] = "Etape {$num}: on_error \"{$onError}\" invalide (stop|continue)";
+            }
+
+            $disabled = $step['disabled'] ?? false;
+            if ($disabled) {
+                $warnings[] = "Etape {$num}: desactivee";
+            }
+        }
+
+        if (count($steps) > 10) {
+            $warnings[] = "Le workflow a " . count($steps) . " etapes (recommande: max 10)";
+        }
+
+        if (empty($workflow->description)) {
+            $warnings[] = "Pas de description — ajoute-en une avec: /workflow describe {$workflow->name} [texte]";
+        }
+
+        $this->log($context, "Workflow validated: {$workflow->name}", [
+            'issues'   => count($issues),
+            'warnings' => count($warnings),
+        ]);
+
+        $stepCount = count($steps);
+        $lines = ["*Validation: {$workflow->name}* ({$stepCount} etape" . ($stepCount > 1 ? 's' : '') . ")\n"];
+
+        if (empty($issues) && empty($warnings)) {
+            $lines[] = "Aucun probleme detecte. Le workflow est valide.";
+            $lines[] = "\nLancer: /workflow trigger {$workflow->name}";
+            $lines[] = "Simuler: /workflow dryrun {$workflow->name}";
+        } else {
+            if (!empty($issues)) {
+                $lines[] = "*Erreurs (" . count($issues) . "):*";
+                foreach ($issues as $issue) {
+                    $lines[] = "  [ERR] {$issue}";
+                }
+            }
+            if (!empty($warnings)) {
+                if (!empty($issues)) $lines[] = '';
+                $lines[] = "*Avertissements (" . count($warnings) . "):*";
+                foreach ($warnings as $warning) {
+                    $lines[] = "  [!] {$warning}";
+                }
+            }
+            $lines[] = "\nCorrections: /workflow edit, /workflow step-config, /workflow remove-step";
+        }
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Apply a tag to multiple workflows at once.
+     */
+    private function commandBulkTag(AgentContext $context, string $names, string $tag = ''): AgentResult
+    {
+        $tag = trim($tag);
+        if (empty($names) || empty($tag)) {
+            return AgentResult::reply(
+                "Usage: /workflow bulk-tag [nom1] [nom2] [nom3] [tag]\n\n"
+                . "Exemple:\n"
+                . "  /workflow bulk-tag morning-brief daily-check routine\n"
+                . "  → Ajoute le tag \"routine\" a morning-brief et daily-check"
+            );
+        }
+
+        $parts = preg_split('/[\s,]+/', trim($names));
+
+        $tag = mb_strtolower(preg_replace('/[^a-zA-Z0-9\-_]/', '', $tag));
+        if (empty($tag)) {
+            return AgentResult::reply("Tag invalide. Utilise uniquement des lettres, chiffres, tirets.");
+        }
+
+        $tagged   = [];
+        $notFound = [];
+        $alreadyTagged = [];
+
+        foreach ($parts as $wfName) {
+            $wfName = trim($wfName);
+            if (empty($wfName)) continue;
+
+            $workflow = $this->findWorkflow($context->from, $wfName);
+            if (!$workflow) {
+                $notFound[] = $wfName;
+                continue;
+            }
+
+            try {
+                $conditions = $workflow->conditions ?? [];
+                $tags = $conditions['tags'] ?? [];
+
+                if (in_array($tag, $tags, true)) {
+                    $alreadyTagged[] = $workflow->name;
+                    continue;
+                }
+
+                $tags[] = $tag;
+                $conditions['tags'] = array_values(array_unique($tags));
+                $workflow->update(['conditions' => $conditions]);
+                $tagged[] = $workflow->name;
+            } catch (\Throwable $e) {
+                Log::error("StreamlineAgent: bulk-tag failed for {$wfName}", [
+                    'error' => $e->getMessage(),
+                ]);
+                $notFound[] = $wfName . ' (erreur)';
+            }
+        }
+
+        $this->log($context, "Bulk tag applied: #{$tag}", [
+            'tagged'  => count($tagged),
+            'skipped' => count($alreadyTagged),
+            'errors'  => count($notFound),
+        ]);
+
+        $lines = ["*Tag #{$tag}* applique:\n"];
+
+        if (!empty($tagged)) {
+            foreach ($tagged as $name) {
+                $lines[] = "  [OK] {$name}";
+            }
+        }
+        if (!empty($alreadyTagged)) {
+            foreach ($alreadyTagged as $name) {
+                $lines[] = "  [=] {$name} (deja tague)";
+            }
+        }
+        if (!empty($notFound)) {
+            $lines[] = '';
+            foreach ($notFound as $name) {
+                $lines[] = "  [?] {$name} — introuvable";
+            }
+        }
+
+        if (empty($tagged) && empty($alreadyTagged)) {
+            return AgentResult::reply("Aucun workflow trouve pour le tag #{$tag}.\nVerifie les noms avec /workflow list.");
+        }
+
+        $lines[] = "\nFiltrer: /workflow list #{$tag}";
+        $lines[] = "Lancer tous: /workflow run-all #{$tag}";
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
      * Show help text, optionally filtered by category.
      */
     private function showHelp(AgentContext $context, string $category = ''): AgentResult
@@ -5301,6 +6142,256 @@ class StreamlineAgent extends BaseAgent
 
         return AgentResult::reply($this->getHelpText());
     }
+
+    /**
+     * Chain multiple workflows: /workflow chain wf1 wf2 wf3
+     * Executes workflows sequentially, passing context between them.
+     */
+    private function commandChain(AgentContext $context, string $arg): AgentResult
+    {
+        $names = preg_split('/[\s,]+/', trim($arg));
+        $names = array_values(array_filter($names, fn($n) => !empty(trim($n))));
+
+        if (count($names) < 2) {
+            return AgentResult::reply(
+                "*Chain de workflows*\n\n"
+                . "Enchaine plusieurs workflows en sequence.\n"
+                . "Le resultat de chaque workflow est passe au suivant.\n\n"
+                . "Utilisation:\n"
+                . "  /workflow chain [nom1] [nom2] [nom3]\n\n"
+                . "Exemple:\n"
+                . "  /workflow chain morning-brief daily-check"
+            );
+        }
+
+        if (count($names) > 5) {
+            return AgentResult::reply("Maximum 5 workflows dans une chain (tu en as " . count($names) . ").");
+        }
+
+        // Resolve all workflows first
+        $workflows = [];
+        foreach ($names as $name) {
+            $wf = $this->findWorkflow($context->from, $name);
+            if (!$wf) {
+                return AgentResult::reply("Workflow \"{$name}\" introuvable.\nVerifie avec /workflow list");
+            }
+            if (!$wf->is_active) {
+                return AgentResult::reply("Le workflow \"{$wf->name}\" est desactive.\nActive-le avec: /workflow enable {$wf->name}");
+            }
+            $workflows[] = $wf;
+        }
+
+        $wfNames = array_map(fn($w) => $w->name, $workflows);
+        $this->log($context, 'Chain started', ['workflows' => $wfNames]);
+        $this->sendText($context->from, "Lancement de la chain: " . implode(' → ', $wfNames) . " (" . count($workflows) . " workflows)...");
+
+        $results = [];
+        $previousOutput = '';
+        $allSuccess = true;
+
+        foreach ($workflows as $i => $wf) {
+            $stepNum = $i + 1;
+            $input = $previousOutput ?: null;
+
+            try {
+                $orchestrator = new AgentOrchestrator();
+                $executor = new WorkflowExecutor($orchestrator);
+
+                $workflowToRun = $wf;
+                if ($input) {
+                    $contextPrefix = "[Contexte chain: " . mb_substr($input, 0, 200) . "] ";
+                    $injectedSteps = array_map(function (array $step) use ($contextPrefix) {
+                        $step['message'] = $contextPrefix . ($step['message'] ?? '');
+                        return $step;
+                    }, $wf->steps ?? []);
+                    $workflowToRun = clone $wf;
+                    $workflowToRun->steps = $injectedSteps;
+                }
+
+                $executionResult = $executor->execute($workflowToRun, $context);
+                $formatted = WorkflowExecutor::formatResults($executionResult);
+
+                // Extract last step output as context for next workflow
+                $stepResults = $executionResult['steps'] ?? [];
+                $lastStep = end($stepResults);
+                $previousOutput = mb_substr($lastStep['reply'] ?? $formatted, 0, 500);
+
+                $success = ($executionResult['status'] ?? '') !== 'failed';
+                $results[] = [
+                    'name'    => $wf->name,
+                    'success' => $success,
+                    'output'  => $formatted,
+                ];
+
+                if (!$success) {
+                    $allSuccess = false;
+                    $this->sendText($context->from, "Le workflow \"{$wf->name}\" a echoue. Chain interrompue.");
+                    break;
+                }
+            } catch (\Throwable $e) {
+                Log::error("StreamlineAgent: chain workflow failed", [
+                    'workflow' => $wf->name,
+                    'error'    => $e->getMessage(),
+                ]);
+                $results[] = [
+                    'name'    => $wf->name,
+                    'success' => false,
+                    'output'  => 'Erreur: ' . $e->getMessage(),
+                ];
+                $allSuccess = false;
+                break;
+            }
+        }
+
+        // Format chain summary
+        $lines = [];
+        $lines[] = $allSuccess ? "*Chain terminee avec succes*" : "*Chain interrompue*";
+        $lines[] = str_repeat('─', 25);
+
+        foreach ($results as $i => $r) {
+            $icon = $r['success'] ? '✅' : '❌';
+            $lines[] = "{$icon} *{$r['name']}*";
+        }
+
+        // Show remaining unexecuted workflows
+        $executed = count($results);
+        if ($executed < count($workflows)) {
+            for ($i = $executed; $i < count($workflows); $i++) {
+                $lines[] = "⏭ *{$workflows[$i]->name}* (non execute)";
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = "Workflows: " . count($results) . "/" . count($workflows) . " executes";
+
+        $this->log($context, 'Chain completed', [
+            'workflows' => $wfNames,
+            'success'   => $allSuccess,
+            'executed'  => $executed,
+        ]);
+
+        return AgentResult::reply(implode("\n", $lines), ['chain_results' => $results]);
+    }
+
+    /**
+     * AI-powered analysis of a workflow's execution patterns and performance.
+     */
+    private function commandAnalyze(AgentContext $context, string $name): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply(
+                "*Analyse IA de workflow*\n\n"
+                . "Analyse les patterns d'execution, performance et fiabilite.\n\n"
+                . "Utilisation: /workflow analyze [nom]\n"
+                . "Exemple: /workflow analyze morning-brief"
+            );
+        }
+
+        [$workflow, $errResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errResult) return $errResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nVerifie avec /workflow list");
+        }
+
+        $this->log($context, "Analyzing workflow: {$workflow->name}");
+
+        // Gather execution data
+        $steps = $workflow->steps ?? [];
+        $stepCount = count($steps);
+        $runCount = $workflow->run_count ?? 0;
+        $lastRun = $workflow->last_run_at ? $workflow->last_run_at->diffForHumans() : 'jamais';
+        $meta = $workflow->meta ?? [];
+        $tags = $meta['tags'] ?? [];
+        $notes = $meta['notes'] ?? '';
+        $isPinned = $this->isPinned($workflow);
+        $status = $this->statusLabel($workflow);
+        $description = $workflow->description ?? 'Aucune description';
+
+        // Build step details
+        $stepDetails = '';
+        foreach ($steps as $i => $step) {
+            $agent = $step['agent'] ?? 'auto';
+            $condition = $step['condition'] ?? 'always';
+            $onError = $step['on_error'] ?? 'stop';
+            $disabled = !empty($step['disabled']);
+            $label = $disabled ? ' [DESACTIVEE]' : '';
+            $stepDetails .= "  " . ($i + 1) . ". [{$agent}] {$step['message']}{$label} (condition: {$condition}, on_error: {$onError})\n";
+        }
+
+        // Get recent execution history
+        $historyEntries = $this->memory->read($context->agent->id ?? 0, $context->from);
+        $recentHistory = '';
+        $entries = $historyEntries['entries'] ?? [];
+        $wfEntries = array_filter($entries, fn($e) => str_contains($e['agent_reply'] ?? '', $workflow->name));
+        $recentEntries = array_slice($wfEntries, -5);
+        foreach ($recentEntries as $entry) {
+            $recentHistory .= "  - " . mb_substr($entry['agent_reply'] ?? '', 0, 120) . "\n";
+        }
+
+        $model = $this->resolveModel($context);
+
+        try {
+            $response = $this->claude->chat(
+                "Analyse le workflow suivant:\n\n"
+                . "Nom: {$workflow->name}\n"
+                . "Description: {$description}\n"
+                . "Statut: {$status}\n"
+                . "Epingle: " . ($isPinned ? 'oui' : 'non') . "\n"
+                . "Executions: {$runCount}\n"
+                . "Derniere execution: {$lastRun}\n"
+                . "Tags: " . (empty($tags) ? 'aucun' : implode(', ', $tags)) . "\n"
+                . "Notes: " . ($notes ?: 'aucune') . "\n\n"
+                . "Etapes ({$stepCount}):\n{$stepDetails}\n"
+                . ($recentHistory ? "Historique recent:\n{$recentHistory}\n" : ''),
+                $model,
+                "Tu es un expert en analyse de workflows et automatisation.\n"
+                . "Analyse ce workflow WhatsApp et fournis un rapport structure.\n"
+                . "Reponds directement en texte (pas de JSON), formate pour WhatsApp:\n"
+                . "- Utilise *gras* pour les titres\n"
+                . "- Utilise des bullets avec •\n"
+                . "- Sois concis mais precis\n\n"
+                . "Structure ton analyse:\n"
+                . "1. *Resume* — Ce que fait ce workflow en 1-2 phrases\n"
+                . "2. *Performance* — Score de fiabilite (base sur les executions), frequence d'utilisation\n"
+                . "3. *Points forts* — Ce qui fonctionne bien\n"
+                . "4. *Points d'amelioration* — Problemes potentiels ou optimisations\n"
+                . "5. *Recommandations* — 2-3 actions concretes (ex: ajouter condition, changer agent, reordonner)\n\n"
+                . "REGLES:\n"
+                . "- N'invente JAMAIS de donnees ou statistiques non fournies\n"
+                . "- Base-toi uniquement sur les informations donnees\n"
+                . "- Si peu de donnees, dis-le clairement\n"
+                . "- Maximum 15 lignes au total"
+            );
+
+            if (empty($response)) {
+                return AgentResult::reply(
+                    "⚠ L'analyse IA n'a pas pu etre generee.\n\n"
+                    . "Alternatives:\n"
+                    . "  /workflow profile {$workflow->name} — profil detaille\n"
+                    . "  /workflow show {$workflow->name} — voir les etapes"
+                );
+            }
+
+            $header = "*🔍 Analyse — {$workflow->name}*\n" . str_repeat('─', 25) . "\n\n";
+
+            $this->log($context, "Workflow analyzed: {$workflow->name}", ['run_count' => $runCount]);
+
+            return AgentResult::reply($header . trim($response));
+        } catch (\Throwable $e) {
+            Log::error("StreamlineAgent: analyze generation failed", [
+                'error'    => $e->getMessage(),
+                'workflow' => $workflow->name,
+            ]);
+            return AgentResult::reply(
+                "⚠ Erreur lors de l'analyse IA de *{$workflow->name}*.\n\n"
+                . "Alternatives:\n"
+                . "  /workflow profile {$workflow->name} — profil detaille\n"
+                . "  /workflow validate {$workflow->name} — verifier l'integrite"
+            );
+        }
+    }
+
+    /**
 
     /**
      * Return help text for a specific category.
@@ -5383,6 +6474,8 @@ class StreamlineAgent extends BaseAgent
                 . "/workflow summary [nom]   — resume IA\n"
                 . "/workflow optimize [nom]  — suggestions IA\n"
                 . "/workflow diff [nom1] [nom2]  — comparer\n"
+                . "/workflow compare-stats [n1] [n2]  — stats\n"
+                . "/workflow recap [jours?]  — activite recente\n"
                 . "/workflow export [nom]    — exporter\n"
                 . "/workflow clean           — nettoyer\n\n"
                 . "Aide complete: /workflow help",
@@ -5391,95 +6484,633 @@ class StreamlineAgent extends BaseAgent
         };
     }
 
+    /**
+     * Parse JSON from LLM response with markdown extraction and truncation recovery.
+     */
+    private function parseJson(?string $response): ?array
+    {
+        if (!$response) {
+            return null;
+        }
+
+        $clean = trim($response);
+
+        // Extract from markdown code blocks
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        // Extract outermost JSON object from mixed text
+        if (!str_starts_with($clean, '{') && preg_match('/(\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})/s', $clean, $m)) {
+            $clean = $m[1];
+        }
+
+        $result = json_decode($clean, true);
+        if ($result !== null) {
+            return $result;
+        }
+
+        // Salvage truncated JSON: close unclosed strings, braces, brackets
+        $salvage = $clean;
+        if (substr_count($salvage, '"') % 2 !== 0) {
+            $salvage .= '"';
+        }
+        $openBraces = substr_count($salvage, '{') - substr_count($salvage, '}');
+        $salvage .= str_repeat('}', max(0, $openBraces));
+        $openBrackets = substr_count($salvage, '[') - substr_count($salvage, ']');
+        $salvage .= str_repeat(']', max(0, $openBrackets));
+
+        return json_decode($salvage, true);
+    }
+
     private function getHelpText(): string
     {
         $v = $this->version();
-        return "Streamline v{$v} — Workflows multi-agents\n"
+        return "*Streamline v{$v}* — Workflows multi-agents\n"
             . str_repeat('─', 30) . "\n\n"
-            . "Creer & gerer:\n"
-            . "  /workflow create [nom] [etape1] then [etape2]\n"
-            . "  /workflow import [nom] [etape1] then [etape2]\n"
-            . "  /workflow list [filtre?] [#tag?]\n"
-            . "  /workflow search [terme]\n"
-            . "  /workflow show [nom]\n"
-            . "  /workflow delete [nom]\n"
-            . "  /workflow rename [ancien] [nouveau]\n"
-            . "  /workflow duplicate [nom] [nouveau-nom]  (alias: clone)\n"
-            . "  /workflow describe [nom] [description]\n\n"
-            . "Modifier les etapes:\n"
-            . "  /workflow edit [nom] [N] [nouveau_message]\n"
-            . "  /workflow step-config [nom] [N] agent=[a]\n"
-            . "  /workflow step-config [nom] [N] condition=[c]\n"
-            . "  /workflow step-config [nom] [N] on_error=stop|continue\n"
-            . "  /workflow add [nom] [message_etape]\n"
-            . "  /workflow insert [nom] [position] [message]\n"
-            . "  /workflow remove-step [nom] [N]\n"
-            . "  /workflow move-step [nom] [from] [to]\n"
-            . "  /workflow disable-step [nom] [N]          — desactiver temporairement\n"
-            . "  /workflow enable-step [nom] [N]           — reactiver\n"
-            . "  /workflow test-step [nom] [N]             — tester une seule etape\n\n"
-            . "Executer:\n"
-            . "  /workflow trigger [nom]               — lancer un workflow\n"
-            . "  /workflow trigger [nom] [contexte]    — lancer avec parametres\n"
-            . "  /workflow batch [nom1] [nom2] [nom3]  — lancer plusieurs specifiques\n"
-            . "  /workflow run-all [#tag?]              — lancer tous (max 5)\n"
-            . "  /workflow enable [nom]\n"
-            . "  /workflow disable [nom]\n\n"
-            . "Organisation:\n"
-            . "  /workflow tag [nom] [tag1,tag2]  — etiqueter\n"
-            . "  /workflow tags                   — tous les tags\n"
-            . "  /workflow list #tag              — filtrer par tag\n"
-            . "  /workflow pin [nom]              — epingler\n"
-            . "  /workflow unpin [nom]            — desepingler\n"
-            . "  /workflow notes [nom] [texte]    — ajouter une note\n\n"
-            . "Templates & Suggestions IA:\n"
-            . "  /workflow template               — 10 templates disponibles\n"
-            . "  /workflow template [tpl] [nom]   — creer depuis un template\n"
-            . "  /workflow suggest [description]  — suggestion IA sur mesure\n\n"
-            . "Analyser & comprendre:\n"
-            . "  /workflow status [nom?]      — apercu rapide\n"
-            . "  /workflow graph [nom]        — graphe visuel du flux\n"
-            . "  /workflow recent [N?]        — workflows recemment lances\n"
-            . "  /workflow summary [nom]      — explication IA du workflow\n"
-            . "  /workflow stats              — statistiques + tags\n"
-            . "  /workflow health             — audit sante de tous les workflows\n"
-            . "  /workflow history [nom?]\n"
-            . "  /workflow export [nom]\n"
-            . "  /workflow dryrun [nom]       — simuler sans executer\n"
-            . "  /workflow reset-stats [nom]  — remettre les stats a zero\n\n"
-            . "Automatisation & fusion:\n"
-            . "  /workflow schedule [nom] [frequence]  — planifier l'execution automatique\n"
-            . "  /workflow merge [nom1] [nom2]         — fusionner deux workflows en un\n"
-            . "  /workflow optimize [nom]              — analyse IA et suggestions d'amelioration\n\n"
-            . "Comparer & favoris:\n"
-            . "  /workflow diff [nom1] [nom2]         — comparer deux workflows\n"
-            . "  /workflow favorites                   — top 5 workflows les plus utilises\n"
-            . "  /workflow dashboard                   — tableau de bord compact\n\n"
-            . "Raccourcis:\n"
-            . "  /workflow quick [terme]              — chercher et lancer immediatement\n"
-            . "  /workflow last                        — relancer le dernier workflow execute\n"
-            . "  /workflow copy-step [src] [N] [dest] — copier une etape vers un autre workflow\n"
-            . "  /workflow swap [nom] [N1] [N2]       — echanger deux etapes de position\n"
-            . "  /workflow undo [nom]                  — annuler la derniere modification\n"
-            . "  /workflow retry [nom?]                — relancer un workflow (dernier si vide)\n"
-            . "  /workflow clean                       — nettoyer workflows casses/obsoletes\n\n"
-            . "Inline (execution immediate, max 8 etapes):\n"
+            . "*Creer & gerer:*\n"
+            . "  • /workflow create [nom] [etape1] then [etape2]\n"
+            . "  • /workflow import [nom] [etape1] then [etape2]\n"
+            . "  • /workflow list [filtre?] [#tag?]\n"
+            . "  • /workflow search [terme]\n"
+            . "  • /workflow show [nom]\n"
+            . "  • /workflow info [nom] — carte compacte\n"
+            . "  • /workflow delete [nom]\n"
+            . "  • /workflow rename [ancien] [nouveau]\n"
+            . "  • /workflow duplicate [nom] [nouveau-nom]\n"
+            . "  • /workflow describe [nom] [description]\n\n"
+            . "*Modifier les etapes:*\n"
+            . "  • /workflow edit [nom] [N] [nouveau_message]\n"
+            . "  • /workflow step-config [nom] [N] agent=[a]\n"
+            . "  • /workflow add [nom] [message_etape]\n"
+            . "  • /workflow insert [nom] [position] [message]\n"
+            . "  • /workflow remove-step [nom] [N]\n"
+            . "  • /workflow move-step [nom] [from] [to]\n"
+            . "  • /workflow swap [nom] [N1] [N2]\n"
+            . "  • /workflow disable-step [nom] [N]\n"
+            . "  • /workflow enable-step [nom] [N]\n"
+            . "  • /workflow test-step [nom] [N]\n"
+            . "  • /workflow undo [nom]\n\n"
+            . "*Executer:*\n"
+            . "  • /workflow trigger [nom] [contexte?]\n"
+            . "  • /workflow chain [nom1] [nom2] [nom3] — enchainer\n"
+            . "  • /workflow batch [nom1] [nom2] [nom3]\n"
+            . "  • /workflow run-all [#tag?]\n"
+            . "  • /workflow quick [terme]\n"
+            . "  • /workflow last — relancer le dernier\n"
+            . "  • /workflow retry [nom?]\n"
+            . "  • /workflow schedule [nom] [frequence]\n"
+            . "  • /workflow dryrun [nom] — simuler\n\n"
+            . "*Organisation:*\n"
+            . "  • /workflow tag [nom] [tag1,tag2]\n"
+            . "  • /workflow bulk-tag [n1] [n2] [tag] — taguer en masse\n"
+            . "  • /workflow pin [nom] / unpin [nom]\n"
+            . "  • /workflow notes [nom] [texte]\n"
+            . "  • /workflow merge [nom1] [nom2]\n\n"
+            . "*Analyse IA:*\n"
+            . "  • /workflow analyze [nom] — analyse complete IA\n"
+            . "  • /workflow summary [nom] — resume IA\n"
+            . "  • /workflow optimize [nom] — suggestions\n"
+            . "  • /workflow suggest [description] — creation IA\n"
+            . "  • /workflow validate [nom] — verifier l'integrite\n\n"
+            . "*Tableau de bord:*\n"
+            . "  • /workflow status [nom?] / stats / health\n"
+            . "  • /workflow dashboard / favorites / recent\n"
+            . "  • /workflow diff [nom1] [nom2] / export [nom]\n"
+            . "  • /workflow history [nom?] / graph [nom]\n"
+            . "  • /workflow compare-stats [nom1] [nom2]\n"
+            . "  • /workflow recap [jours?] — activite recente\n"
+            . "  • /workflow clean — nettoyer\n\n"
+            . "*Inline* (max 8 etapes):\n"
             . "  \"resume mes todos puis check mes rappels\"\n"
             . "  \"analyse ce code >> cree un resume\"\n\n"
-            . "Conditions par etape:\n"
-            . "  always | success | contains:mot | not_contains:mot\n"
-            . "Gestion erreurs: stop (defaut) | continue\n"
-            . "Separateurs: then | puis | et puis | ensuite | after that | >>\n\n"
-            . "Exemples:\n"
-            . "  /workflow create daily-brief check todos then rappels then meteo\n"
-            . "  /workflow template morning-brief ma-routine\n"
-            . "  /workflow run-all #matin\n"
-            . "  /workflow summary morning-brief\n\n"
-            . "Aide par categorie:\n"
-            . "  /workflow help create   — creation\n"
-            . "  /workflow help execute  — execution\n"
-            . "  /workflow help edit     — modifier etapes\n"
-            . "  /workflow help organize — organisation\n"
-            . "  /workflow help analyze  — analyse & stats";
+            . "*Aide par categorie:*\n"
+            . "  /workflow help create • execute • edit\n"
+            . "  /workflow help organize • analyze";
+    }
+
+    /**
+     * Compare execution stats between two workflows side by side.
+     */
+    private function commandCompareStats(AgentContext $context, string $name1, string $name2): AgentResult
+    {
+        if (empty($name1) || empty($name2)) {
+            return AgentResult::reply(
+                "*Comparer les stats de deux workflows*\n\n"
+                . "Utilisation: /workflow compare-stats [nom1] [nom2]\n"
+                . "Exemple: /workflow compare-stats morning-brief daily-check"
+            );
+        }
+
+        $wf1 = $this->findWorkflow($context->from, $name1);
+        $wf2 = $this->findWorkflow($context->from, $name2);
+
+        if (!$wf1 && !$wf2) {
+            return AgentResult::reply("Workflows \"{$name1}\" et \"{$name2}\" introuvables.\nVerifie avec /workflow list");
+        }
+        if (!$wf1) {
+            return AgentResult::reply("Workflow \"{$name1}\" introuvable.\nVerifie avec /workflow list");
+        }
+        if (!$wf2) {
+            return AgentResult::reply("Workflow \"{$name2}\" introuvable.\nVerifie avec /workflow list");
+        }
+
+        $this->log($context, "Compare stats: {$wf1->name} vs {$wf2->name}");
+
+        $steps1 = count($wf1->steps ?? []);
+        $steps2 = count($wf2->steps ?? []);
+        $runs1 = $wf1->run_count ?? 0;
+        $runs2 = $wf2->run_count ?? 0;
+        $lastRun1 = $wf1->last_run_at ? $wf1->last_run_at->diffForHumans() : 'jamais';
+        $lastRun2 = $wf2->last_run_at ? $wf2->last_run_at->diffForHumans() : 'jamais';
+        $status1 = $wf1->is_active ? '✅ Actif' : '⏸ Inactif';
+        $status2 = $wf2->is_active ? '✅ Actif' : '⏸ Inactif';
+
+        $dur1 = $wf1->conditions['durations'] ?? [];
+        $dur2 = $wf2->conditions['durations'] ?? [];
+        $avgDur1 = !empty($dur1) ? round(array_sum($dur1) / count($dur1), 1) . 's' : 'N/A';
+        $avgDur2 = !empty($dur2) ? round(array_sum($dur2) / count($dur2), 1) . 's' : 'N/A';
+
+        $tags1 = implode(' ', array_map(fn($t) => "#{$t}", $wf1->conditions['tags'] ?? [])) ?: '—';
+        $tags2 = implode(' ', array_map(fn($t) => "#{$t}", $wf2->conditions['tags'] ?? [])) ?: '—';
+
+        $lines = [
+            "*📊 Comparaison*",
+            str_repeat('─', 28),
+            "",
+            "                *{$wf1->name}*  vs  *{$wf2->name}*",
+            str_repeat('─', 28),
+            "Statut     : {$status1}  |  {$status2}",
+            "Etapes     : {$steps1}  |  {$steps2}",
+            "Executions : {$runs1}  |  {$runs2}",
+            "Duree moy. : {$avgDur1}  |  {$avgDur2}",
+            "Dernier    : {$lastRun1}  |  {$lastRun2}",
+            "Tags       : {$tags1}  |  {$tags2}",
+        ];
+
+        // Winner summary
+        if ($runs1 > 0 && $runs2 > 0) {
+            $lines[] = '';
+            $moreUsed = $runs1 > $runs2 ? $wf1->name : ($runs2 > $runs1 ? $wf2->name : 'egalite');
+            if ($moreUsed !== 'egalite') {
+                $lines[] = "🏆 Plus utilise: *{$moreUsed}*";
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = "/workflow diff {$wf1->name} {$wf2->name} — comparer les etapes";
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * NLU helper for compare-stats (splits "name1 name2" from single name field).
+     */
+    private function handleCompareStatsFromNLU(AgentContext $context, string $names): AgentResult
+    {
+        $parts = preg_split('/\s+/', trim($names), 2);
+        return $this->commandCompareStats($context, $parts[0] ?? '', $parts[1] ?? '');
+    }
+
+    /**
+     * Activity recap: summary of recent workflow executions over the last N days.
+     */
+    private function commandRecap(AgentContext $context, string $arg): AgentResult
+    {
+        $days = max(1, min(30, (int) ($arg ?: 7)));
+
+        $workflows = Workflow::forUser($context->from)->get();
+
+        if ($workflows->isEmpty()) {
+            return AgentResult::reply(
+                "Aucun workflow cree.\n\n"
+                . "Cree-en un avec:\n/workflow create [nom] [etape1] then [etape2]"
+            );
+        }
+
+        $since = now()->subDays($days);
+
+        // Workflows executed in the period
+        $executedRecently = $workflows->filter(fn($wf) => $wf->last_run_at && $wf->last_run_at->gte($since));
+        $neverRun = $workflows->where('run_count', 0);
+        $totalRuns = $workflows->sum('run_count');
+        $activeCount = $workflows->where('is_active', true)->count();
+
+        $lines = [
+            "*📋 Recap des {$days} derniers jours*",
+            str_repeat('─', 28),
+            "",
+            "Workflows total : *{$workflows->count()}* ({$activeCount} actifs)",
+            "Executions tot. : {$totalRuns}",
+            "Lances recemment: {$executedRecently->count()}/{$workflows->count()}",
+        ];
+
+        if ($executedRecently->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = "*Derniers lances:*";
+            foreach ($executedRecently->sortByDesc('last_run_at')->take(8)->values() as $wf) {
+                $ago = $wf->last_run_at->diffForHumans();
+                $stepCount = count($wf->steps ?? []);
+                $lines[] = "  · *{$wf->name}* — {$wf->run_count} exec. · {$stepCount} etapes · {$ago}";
+            }
+        }
+
+        if ($neverRun->isNotEmpty()) {
+            $lines[] = '';
+            $neverCount = $neverRun->count();
+            $lines[] = "⚠ *{$neverCount} workflow" . ($neverCount > 1 ? 's' : '') . " jamais lance" . ($neverCount > 1 ? 's' : '') . ":*";
+            foreach ($neverRun->take(5)->values() as $wf) {
+                $lines[] = "  · {$wf->name}";
+            }
+            if ($neverCount > 5) {
+                $lines[] = "  ... et " . ($neverCount - 5) . " autre(s)";
+            }
+        }
+
+        // Inactive but recently created
+        $dormant = $workflows->filter(fn($wf) =>
+            !$wf->is_active && $wf->created_at->gte($since)
+        );
+        if ($dormant->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = "⏸ {$dormant->count()} workflow(s) cree(s) mais desactive(s)";
+        }
+
+        $lines[] = '';
+        $lines[] = str_repeat('─', 24);
+        $lines[] = "/workflow stats — statistiques detaillees";
+        $lines[] = "/workflow health — audit de sante";
+
+        $this->log($context, "Recap generated: {$days} days, {$executedRecently->count()} active");
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Detailed workflow profile card with performance scoring, reliability, and recommendations.
+     * Usage: /workflow profile [name]
+     */
+    private function commandProfile(AgentContext $context, string $name): AgentResult
+    {
+        if (empty(trim($name))) {
+            return AgentResult::reply(
+                "*Profil detaille d'un workflow*\n\n"
+                . "Utilisation: /workflow profile [nom]\n"
+                . "Exemple: /workflow profile morning-brief"
+            );
+        }
+
+        $result = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($result instanceof AgentResult) {
+            return $result;
+        }
+        $workflow = $result;
+
+        $steps     = $workflow->steps ?? [];
+        $stepCount = count($steps);
+        $runs      = $workflow->run_count ?? 0;
+        $status    = $workflow->is_active ? '✅ Actif' : '⏸ Inactif';
+        $pinned    = $this->isPinned($workflow) ? '📌 Epingle' : '';
+        $tags      = $workflow->conditions['tags'] ?? [];
+        $tagStr    = !empty($tags) ? implode(' ', array_map(fn($t) => "#{$t}", $tags)) : '—';
+        $created   = $workflow->created_at->format('d/m/Y');
+        $lastRun   = $workflow->last_run_at ? $workflow->last_run_at->format('d/m/Y H:i') : 'jamais';
+        $ago       = $workflow->last_run_at ? ' (' . $workflow->last_run_at->diffForHumans() . ')' : '';
+        $desc      = $workflow->description ?: '_Aucune description_';
+
+        // Performance scoring (0-100)
+        $perfScore = 50;
+        if ($runs > 0) $perfScore += 10;
+        if ($runs > 5) $perfScore += 10;
+        if ($runs > 20) $perfScore += 10;
+        if ($workflow->is_active) $perfScore += 5;
+        if (!empty($workflow->description)) $perfScore += 5;
+        if (!empty($tags)) $perfScore += 5;
+        if ($this->isPinned($workflow)) $perfScore += 5;
+        if ($workflow->last_run_at && $workflow->last_run_at->diffInDays(now()) > 30) $perfScore -= 15;
+        if ($workflow->last_run_at && $workflow->last_run_at->diffInDays(now()) > 60) $perfScore -= 10;
+        $emptySteps = collect($steps)->filter(fn($s) => empty(trim($s['message'] ?? '')))->count();
+        if ($emptySteps > 0) $perfScore -= ($emptySteps * 10);
+        $perfScore = max(0, min(100, $perfScore));
+        $perfBar   = str_repeat('█', (int) round($perfScore / 10)) . str_repeat('░', 10 - (int) round($perfScore / 10));
+        $perfIcon  = $perfScore >= 80 ? '🟢' : ($perfScore >= 50 ? '🟡' : '🔴');
+
+        // Duration stats
+        $durations = $workflow->conditions['durations'] ?? [];
+        $durationInfo = 'N/A';
+        if (!empty($durations)) {
+            $avg = round(array_sum($durations) / count($durations), 1);
+            $min = round(min($durations), 1);
+            $max = round(max($durations), 1);
+            $durationInfo = "moy: {$avg}s · min: {$min}s · max: {$max}s";
+        }
+
+        // Agent distribution
+        $agentCounts = [];
+        foreach ($steps as $step) {
+            $agent = $step['agent'] ?? 'auto';
+            $agentCounts[$agent] = ($agentCounts[$agent] ?? 0) + 1;
+        }
+        arsort($agentCounts);
+        $agentStr = implode(', ', array_map(fn($a, $c) => "{$a}({$c})", array_keys($agentCounts), $agentCounts));
+
+        // Conditions analysis
+        $hasConditions = collect($steps)->contains(fn($s) => ($s['condition'] ?? 'always') !== 'always');
+        $hasErrorHandling = collect($steps)->contains(fn($s) => ($s['on_error'] ?? 'stop') === 'continue');
+        $disabledSteps = collect($steps)->filter(fn($s) => !empty($s['disabled']))->count();
+
+        $lines = [
+            "*🪪 Profil: {$workflow->name}*",
+            str_repeat('═', 30),
+            "",
+            "{$perfIcon} Score: {$perfBar} *{$perfScore}/100*",
+            "",
+            "📝 {$desc}",
+            "",
+            "📊 *Metriques:*",
+            "  Statut    : {$status} {$pinned}",
+            "  Etapes    : {$stepCount}" . ($disabledSteps > 0 ? " ({$disabledSteps} desactivee" . ($disabledSteps > 1 ? 's' : '') . ")" : ''),
+            "  Executions: {$runs}",
+            "  Duree     : {$durationInfo}",
+            "  Cree le   : {$created}",
+            "  Dernier   : {$lastRun}{$ago}",
+            "  Tags      : {$tagStr}",
+            "",
+            "🔧 *Configuration:*",
+            "  Agents   : {$agentStr}",
+            "  Conditions: " . ($hasConditions ? '✅ oui' : '❌ aucune'),
+            "  Tolerance : " . ($hasErrorHandling ? '✅ on_error=continue' : '⛔ on_error=stop'),
+        ];
+
+        // Recommendations
+        $recs = [];
+        if (empty($workflow->description)) $recs[] = "Ajoute une description: /workflow describe {$workflow->name} [desc]";
+        if (empty($tags)) $recs[] = "Ajoute des tags: /workflow tag {$workflow->name} [tag1,tag2]";
+        if ($runs === 0) $recs[] = "Lance-le: /workflow trigger {$workflow->name}";
+        if ($workflow->last_run_at && $workflow->last_run_at->diffInDays(now()) > 30) {
+            $recs[] = "Inactif >30j. Planifie: /workflow schedule {$workflow->name} [freq]";
+        }
+        if ($emptySteps > 0) $recs[] = "Corrige {$emptySteps} etape(s) vide(s): /workflow show {$workflow->name}";
+        if (!$hasConditions && $stepCount > 2) $recs[] = "Ajoute des conditions: /workflow step-config {$workflow->name} [N] condition=success";
+
+        if (!empty($recs)) {
+            $lines[] = '';
+            $lines[] = "*💡 Recommandations:*";
+            foreach (array_slice($recs, 0, 3) as $rec) {
+                $lines[] = "  · {$rec}";
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = str_repeat('═', 30);
+        $lines[] = "/workflow show {$workflow->name}     — voir etapes";
+        $lines[] = "/workflow analyze {$workflow->name}  — analyse IA";
+        $lines[] = "/workflow optimize {$workflow->name} — optimiser";
+
+        $this->log($context, "Profile viewed: {$workflow->name}", ['score' => $perfScore]);
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Bulk action: enable/disable/pin/unpin/delete multiple workflows at once.
+     * Usage: /workflow bulk [action] [name1] [name2] [name3]
+     */
+    private function commandBulkAction(AgentContext $context, string $arg): AgentResult
+    {
+        $parts  = preg_split('/\s+/', trim($arg));
+        $action = mb_strtolower($parts[0] ?? '');
+        $names  = array_slice($parts, 1);
+
+        $validActions = ['enable', 'disable', 'pin', 'unpin', 'delete'];
+
+        if (empty($action) || !in_array($action, $validActions, true) || empty($names)) {
+            return AgentResult::reply(
+                "*Actions en masse*\n\n"
+                . "Utilisation: /workflow bulk [action] [nom1] [nom2] ...\n\n"
+                . "Actions: enable, disable, pin, unpin, delete\n\n"
+                . "Exemples:\n"
+                . "  /workflow bulk enable morning-brief daily-check\n"
+                . "  /workflow bulk disable old-wf1 old-wf2\n"
+                . "  /workflow bulk pin morning-brief evening-check\n"
+                . "  /workflow bulk delete obsolete-1 obsolete-2"
+            );
+        }
+
+        if (count($names) > 10) {
+            return AgentResult::reply("Maximum 10 workflows par action en masse (recu: " . count($names) . ").");
+        }
+
+        // Delete needs confirmation
+        if ($action === 'delete') {
+            $resolved = [];
+            $notFound = [];
+            foreach ($names as $n) {
+                $wf = $this->findWorkflow($context->from, $n);
+                if ($wf) {
+                    $resolved[] = $wf;
+                } else {
+                    $notFound[] = $n;
+                }
+            }
+            if (empty($resolved)) {
+                return AgentResult::reply("Aucun des workflows specifies n'a ete trouve.\nVerifie avec /workflow list");
+            }
+            $nameList = implode(', ', array_map(fn($wf) => "*{$wf->name}*", $resolved));
+            $this->setPendingContext($context, 'confirm_bulk_delete', [
+                'workflow_ids' => array_map(fn($wf) => $wf->id, $resolved),
+            ], 3);
+            $warn = !empty($notFound) ? "\n⚠ Introuvable(s): " . implode(', ', $notFound) : '';
+            return AgentResult::reply(
+                "🗑 Supprimer *" . count($resolved) . "* workflow(s)?\n"
+                . $nameList . $warn
+                . "\n\nReponds *oui* pour confirmer ou *non* pour annuler."
+            );
+        }
+
+        // Apply action
+        $success = [];
+        $failed  = [];
+        foreach ($names as $n) {
+            $wf = $this->findWorkflow($context->from, $n);
+            if (!$wf) {
+                $failed[] = $n;
+                continue;
+            }
+            switch ($action) {
+                case 'enable':
+                    $wf->update(['is_active' => true]);
+                    $success[] = $wf->name;
+                    break;
+                case 'disable':
+                    $wf->update(['is_active' => false]);
+                    $success[] = $wf->name;
+                    break;
+                case 'pin':
+                    $conditions = $wf->conditions ?? [];
+                    $conditions['pinned'] = true;
+                    $wf->update(['conditions' => $conditions]);
+                    $success[] = $wf->name;
+                    break;
+                case 'unpin':
+                    $conditions = $wf->conditions ?? [];
+                    unset($conditions['pinned']);
+                    $wf->update(['conditions' => $conditions]);
+                    $success[] = $wf->name;
+                    break;
+            }
+        }
+
+        $actionLabel = match ($action) {
+            'enable'  => 'active(s)',
+            'disable' => 'desactive(s)',
+            'pin'     => 'epingle(s)',
+            'unpin'   => 'desepingle(s)',
+            default   => $action,
+        };
+        $emoji = match ($action) {
+            'enable'  => '✅',
+            'disable' => '⏸',
+            'pin'     => '📌',
+            'unpin'   => '📌',
+            default   => '✅',
+        };
+
+        $lines = ["{$emoji} *" . count($success) . "* workflow(s) {$actionLabel}:"];
+        foreach ($success as $n) {
+            $lines[] = "  · {$n}";
+        }
+        if (!empty($failed)) {
+            $lines[] = '';
+            $lines[] = "⚠ Introuvable(s): " . implode(', ', $failed);
+        }
+
+        $this->log($context, "Bulk {$action}: " . implode(', ', $success), ['failed' => $failed]);
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Show agent usage distribution across all workflows.
+     * Helps understand which agents are most used and which workflows share agents.
+     */
+    private function commandDependencies(AgentContext $context): AgentResult
+    {
+        $workflows = Workflow::forUser($context->from)->get();
+
+        if ($workflows->isEmpty()) {
+            return AgentResult::reply(
+                "Aucun workflow cree.\n\n"
+                . "Cree-en un avec:\n/workflow create [nom] [etape1] then [etape2]"
+            );
+        }
+
+        $agentMap = [];  // agent => [workflow names]
+        $totalSteps = 0;
+
+        foreach ($workflows as $wf) {
+            foreach ($wf->steps ?? [] as $step) {
+                $agent = $step['agent'] ?? 'auto';
+                $agentMap[$agent] ??= [];
+                if (!in_array($wf->name, $agentMap[$agent], true)) {
+                    $agentMap[$agent][] = $wf->name;
+                }
+                $totalSteps++;
+            }
+        }
+
+        // Sort by number of workflows using each agent (desc)
+        uasort($agentMap, fn($a, $b) => count($b) <=> count($a));
+
+        $lines = [
+            "*🔗 Carte des dependances*",
+            str_repeat('─', 28),
+            "",
+            "*{$workflows->count()}* workflows · *{$totalSteps}* etapes · *" . count($agentMap) . "* agents",
+            "",
+        ];
+
+        foreach ($agentMap as $agent => $wfNames) {
+            $count = count($wfNames);
+            $pct = $totalSteps > 0 ? (int) round(collect($workflows)->sum(fn($wf) => collect($wf->steps ?? [])->where('agent', $agent)->count()) / $totalSteps * 100) : 0;
+            $bar = str_repeat('█', max(1, (int) round($pct / 10))) . str_repeat('░', max(0, 10 - (int) round($pct / 10)));
+            $lines[] = "*{$agent}* {$bar} {$pct}%";
+            $lines[] = "  " . implode(', ', array_slice($wfNames, 0, 5)) . (count($wfNames) > 5 ? " +..." : '');
+        }
+
+        // Identify shared agents (used by 3+ workflows)
+        $shared = array_filter($agentMap, fn($wfs) => count($wfs) >= 3);
+        if (!empty($shared)) {
+            $lines[] = '';
+            $lines[] = "*💡 Agents partages (3+ workflows):*";
+            foreach ($shared as $agent => $wfs) {
+                $lines[] = "  · *{$agent}* → " . count($wfs) . " workflows";
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = "/workflow stats     — statistiques globales";
+        $lines[] = "/workflow dashboard — tableau de bord";
+
+        $this->log($context, "Dependencies viewed", ['agents' => count($agentMap), 'workflows' => $workflows->count()]);
+
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Export all workflows as a single text block for backup.
+     */
+    private function commandExportAll(AgentContext $context): AgentResult
+    {
+        $workflows = Workflow::forUser($context->from)->orderBy('name')->get();
+
+        if ($workflows->isEmpty()) {
+            return AgentResult::reply(
+                "Aucun workflow a exporter.\n\n"
+                . "Cree-en un avec:\n/workflow create [nom] [etape1] then [etape2]"
+            );
+        }
+
+        $lines = [
+            "*📦 Export complet* — {$workflows->count()} workflow(s)",
+            str_repeat('═', 30),
+            "_Genere le " . now()->format('d/m/Y H:i') . "_",
+            "",
+        ];
+
+        foreach ($workflows as $wf) {
+            $status = $wf->is_active ? '✅' : '⏸';
+            $tags = $wf->conditions['tags'] ?? [];
+            $tagStr = !empty($tags) ? ' #' . implode(' #', $tags) : '';
+
+            $lines[] = str_repeat('─', 28);
+            $lines[] = "{$status} *{$wf->name}*{$tagStr}";
+            if (!empty($wf->description)) {
+                $lines[] = "_" . mb_substr($wf->description, 0, 80) . "_";
+            }
+            $lines[] = "{$wf->run_count} exec. · " . count($wf->steps ?? []) . " etapes";
+
+            foreach ($wf->steps ?? [] as $i => $step) {
+                $agent = !empty($step['agent']) ? " [{$step['agent']}]" : '';
+                $condition = (!empty($step['condition']) && $step['condition'] !== 'always')
+                    ? " si:{$step['condition']}" : '';
+                $disabled = !empty($step['disabled']) ? ' ⏭' : '';
+                $lines[] = "  " . ($i + 1) . ". " . mb_substr($step['message'] ?? '', 0, 100) . $agent . $condition . $disabled;
+            }
+            $lines[] = "";
+        }
+
+        $lines[] = str_repeat('═', 30);
+        $lines[] = "Pour reimporter: /workflow import [nom] [etape1] then [etape2]";
+
+        $this->log($context, "Export all: {$workflows->count()} workflows");
+
+        $text = implode("\n", $lines);
+        // WhatsApp message limit safety
+        if (mb_strlen($text) > 4000) {
+            $text = mb_substr($text, 0, 3950) . "\n\n_... tronque (trop de workflows)_";
+        }
+
+        return AgentResult::reply($text);
     }
 }
