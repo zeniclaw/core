@@ -87,7 +87,7 @@ class DocumentAgent extends BaseAgent
         $lower = mb_strtolower($body);
 
         // Patterns indicating the user wants real data from the web
-        $needsDataPatterns = [
+        $webDataPatterns = [
             'liste des ', 'list of ', 'toutes les ', 'tous les ',
             'brasseries', 'restaurants', 'hotels', 'entreprises', 'societes',
             'en wallonie', 'en belgique', 'en france', 'a bruxelles', 'a paris',
@@ -96,10 +96,17 @@ class DocumentAgent extends BaseAgent
             'comparatif', 'classement', 'top ', 'meilleur',
         ];
 
-        foreach ($needsDataPatterns as $pattern) {
+        foreach ($webDataPatterns as $pattern) {
             if (str_contains($lower, $pattern)) {
                 return true;
             }
+        }
+
+        // Patterns indicating the user wants data from a project API
+        // (clients, fournisseurs, factures, commandes, etc.)
+        $apiDataPatterns = '/\b(clients?|fournisseurs?|factures?|invoices?|commandes?|orders?|produits?|products?|contacts?|prospects?|campagnes?|campaigns?|utilisateurs?|users?|bookings?|templates?|entit[ée])\b/iu';
+        if (preg_match($apiDataPatterns, $body)) {
+            return true;
         }
 
         return false;
@@ -121,23 +128,32 @@ Tu es un agent expert en creation de documents professionnels.
 Tu as acces a des outils pour collecter des donnees REELLES avant de creer le document.
 
 WORKFLOW OBLIGATOIRE (dans cet ordre STRICT):
+
+OPTION A — Donnees depuis une API projet (clients, fournisseurs, factures, commandes, produits, etc.):
+1. Utilise send_agent_message vers l'agent "dev" pour demander les donnees.
+   Exemple: send_agent_message(agent_name: "dev", message: "recupere la liste des clients de l'entite 1 depuis l'API")
+2. Le DevAgent va interroger l'API du projet actif et te retourner les donnees reelles.
+3. SEULEMENT APRES avoir recu les donnees: utilise create_document avec les VRAIES donnees.
+
+OPTION B — Donnees depuis le web (entreprises, brasseries, restaurants, classements, etc.):
 1. OBLIGATOIRE: utilise web_search (au moins 2-3 recherches differentes) pour collecter les donnees reelles
 2. OBLIGATOIRE: utilise web_fetch sur les pages les plus pertinentes pour extraire les details
 3. SEULEMENT APRES avoir collecte les donnees: utilise create_document avec les VRAIES donnees
+
+Comment choisir: si l'utilisateur mentionne des termes comme "clients", "fournisseurs", "factures", "commandes", "produits", "entite", "mon API" → OPTION A (send_agent_message vers dev).
+Sinon (recherche web, classements, listes publiques) → OPTION B (web_search + web_fetch).
 
 {$userContext}
 {$knowledgeData}
 
 REGLE ABSOLUE — ZERO HALLUCINATION:
 Tu ne dois JAMAIS, sous AUCUN pretexte, inventer des donnees. C'est la regle numero 1.
-- Si tu n'as pas fait de web_search, tu n'as PAS le droit d'appeler create_document avec des donnees factuelles
-- Si web_search ne retourne pas assez de resultats, dis-le clairement a l'utilisateur au lieu d'inventer
-- Chaque ligne de donnees dans le document DOIT provenir d'une source verifiable (web_search ou web_fetch)
-- Si l'utilisateur demande "liste des X", tu DOIS chercher sur le web — ne genere JAMAIS une liste de memoire
+- Si tu n'as pas collecte les donnees (via send_agent_message OU web_search), tu n'as PAS le droit d'appeler create_document avec des donnees factuelles
+- Si les donnees retournees sont insuffisantes, dis-le clairement a l'utilisateur au lieu d'inventer
+- Chaque ligne de donnees dans le document DOIT provenir d'une source verifiable (API, web_search ou web_fetch)
 - En cas de doute, prefere un document incomplet mais EXACT plutot qu'un document complet avec des donnees inventees
 
 AUTRES REGLES:
-- Fais PLUSIEURS recherches web pour etre exhaustif
 - Utilise le format le plus adapte (xlsx pour des listes/tableaux, pdf pour des rapports)
 - Si tu ne trouves pas les donnees demandees, reponds honnetement: "Je n'ai pas trouve suffisamment de donnees fiables pour creer ce document."
 PROMPT;

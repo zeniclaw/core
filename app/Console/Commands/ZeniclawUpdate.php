@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AgentLog;
+use App\Services\AgentManager;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -161,12 +162,7 @@ class ZeniclawUpdate extends Command
         try {
             $firstAgent = \App\Models\Agent::first();
             if ($firstAgent) {
-                AgentLog::create([
-                    'agent_id' => $firstAgent->id,
-                    'level' => 'info',
-                    'message' => "ZeniClaw updated to v{$newVersion}",
-                    'context' => ['command' => 'zeniclaw:update'],
-                ]);
+                AgentManager::log($firstAgent->id, 'system', "ZeniClaw updated to v{$newVersion}", ['command' => 'zeniclaw:update']);
             }
         } catch (\Exception $e) {
             // non-fatal

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AgentLog;
+use App\Services\AgentManager;
 use App\Models\AppSetting;
 use App\Models\Reminder;
 use Carbon\Carbon;
@@ -33,11 +34,9 @@ class ProcessReminders extends Command
             }
 
             // Log the reminder dispatch
-            AgentLog::create([
-                'agent_id' => $reminder->agent_id,
-                'level' => 'info',
-                'message' => "Reminder sent via {$reminder->channel}: {$reminder->message}",
-                'context' => ['reminder_id' => $reminder->id, 'channel' => $reminder->channel],
+            AgentManager::log($reminder->agent_id, 'reminder', "Reminder sent via {$reminder->channel}: {$reminder->message}", [
+                'reminder_id' => $reminder->id,
+                'channel'     => $reminder->channel,
             ]);
 
             if ($reminder->recurrence_rule) {

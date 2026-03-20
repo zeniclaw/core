@@ -4,6 +4,7 @@ namespace App\Services\ContentCurator;
 
 use App\Services\AnthropicClient;
 use App\Services\ModelResolver;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ContentSummarizer
@@ -17,10 +18,20 @@ class ContentSummarizer
 
     /**
      * Summarize a batch of articles using Claude API.
+     * Results are cached 30 min by article URL fingerprint.
      */
     public function summarizeBatch(array $articles, int $limit = 8): array
     {
         $articles = array_slice($articles, 0, $limit);
+
+        // Cache key based on article URLs fingerprint
+        $urlFingerprint = md5(implode(',', array_column($articles, 'url')));
+        $cacheKey = "content_curator:summaries:{$urlFingerprint}";
+
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && count($cached) === count($articles)) {
+            return $cached;
+        }
 
         // Build a single prompt with all articles for efficient API usage
         $articlesText = '';
@@ -40,20 +51,26 @@ class ContentSummarizer
         }
 
         $systemPrompt = <<<PROMPT
-Tu es un assistant de curation de contenu. Resume chaque article en 1-2 lignes concises et pertinentes.
+Tu es un assistant de curation de contenu expert. Resume chaque article de manière concise et percutante pour un lecteur sur mobile (WhatsApp).
 
 FORMAT DE REPONSE (JSON array):
 [
-  {"index": 1, "summary": "Resume court et informatif de l'article 1"},
-  {"index": 2, "summary": "Resume court et informatif de l'article 2"}
+  {"index": 1, "summary": "Fait principal en 1 phrase directe, style journalistique. Max 120 caractères."},
+  {"index": 2, "summary": "Fait principal en 1 phrase directe, style journalistique. Max 120 caractères."}
 ]
 
-REGLES:
-- Resume chaque article en 1-2 phrases maximum
-- Sois factuel et informatif
-- Mets en avant l'information cle
-- Reponds en francais
-- Retourne UNIQUEMENT le JSON, rien d'autre
+REGLES STRICTES:
+- 1 phrase maximum par article, commencer par le fait principal (jamais par "L'article..." ou "Cet article...")
+- Style journalistique direct : sujet + verbe + information clé
+- Maximum 120 caractères par résumé
+- Factuel, sans opinion ni supposition
+- En français, sans markdown ni guillemets
+- Retourner UNIQUEMENT le JSON, rien d'autre
+
+EXEMPLES DE BON RÉSUMÉ:
+- "Meta licencie 3 600 employés dans sa division réalité augmentée pour réorienter vers l'IA."
+- "Laravel 12 introduit le support natif des types PHP 8.4 et améliore les performances de 30%."
+- "Bitcoin dépasse les 100 000$ pour la première fois après l'approbation des ETF spot aux États-Unis."
 PROMPT;
 
         try {
@@ -98,6 +115,7 @@ PROMPT;
                 ]);
             }
 
+            Cache::put($cacheKey, $result, 1800);
             return $result;
         } catch (\Throwable $e) {
             Log::error("[ContentSummarizer] Batch summarization failed: " . $e->getMessage());

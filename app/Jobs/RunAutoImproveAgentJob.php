@@ -18,17 +18,30 @@ class RunAutoImproveAgentJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 900;
-    public int $tries = 1;
+    public int $timeout = 600;          // Must be < worker --timeout (660s)
+    public int $tries = 0;
+    public int $maxExceptions = 2;
+    public int $backoff = 10;
+
+    private const MAX_TURNS_PER_RUN = 40;
+    private const MAX_RUNS = 3;             // Max resume cycles
+    private const CLAUDE_MODEL = 'opus';
 
     private string $workdir = '/opt/zeniclaw-repo';
+
+    public int $runNumber = 1;
+    public ?string $sessionId = null;
 
     public function __construct(
         public SelfImprovement $improvement,
         public SubAgent $subAgent,
         public string $agentSlug,
         public string $agentFile,
+        int $runNumber = 1,
+        ?string $sessionId = null,
     ) {
+        $this->runNumber = $runNumber;
+        $this->sessionId = $sessionId;
         $this->onQueue('default');
     }
 
@@ -41,76 +54,100 @@ class RunAutoImproveAgentJob implements ShouldQueue
         }
 
         try {
+            // Cleanup before starting
+            $this->cleanupOrphanedProcesses();
+
+            $isResume = $this->runNumber > 1 && $this->sessionId;
+
             $this->subAgent->update([
                 'status' => 'running',
-                'started_at' => now(),
+                'started_at' => $this->subAgent->started_at ?? now(),
             ]);
             $this->improvement->update(['status' => 'in_progress']);
 
-            $this->subAgent->appendLog("[START] Auto-improve agent: {$this->agentSlug}");
+            if ($isResume) {
+                $this->subAgent->appendLog("[RESUME] Run #{$this->runNumber} — reprise session {$this->sessionId}");
+            } else {
+                $this->subAgent->appendLog("[START] Auto-improve agent: {$this->agentSlug} (run #{$this->runNumber})");
+                $this->prepareWorkdir();
+            }
 
-            // Ensure workdir is clean and up to date
-            $this->subAgent->appendLog("[GIT] Preparing workdir...");
-            $env = ['HOME' => '/tmp'];
-            Process::env($env)->run('git config --global --add safe.directory ' . $this->workdir);
-            Process::env($env)->path($this->workdir)->run('git fetch origin 2>&1');
-            Process::env($env)->path($this->workdir)->run('git reset --hard origin/main 2>&1');
-            Process::env($env)->path($this->workdir)->run('git clean -fd 2>&1');
-            $this->subAgent->appendLog("[GIT] Synced to origin/main");
+            // Build command
+            $cmd = $this->buildClaudeCommand($isResume);
 
-            $prompt = $this->buildPrompt();
+            $this->subAgent->appendLog("[CLAUDE CODE] Lancement " . self::CLAUDE_MODEL . " (max " . self::MAX_TURNS_PER_RUN . " turns)...");
+            $apiCalls = $this->subAgent->api_calls_count ?? 0;
+            $capturedSessionId = $this->sessionId;
+            $hitMaxTurns = false;
 
-            $this->subAgent->appendLog("[ZENICLAW AI] Lancement analyse + amelioration de {$this->agentSlug}...");
-            $apiCalls = 0;
-            $success = $this->executeClaudeCode($prompt, $apiKey, $apiCalls);
+            $success = $this->executeClaudeCode($cmd, $apiKey, $apiCalls, $capturedSessionId, $hitMaxTurns);
             $this->subAgent->update(['api_calls_count' => $apiCalls]);
 
-            if (!$success) {
+            // If max turns reached and we haven't exceeded max runs, resume
+            if ($hitMaxTurns && $this->runNumber < self::MAX_RUNS && $capturedSessionId) {
+                $this->subAgent->appendLog("[PAUSE] Max turns atteint, re-dispatch pour continuer (run #{$this->runNumber} -> #{$nextRun})...");
+                $nextRun = $this->runNumber + 1;
+
+                // Dispatch continuation
+                self::dispatch(
+                    $this->improvement,
+                    $this->subAgent,
+                    $this->agentSlug,
+                    $this->agentFile,
+                    $nextRun,
+                    $capturedSessionId,
+                )->delay(now()->addSeconds(5));
+
+                return;
+            }
+
+            if (!$success && !$hitMaxTurns) {
                 $this->subAgent->appendLog("[ERROR] Claude Code a echoue");
                 $this->markFailed('Claude Code a echoue');
                 return;
             }
 
-            // Check for changes
-            $statusResult = Process::path($this->workdir)->run('git status --porcelain');
-            $changes = trim($statusResult->output());
-
-            if (empty($changes)) {
-                $this->subAgent->appendLog("[DONE] Aucune modification necessaire");
-                $this->markCompleted();
-                return;
-            }
-
-            // Commit and push
-            $this->subAgent->appendLog("[GIT] Commit des modifications...");
-            $commitMsg = "feat(auto-improve): upgrade {$this->agentSlug} agent";
-
-            Process::path($this->workdir)->run('git add -A');
-            $commitResult = Process::path($this->workdir)->run(
-                sprintf('git commit -m %s', escapeshellarg($commitMsg))
-            );
-
-            if (!$commitResult->successful()) {
-                $this->subAgent->appendLog("[ERROR] Git commit failed: " . $commitResult->errorOutput());
-                $this->markFailed('Git commit failed: ' . $commitResult->errorOutput());
-                return;
-            }
-
-            $this->subAgent->appendLog("[GIT] Push...");
-            $pushResult = Process::path($this->workdir)->run('git push');
-
-            if (!$pushResult->successful()) {
-                $this->subAgent->appendLog("[WARN] Git push failed: " . $pushResult->errorOutput());
-            } else {
-                $this->subAgent->appendLog("[GIT] Push OK");
-            }
-
+            // Git commit & push
+            $this->commitAndPush();
             $this->markCompleted();
 
         } catch (\Exception $e) {
             Log::error("[AutoImproveAgent {$this->agentSlug}] Error: " . $e->getMessage());
             $this->markFailed($e->getMessage());
         }
+    }
+
+    private function prepareWorkdir(): void
+    {
+        $this->subAgent->appendLog("[GIT] Preparing workdir...");
+        $env = ['HOME' => '/tmp'];
+        Process::env($env)->run('git config --global --add safe.directory ' . $this->workdir);
+        Process::env($env)->path($this->workdir)->run('git fetch origin 2>&1');
+        Process::env($env)->path($this->workdir)->run('git reset --hard origin/main 2>&1');
+        Process::env($env)->path($this->workdir)->run('git clean -fd 2>&1');
+        $this->subAgent->appendLog("[GIT] Synced to origin/main");
+    }
+
+    private function buildClaudeCommand(bool $isResume): string
+    {
+        if ($isResume) {
+            // Resume previous session
+            return sprintf(
+                'claude --resume %s --model %s --max-turns %d --dangerously-skip-permissions --verbose --output-format stream-json 2>&1',
+                escapeshellarg($this->sessionId),
+                self::CLAUDE_MODEL,
+                self::MAX_TURNS_PER_RUN,
+            );
+        }
+
+        // New session with prompt
+        $prompt = $this->buildPrompt();
+        return sprintf(
+            'claude -p %s --model %s --max-turns %d --dangerously-skip-permissions --verbose --output-format stream-json 2>&1',
+            escapeshellarg($prompt),
+            self::CLAUDE_MODEL,
+            self::MAX_TURNS_PER_RUN,
+        );
     }
 
     private function buildPrompt(): string
@@ -120,67 +157,37 @@ class RunAutoImproveAgentJob implements ShouldQueue
         return <<<PROMPT
 Tu es un expert en amelioration d'agents IA pour le projet ZeniClaw (Laravel 12 + PHP 8.4).
 
-Ta mission: analyser et ameliorer le sub-agent "{$this->agentSlug}" situe dans {$this->agentFile}.
+Mission: analyser et ameliorer le sub-agent "{$this->agentSlug}" dans {$this->agentFile}.
 
-ETAPES A SUIVRE DANS L'ORDRE:
+STRATEGIE DE TRAVAIL:
+- Utilise l'outil Agent pour paralleliser les taches (analyse, recherche de patterns, etc.)
+- Pour les gros fichiers (>500 lignes), utilise Grep pour trouver les sections pertinentes AVANT de lire
+- Ne relis JAMAIS un fichier deja lu. Utilise offset+limit si necessaire.
+- Fais des Edit cibles, jamais de Write pour reecrire un fichier entier.
 
-## 1. ANALYSE
-- Lis le fichier source complet de l'agent
-- Identifie toutes ses capacites actuelles (methodes, fonctionnalites, commandes supportees)
-- Note les faiblesses, cas non geres, ameliorations possibles
+ETAPES:
 
-## 2. AMELIORATION DES CAPACITES EXISTANTES
-Pour chaque capacite identifiee:
-- Ameliore la gestion d'erreurs
-- Ameliore les prompts LLM (plus precis, meilleurs exemples)
-- Ameliore le formatage des reponses (plus clair, plus lisible pour WhatsApp)
-- Ajoute des cas limites non geres
-- Optimise les requetes DB si applicable
+1. ANALYSE — Utilise Grep pour identifier la structure (methodes, version, keywords). Lis uniquement les sections cles.
 
-## 3. CREATION DE NOUVELLES CAPACITES
-- Ajoute au minimum 1-2 nouvelles fonctionnalites pertinentes pour cet agent
-- Les nouvelles capacites doivent etre coherentes avec le role de l'agent
-- Mets a jour le system prompt et les keywords si necessaire
+2. AMELIORATIONS — Ameliore gestion d'erreurs, prompts LLM, formatage WhatsApp, cas limites. Ajoute 1-2 nouvelles fonctionnalites coherentes.
 
-## 4. TESTS
-- Lance `php artisan test` et corrige toute erreur
-- Si des tests existent pour cet agent, verifie qu'ils passent
-- Lance `php artisan route:list` pour verifier que les routes sont OK
-- Corrige tout probleme jusqu'a ce que tout soit stable
+3. TESTS — Lance `php artisan test` UNE SEULE FOIS. Les echecs pre-existants sont normaux, ignore-les. Verifie syntaxe avec `php -l`.
 
-## 5. RAPPORT DE TEST
-- Cree un fichier `test_{$this->agentSlug}_v<nouvelle_version>_{$date}.md` dans le meme dossier que l'agent (app/Services/Agents/)
-- Le rapport doit contenir:
-  - Resume des ameliorations apportees
-  - Liste COMPLETE de toutes les capacites (existantes + nouvelles), chacune avec:
-    - Description courte de la fonctionnalite
-    - 1-2 exemples de messages WhatsApp que l'utilisateur peut envoyer pour declencher cette fonctionnalite
-    - Exemple: "**Ajouter une tache** — `ajoute acheter du pain`, `nouvelle tache: finir le rapport`"
-  - Resultats des tests (pass/fail)
-  - Version precedente -> nouvelle version
+4. RAPPORT — Cree `app/Services/Agents/test_{$this->agentSlug}_v<version>_{$date}.md` avec: resume, liste capacites avec exemples WhatsApp, resultats tests.
 
-## 6. BUMP DE VERSION
-- Dans le fichier de l'agent, incremente la version mineure: si 1.X.0, passe a 1.(X+1).0
-- La methode version() doit retourner la nouvelle version
+5. VERSION — Incremente version mineure dans la methode version().
 
-REGLES IMPORTANTES:
-- Ne modifie PAS les fichiers de migration existants
-- Ne touche PAS au RouterAgent ni a l'AgentOrchestrator (sauf si absolument necessaire pour les keywords)
-- Garde la compatibilite avec l'interface AgentInterface et BaseAgent
-- Sois concis et efficace dans tes modifications
-- Assure-toi que le code est propre et sans erreur de syntaxe
-- Utilise les memes patterns que le code existant (AnthropicClient, sendText, etc.)
+REGLES:
+- Ne modifie PAS les migrations, RouterAgent, AgentOrchestrator
+- Garde compatibilite BaseAgent/AgentInterface
+- Patterns existants: AnthropicClient, sendText, etc.
+- Sois efficace, pas de boucles inutiles
 PROMPT;
     }
 
-    private function executeClaudeCode(string $prompt, string $apiKey, int &$apiCalls): bool
+    private function executeClaudeCode(string $cmd, string $apiKey, int &$apiCalls, ?string &$sessionId, bool &$hitMaxTurns): bool
     {
-        $claudeTimeout = max(($this->subAgent->timeout_minutes ?: 15) * 60 - 60, 120);
-
-        $cmd = sprintf(
-            'claude -p %s --model sonnet --dangerously-skip-permissions --verbose --output-format stream-json 2>&1',
-            escapeshellarg($prompt)
-        );
+        $claudeTimeout = max(min(($this->subAgent->timeout_minutes ?: 10) * 60 - 60, 500), 120);
 
         $envKey = str_starts_with($apiKey, 'sk-ant-oat')
             ? 'CLAUDE_CODE_OAUTH_TOKEN'
@@ -209,10 +216,11 @@ PROMPT;
                 throw new \RuntimeException('SubAgent arrete par l\'admin');
             }
 
-            $this->consumeOutput($process, $apiCalls);
+            $this->consumeOutput($process, $apiCalls, $sessionId, $hitMaxTurns);
             usleep(500_000);
         }
 
+        // Consume remaining output
         $result = $process->wait();
         $remaining = $result->output();
         if ($remaining) {
@@ -221,7 +229,7 @@ PROMPT;
                 if (!$line) continue;
                 $event = json_decode($line, true);
                 if ($event) {
-                    $this->processStreamEvent($event, $apiCalls);
+                    $this->processStreamEvent($event, $apiCalls, $sessionId, $hitMaxTurns);
                 } else {
                     $this->subAgent->appendLog($line);
                 }
@@ -231,7 +239,7 @@ PROMPT;
         return $result->successful();
     }
 
-    private function consumeOutput($process, int &$apiCalls): void
+    private function consumeOutput($process, int &$apiCalls, ?string &$sessionId, bool &$hitMaxTurns): void
     {
         $newOutput = $process->latestOutput();
         if ($newOutput) {
@@ -240,7 +248,7 @@ PROMPT;
                 if (!$line) continue;
                 $event = json_decode($line, true);
                 if ($event) {
-                    $this->processStreamEvent($event, $apiCalls);
+                    $this->processStreamEvent($event, $apiCalls, $sessionId, $hitMaxTurns);
                 } else {
                     $this->subAgent->appendLog($line);
                 }
@@ -257,14 +265,23 @@ PROMPT;
         }
     }
 
-    private function processStreamEvent(array $event, int &$apiCalls): void
+    private function processStreamEvent(array $event, int &$apiCalls, ?string &$sessionId, bool &$hitMaxTurns): void
     {
         $type = $event['type'] ?? '';
 
         switch ($type) {
             case 'system':
-                if (($event['subtype'] ?? '') === 'init') {
-                    $this->subAgent->appendLog("[ZENICLAW AI] Modele: " . ($event['model'] ?? 'unknown'));
+                $subtype = $event['subtype'] ?? '';
+                if ($subtype === 'init') {
+                    $this->subAgent->appendLog("[CLAUDE CODE] Modele: " . ($event['model'] ?? 'unknown'));
+                    // Capture session ID for resume
+                    if (!empty($event['session_id'])) {
+                        $sessionId = $event['session_id'];
+                        $this->subAgent->appendLog("[SESSION] ID: {$sessionId}");
+                    }
+                } elseif ($subtype === 'max_turns_reached') {
+                    $hitMaxTurns = true;
+                    $this->subAgent->appendLog("[MAX TURNS] Limite atteinte, pause...");
                 }
                 break;
 
@@ -285,6 +302,7 @@ PROMPT;
                             'Bash' => "Commande: " . mb_substr($input['command'] ?? '?', 0, 100),
                             'Glob' => "Recherche fichiers: " . ($input['pattern'] ?? '?'),
                             'Grep' => "Recherche code: " . ($input['pattern'] ?? '?'),
+                            'Agent' => "Sub-agent: " . mb_substr($input['prompt'] ?? $input['description'] ?? '?', 0, 100),
                             default => "Outil: {$tool}",
                         };
                         $this->subAgent->appendLog("[TOOL] {$desc}");
@@ -297,7 +315,90 @@ PROMPT;
                 if ($resultText) {
                     $this->subAgent->appendLog("[RESULT] " . mb_substr($resultText, 0, 500));
                 }
+                // Check for max_turns in result
+                if (str_contains($resultText, 'max_turns') || str_contains($resultText, 'Hit max turns')) {
+                    $hitMaxTurns = true;
+                }
                 break;
+        }
+    }
+
+    private function commitAndPush(): void
+    {
+        $statusResult = Process::path($this->workdir)->run('git status --porcelain');
+        $changes = trim($statusResult->output());
+
+        if (empty($changes)) {
+            $this->subAgent->appendLog("[GIT] Aucune modification");
+            return;
+        }
+
+        $this->subAgent->appendLog("[GIT] Commit des modifications...");
+        $commitMsg = "feat(auto-improve): upgrade {$this->agentSlug} agent";
+        $env = ['HOME' => '/tmp'];
+
+        Process::env($env)->path($this->workdir)->run('git add -A');
+        $commitResult = Process::env($env)->path($this->workdir)->run(
+            sprintf('git commit -m %s', escapeshellarg($commitMsg))
+        );
+
+        if (!$commitResult->successful()) {
+            $this->subAgent->appendLog("[ERROR] Git commit failed: " . $commitResult->errorOutput());
+            return;
+        }
+
+        // Pull rebase to integrate any remote changes before push
+        $this->subAgent->appendLog("[GIT] Pull rebase...");
+        $pullResult = Process::env($env)->path($this->workdir)->run('git pull --rebase origin main 2>&1');
+        if (!$pullResult->successful()) {
+            $this->subAgent->appendLog("[WARN] Git pull rebase failed: " . $pullResult->output());
+            // Abort rebase if stuck
+            Process::env($env)->path($this->workdir)->run('git rebase --abort 2>/dev/null');
+        }
+
+        $this->subAgent->appendLog("[GIT] Push...");
+        $pushResult = Process::env($env)->path($this->workdir)->run('git push origin main 2>&1');
+
+        if (!$pushResult->successful()) {
+            $this->subAgent->appendLog("[WARN] Git push failed: " . $pushResult->errorOutput());
+        } else {
+            $this->subAgent->appendLog("[GIT] Push OK");
+        }
+    }
+
+    private function cleanupOrphanedProcesses(): void
+    {
+        // Kill any running Claude processes in the workdir
+        $result = Process::run("pgrep -f 'claude.*zeniclaw-repo' 2>/dev/null");
+        $pids = array_filter(explode("\n", trim($result->output())));
+        if (!empty($pids)) {
+            $this->subAgent->appendLog("[CLEANUP] Killing " . count($pids) . " orphaned Claude process(es)");
+            foreach ($pids as $pid) {
+                Process::run("kill -TERM {$pid} 2>/dev/null");
+            }
+            sleep(2);
+            foreach ($pids as $pid) {
+                Process::run("kill -9 {$pid} 2>/dev/null");
+            }
+        }
+
+        // Mark stuck "running" subagents with dead PIDs as failed
+        $stuck = SubAgent::where('status', 'running')
+            ->where('id', '!=', $this->subAgent->id)
+            ->whereNotNull('pid')
+            ->get();
+
+        foreach ($stuck as $sa) {
+            $checkPid = Process::run("ps -p {$sa->pid} -o pid= 2>/dev/null");
+            if (empty(trim($checkPid->output()))) {
+                $sa->update([
+                    'status' => 'failed',
+                    'error_message' => 'Process orphelin nettoyé',
+                    'completed_at' => now(),
+                    'pid' => null,
+                ]);
+                $this->subAgent->appendLog("[CLEANUP] SubAgent {$sa->id} marqué failed (process mort)");
+            }
         }
     }
 
@@ -309,7 +410,7 @@ PROMPT;
             'pid' => null,
         ]);
         $this->improvement->update(['status' => 'completed']);
-        $this->subAgent->appendLog("[DONE] Auto-improve agent {$this->agentSlug} termine");
+        $this->subAgent->appendLog("[DONE] Auto-improve agent {$this->agentSlug} termine (run #{$this->runNumber})");
 
         $this->dispatchNext();
     }

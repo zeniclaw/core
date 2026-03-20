@@ -1273,6 +1273,7 @@ PROMPT;
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
+        $context->session->update(['active_project_id' => $project->id]);
         $conversation = $this->getRecentConversation($context);
         $reply = $this->runApiAgent($project, $context->body, $conversation, $context);
         $this->sendText($context->from, $reply);
@@ -1287,6 +1288,7 @@ PROMPT;
             $this->sendText($context->from, $reply);
             return AgentResult::reply($reply);
         }
+        $context->session->update(['active_project_id' => $project->id]);
         $conversation = $this->getRecentConversation($context);
         $reply = $this->runApiAgent($project, $context->body, $conversation, $context);
         $this->sendText($context->from, $reply);
@@ -1299,6 +1301,7 @@ PROMPT;
         // redirect to api_query instead of creating a code-change sub-agent
         $project = $this->findProjectForUser($context);
         if ($project) {
+            $context->session->update(['active_project_id' => $project->id]);
             $settings = $project->settings ?? [];
             $hasApiCreds = !empty($settings['api_key']) || !empty($settings['base_url']) || !empty($settings['api_endpoint']);
             if ($hasApiCreds) {

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Models\AgentLog;
+use App\Services\AgentManager;
 use App\Models\AgentSession;
 use App\Models\AuditLog;
 use App\Services\AgentContext;
@@ -152,12 +153,7 @@ class ChannelController extends Controller
             }
 
             // Log incoming message (use json() for raw JSON POST bodies)
-            AgentLog::create([
-                'agent_id' => $agent->id,
-                'level' => 'info',
-                'message' => 'WhatsApp message received',
-                'context' => ['payload' => $payload],
-            ]);
+            AgentManager::log($agent->id, 'channel', 'WhatsApp message received', ['payload' => $payload]);
 
             // Skip: sent by us, system messages, status broadcasts, or no content at all
             if ($fromMe || !$from || $from === 'status@broadcast' || (!$body && !$hasMedia)) {
@@ -169,12 +165,7 @@ class ChannelController extends Controller
                 $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $from);
                 $existing = AgentSession::where('session_key', $sessionKey)->first();
                 if (!$existing || !$existing->whitelisted) {
-                    AgentLog::create([
-                        'agent_id' => $agent->id,
-                        'level' => 'warn',
-                        'message' => 'Blocked by whitelist',
-                        'context' => ['from' => $from, 'body' => $body],
-                    ]);
+                    AgentManager::log($agent->id, 'channel', 'Blocked by whitelist', ['from' => $from, 'body' => $body], 'warn');
                     return response()->json(['ok' => true, 'blocked' => 'whitelist']);
                 }
             }
