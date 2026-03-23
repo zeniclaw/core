@@ -8,6 +8,7 @@
         'orange' => ['bg' => 'bg-orange-50', 'border' => 'border-orange-200', 'icon_bg' => 'bg-orange-100', 'text' => 'text-orange-700', 'badge' => 'bg-orange-100 text-orange-600', 'stat' => 'text-orange-600'],
         'green'  => ['bg' => 'bg-green-50',  'border' => 'border-green-200', 'icon_bg' => 'bg-green-100', 'text' => 'text-green-700', 'badge' => 'bg-green-100 text-green-600', 'stat' => 'text-green-600'],
         'red'    => ['bg' => 'bg-red-50',    'border' => 'border-red-200', 'icon_bg' => 'bg-red-100', 'text' => 'text-red-700', 'badge' => 'bg-red-100 text-red-600', 'stat' => 'text-red-600'],
+        'amber'  => ['bg' => 'bg-amber-50',  'border' => 'border-amber-200', 'icon_bg' => 'bg-amber-100', 'text' => 'text-amber-700', 'badge' => 'bg-amber-100 text-amber-600', 'stat' => 'text-amber-600'],
     ];
     $colors = $colorMap[$meta['color']];
     $complexityColors = [
