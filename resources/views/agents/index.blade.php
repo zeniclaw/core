@@ -168,6 +168,9 @@
                                 <span class="w-8 h-8 rounded-lg {{ $colors['bg'] }} flex items-center justify-center text-lg flex-shrink-0">{{ $meta['icon'] }}</span>
                                 <div class="min-w-0">
                                     <span class="font-semibold text-sm text-gray-900 group-hover:text-indigo-600 transition-colors">{{ $meta['label'] }}</span>
+                                    @if(!empty($meta['is_private']))
+                                    <span class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-100 text-amber-700">PRIVE</span>
+                                    @endif
                                 </div>
                             </a>
                         </div>

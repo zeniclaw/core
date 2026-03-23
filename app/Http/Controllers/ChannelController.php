@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Models\AgentLog;
-use App\Services\AgentManager;
 use App\Models\AgentSession;
 use App\Models\AuditLog;
 use App\Services\AgentContext;
+use App\Services\AgentManager;
 use App\Services\AgentOrchestrator;
 use App\Services\RateLimiter;
 use Illuminate\Http\JsonResponse;
@@ -144,8 +144,29 @@ class ChannelController extends Controller
             $fromMe = $payload['fromMe'] ?? false;
             $hasMedia = $payload['hasMedia'] ?? false;
             $media = $payload['media'] ?? null;
-            $mediaUrl = $media['url'] ?? null;
-            $mimetype = $media['mimetype'] ?? null;
+            $mediaUrl = $media['url'] ?? $payload['mediaUrl'] ?? null;
+            $mimetype = $media['mimetype'] ?? $payload['mimetype'] ?? null;
+
+            // If hasMedia but no mediaUrl, fetch it from WAHA by message ID
+            if ($hasMedia && !$mediaUrl && !empty($payload['id'])) {
+                try {
+                    $wahaBase = 'http://waha:3000';
+                    $msgId = $payload['id'];
+                    $chatId = $payload['from'] ?? '';
+                    $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
+                        ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                        ->get("$wahaBase/api/media", ['messageId' => $msgId, 'chatId' => $chatId, 'session' => 'default']);
+                    if ($dlResponse->successful()) {
+                        $mediaData = $dlResponse->json();
+                        $mediaUrl = $mediaData['url'] ?? $mediaData['mediaUrl'] ?? null;
+                        if ($mediaUrl) {
+                            $mediaUrl = str_replace('http://localhost:3000', $wahaBase, $mediaUrl);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('WAHA media fetch failed: ' . $e->getMessage());
+                }
+            }
 
             // WAHA returns localhost URLs — rewrite to internal Docker hostname
             if ($mediaUrl) {
@@ -153,7 +174,7 @@ class ChannelController extends Controller
             }
 
             // Log incoming message (use json() for raw JSON POST bodies)
-            AgentManager::log($agent->id, 'channel', 'WhatsApp message received', ['payload' => $payload]);
+            AgentManager::log($agent->id, 'webhook', 'WhatsApp message received', ['payload' => $payload]);
 
             // Skip: sent by us, system messages, status broadcasts, or no content at all
             if ($fromMe || !$from || $from === 'status@broadcast' || (!$body && !$hasMedia)) {
@@ -165,7 +186,7 @@ class ChannelController extends Controller
                 $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $from);
                 $existing = AgentSession::where('session_key', $sessionKey)->first();
                 if (!$existing || !$existing->whitelisted) {
-                    AgentManager::log($agent->id, 'channel', 'Blocked by whitelist', ['from' => $from, 'body' => $body], 'warn');
+                    AgentManager::log($agent->id, 'webhook', 'Blocked by whitelist', ['from' => $from, 'body' => $body], 'warn');
                     return response()->json(['ok' => true, 'blocked' => 'whitelist']);
                 }
             }

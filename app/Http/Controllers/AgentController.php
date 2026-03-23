@@ -201,8 +201,8 @@ class AgentController extends Controller
             'icon' => '⚙️',
             'color' => 'indigo',
             'version' => '1.0.0',
-            'updated_at' => '2026-03-09',
-            'description' => 'Chainer et automatiser des workflows multi-agents',
+            'updated_at' => '2026-03-20',
+            'description' => 'Workflows multi-agents avec 7 templates, edition d\'etapes, dry-run, variables dynamiques, historique et import/export',
         ],
         'interactive_quiz' => [
             'label' => 'Quiz Interactif',
@@ -283,6 +283,15 @@ class AgentController extends Controller
             'version' => '1.0.0',
             'updated_at' => '2026-03-09',
             'description' => 'Coaching personnalise & suggestions intelligentes',
+        ],
+        'zenibiz_docs' => [
+            'label' => 'ZENIBIZ DOCS',
+            'icon' => '📚',
+            'color' => 'amber',
+            'version' => '1.0.0',
+            'updated_at' => '2026-03-23',
+            'description' => 'Agent prive: gestion documentaire ZENIBIZ via API REST',
+            'is_private' => true,
         ],
     ];
 
@@ -487,6 +496,41 @@ class AgentController extends Controller
         $agent->update(['sub_agent_models' => $filtered ?: null]);
 
         return back()->with('success', 'Modeles des sub-agents mis a jour.');
+    }
+
+    public function updatePrivateAgentAccess(Request $request, Agent $agent)
+    {
+        $this->authorize('update', $agent);
+
+        $privateAgents = $request->input('private_sub_agents', []);
+
+        // Build the map: agent_name => [peer_id, ...]
+        $filtered = [];
+        foreach ($privateAgents as $agentKey => $peers) {
+            if (!is_string($peers)) continue;
+            $peerList = array_filter(array_map('trim', explode(',', $peers)));
+            if (!empty($peerList)) {
+                $filtered[$agentKey] = array_values($peerList);
+            }
+        }
+
+        $agent->update(['private_sub_agents' => $filtered ?: null]);
+
+        return back()->with('success', 'Acces aux agents prives mis a jour.');
+    }
+
+    /**
+     * Get list of private sub-agents from discovered agents.
+     */
+    public static function getPrivateSubAgents(): array
+    {
+        $private = [];
+        foreach (self::SUB_AGENTS as $key => $meta) {
+            if (!empty($meta['is_private'])) {
+                $private[$key] = $meta;
+            }
+        }
+        return $private;
     }
 
     public function destroy(Request $request, Agent $agent)
@@ -804,3 +848,5 @@ class AgentController extends Controller
         return response()->json(['success' => true, 'skill' => $skill]);
     }
 }
+
+

@@ -50,7 +50,7 @@
     {{-- Tabs --}}
     <div x-data="{ tab: 'logs' }">
         <div class="flex gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-4">
-            @foreach(['logs'=>'📋 Logs', 'reminders'=>'⏰ Reminders', 'memory'=>'🧠 Mémoire', 'sessions'=>'💬 Sessions', 'orchestrator'=>'🧠 Orchestrator'] as $t => $l)
+            @foreach(['logs'=>'📋 Logs', 'reminders'=>'⏰ Reminders', 'memory'=>'🧠 Mémoire', 'sessions'=>'💬 Sessions', 'orchestrator'=>'🧠 Orchestrator', 'private'=>'🔒 Agents Privés'] as $t => $l)
             <button @click="tab = '{{ $t }}'"
                     :class="tab === '{{ $t }}' ? 'bg-indigo-600 text-white shadow' : 'text-gray-500 hover:text-gray-800'"
                     class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all">{{ $l }}</button>
@@ -303,6 +303,89 @@
             </div>
         </div>
 
+
+        {{-- PRIVATE AGENTS tab --}}
+        <div x-show="tab === 'private'">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+                <div class="px-5 py-4 border-b border-gray-100">
+                    <h3 class="font-semibold text-gray-800">🔒 Agents Prives — Acces par session</h3>
+                    <p class="text-xs text-gray-500 mt-1">Configurez quels contacts/sessions peuvent utiliser chaque agent prive. Entrez les peer IDs separes par des virgules.</p>
+                </div>
+
+                @php
+                    $privateAgents = collect(\App\Http\Controllers\AgentController::getPrivateSubAgents());
+                    $currentAccess = $agent->private_sub_agents ?? [];
+                    $allSessions = $agent->sessions()->orderByDesc('last_message_at')->get();
+                @endphp
+
+                @if($privateAgents->isEmpty())
+                    <p class="px-5 py-8 text-sm text-gray-400 text-center">Aucun agent prive disponible.</p>
+                @else
+                <form method="POST" action="{{ route('agents.private-agent-access', $agent) }}">
+                    @csrf
+                    <div class="divide-y divide-gray-50">
+                        @foreach($privateAgents as $key => $meta)
+                        @php
+                            $allowedPeers = $currentAccess[$key] ?? [];
+                        @endphp
+                        <div class="px-5 py-4">
+                            <div class="flex items-center gap-3 mb-3">
+                                <span class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center text-lg">{{ $meta['icon'] }}</span>
+                                <div>
+                                    <span class="font-semibold text-sm text-gray-900">{{ $meta['label'] }}</span>
+                                    <span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-100 text-amber-600">v{{ $meta['version'] }}</span>
+                                    <span class="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700">PRIVE</span>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-3">{{ $meta['description'] }}</p>
+
+                            <div class="space-y-2">
+                                <label class="block text-xs font-medium text-gray-600">Sessions autorisees (peer IDs)</label>
+                                <textarea name="private_sub_agents[{{ $key }}]" rows="2"
+                                    class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                                    placeholder="254936424145066@lid, web-1, ...">{{ implode(', ', $allowedPeers) }}</textarea>
+
+                                {{-- Quick-add buttons from existing sessions --}}
+                                @if($allSessions->isNotEmpty())
+                                <div class="flex flex-wrap gap-1 mt-1">
+                                    <span class="text-[10px] text-gray-400 mr-1 self-center">Ajouter :</span>
+                                    @foreach($allSessions->take(10) as $sess)
+                                    <button type="button"
+                                        class="px-2 py-0.5 text-[10px] rounded border border-gray-200 hover:bg-amber-50 hover:border-amber-300 text-gray-600 transition-colors"
+                                        onclick="addPeer(this, '{{ $key }}', '{{ $sess->peer_id }}')"
+                                        title="{{ $sess->channel }} — {{ $sess->peer_id }}">
+                                        {{ $sess->channel === 'whatsapp' ? '📱' : ($sess->channel === 'web' ? '🌐' : '💬') }}
+                                        {{ Str::limit($sess->peer_id, 20) }}
+                                    </button>
+                                    @endforeach
+                                </div>
+                                @endif
+                            </div>
+                        </div>
+                        @endforeach
+                    </div>
+
+                    <div class="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+                        <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition-colors">
+                            Sauvegarder les acces
+                        </button>
+                    </div>
+                </form>
+                @endif
+            </div>
+        </div>
+
+        <script>
+        function addPeer(btn, agentKey, peerId) {
+            const textarea = document.querySelector(`textarea[name="private_sub_agents[${agentKey}]"]`);
+            const current = textarea.value.split(',').map(s => s.trim()).filter(Boolean);
+            if (!current.includes(peerId)) {
+                current.push(peerId);
+                textarea.value = current.join(', ');
+            }
+            btn.classList.add('bg-amber-100', 'border-amber-400');
+        }
+        </script>
     </div>
 </div>
 @endsection

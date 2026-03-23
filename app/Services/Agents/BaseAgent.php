@@ -44,6 +44,11 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
         return [];
     }
 
+    public function isPrivate(): bool
+    {
+        return false;
+    }
+
     public function version(): string
     {
         return '1.0.0';

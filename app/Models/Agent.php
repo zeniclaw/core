@@ -11,11 +11,12 @@ class Agent extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status', 'whitelist_enabled', 'sub_agent_models'];
+    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status', 'whitelist_enabled', 'sub_agent_models', 'private_sub_agents'];
 
     protected $casts = [
         'whitelist_enabled' => 'boolean',
         'sub_agent_models' => 'array',
+        'private_sub_agents' => 'array',
     ];
 
     /**

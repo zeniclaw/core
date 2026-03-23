@@ -227,6 +227,19 @@ class AgentOrchestrator
             $routing = $this->router->route($context);
             \App\Events\AfterRouting::dispatch($context, $routing);
 
+            // 2b. Check private agent access — redirect to chat if unauthorized
+            $routedAgentName = $routing['agent'];
+            $routedAgentInstance = $this->agents[$routedAgentName] ?? null;
+            if ($routedAgentInstance && $routedAgentInstance->isPrivate()) {
+                $privateAccess = $context->agent->private_sub_agents ?? [];
+                $allowedPeers = $privateAccess[$routedAgentName] ?? [];
+                if (!in_array($context->from, $allowedPeers)) {
+                    Log::info("Private agent '{$routedAgentName}' blocked for peer {$context->from}");
+                    $routing['agent'] = 'chat';
+                    $routing['reasoning'] = "Private agent not authorized for this session";
+                }
+            }
+
             // Log routing decision
             AgentManager::log($context->agent->id, 'orchestrator', 'Router decision', [
                 'from'    => $context->from,
@@ -334,6 +347,19 @@ class AgentOrchestrator
             // Only redirect when the message itself mentions the project (not just session).
             if ($dispatchAgent === 'document' && $this->messageReferencesApiProject($context->body ?? '')) {
                 $dispatchAgent = 'dev';
+            }
+
+            // If image received and peer has access to zenibiz_docs, redirect there
+            // (for photo-to-PDF document flow)
+            if ($context->hasMedia && $dispatchAgent === 'screenshot') {
+                $mime = $context->mimetype ?? ($context->media['mimetype'] ?? '');
+                if (str_starts_with($mime, 'image/') && isset($this->agents['zenibiz_docs'])) {
+                    $privateAccess = $context->agent->private_sub_agents ?? [];
+                    $allowedPeers = $privateAccess['zenibiz_docs'] ?? [];
+                    if (in_array($context->from, $allowedPeers)) {
+                        $dispatchAgent = 'zenibiz_docs';
+                    }
+                }
             }
 
             // Inject conversation memory context into the routed context
@@ -503,7 +529,11 @@ class AgentOrchestrator
 
     private function handlePendingStates(AgentContext $context, bool $debug = false, array &$debugTraces = []): ?AgentResult
     {
-        if (!$context->body) return null;
+        // Allow media-only messages through if there is a pending photo collection
+        $pendingCheck = $context->session->pending_agent_context;
+        if (!$context->body && !($context->hasMedia && $pendingCheck && str_contains($pendingCheck['type'] ?? '', 'photo'))) {
+            return null;
+        }
 
         // Generic pending agent context (list selection, multi-step flows, etc.)
         $pendingCtx = $context->session->pending_agent_context;
@@ -836,3 +866,4 @@ class AgentOrchestrator
         return (bool) collect($settings)->keys()->first(fn($k) => str_contains($k, 'token') || str_contains($k, 'api_key'));
     }
 }
+

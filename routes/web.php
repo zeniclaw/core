@@ -92,6 +92,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('agents.sub-agent')
         ->where('subAgent', 'chat|dev|reminder|project|analysis|todo|music|mood_check|smart_context|finance|smart_meeting|hangman|flashcard|voice_command|code_review|screenshot|content_summarizer|event_reminder|habit|pomodoro|web_search|document|user_preferences|conversation_memory|streamline|interactive_quiz|content_curator|context_memory_bridge|game_master|budget_tracker|daily_brief|collaborative_task|recipe|time_blocker|assistant');
     Route::post('/agents/{agent}/sub-agent-models', [AgentController::class, 'updateSubAgentModels'])->name('agents.sub-agent-models');
+    Route::post('/agents/{agent}/private-agent-access', [AgentController::class, 'updatePrivateAgentAccess'])->name('agents.private-agent-access');
 
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');

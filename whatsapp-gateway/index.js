@@ -123,6 +123,38 @@ async function connectWhatsApp() {
           msg.message?.documentMessage?.caption ||
           "";
 
+        // Download media if present
+        let mediaUrl = null;
+        const hasMedia = !!(
+          msg.message?.imageMessage ||
+          msg.message?.audioMessage ||
+          msg.message?.videoMessage ||
+          msg.message?.documentMessage ||
+          msg.message?.stickerMessage
+        );
+        if (hasMedia && sock) {
+          try {
+            const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
+            const buffer = await downloadMediaMessage(msg, "buffer", {});
+            if (buffer && buffer.length > 0) {
+              const mediaId = msg.key?.id || Date.now().toString();
+              const mediaDir = "/data/media";
+              fs.mkdirSync(mediaDir, { recursive: true });
+              const ext = msg.message?.imageMessage ? "jpg"
+                : msg.message?.audioMessage ? "ogg"
+                : msg.message?.videoMessage ? "mp4"
+                : msg.message?.documentMessage ? "bin"
+                : "bin";
+              const mediaFile = `${mediaDir}/${mediaId}.${ext}`;
+              fs.writeFileSync(mediaFile, buffer);
+              mediaUrl = `http://waha:${PORT}/media/${mediaId}.${ext}`;
+              logger.info({ mediaId, size: buffer.length }, "Media downloaded");
+            }
+          } catch (err) {
+            logger.warn({ error: err.message }, "Media download failed");
+          }
+        }
+
         // Build WAHA-compatible webhook payload
         const payload = {
           event: "message",
@@ -135,15 +167,8 @@ async function connectWhatsApp() {
             fromMe: false,
             to: meInfo?.id,
             body: text,
-            hasMedia: !!(
-              msg.message?.imageMessage ||
-              msg.message?.audioMessage ||
-              msg.message?.videoMessage ||
-              msg.message?.documentMessage ||
-              msg.message?.stickerMessage
-            ),
-            // Media URL placeholder (media download requires separate handling)
-            mediaUrl: null,
+            hasMedia,
+            mediaUrl,
             // Audio detection
             mimetype: msg.message?.audioMessage
               ? "audio/ogg"
@@ -372,6 +397,16 @@ app.get("/", async (req, res) => {
 });
 
 // Health check
+// Serve downloaded media files
+app.get("/media/:filename", (req, res) => {
+  const filePath = `/data/media/${req.params.filename}`;
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Not found" });
+  const ext = req.params.filename.split(".").pop();
+  const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", ogg: "audio/ogg", mp4: "video/mp4", bin: "application/octet-stream" };
+  res.setHeader("Content-Type", mimeMap[ext] || "application/octet-stream");
+  res.send(fs.readFileSync(filePath));
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", session: sessionStatus });
 });
