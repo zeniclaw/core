@@ -538,6 +538,55 @@ class AgentController extends Controller
         return $private;
     }
 
+    /**
+     * Get required secrets for all private agents by instantiating them.
+     */
+    public static function getPrivateAgentSecrets(): array
+    {
+        $secrets = [];
+        $agentDir = app_path("Services/Agents");
+        foreach (glob("{$agentDir}/*Agent.php") as $file) {
+            $class = "App\\Services\\Agents\\" . basename($file, ".php");
+            if (!class_exists($class)) continue;
+            try {
+                $instance = new $class();
+                if ($instance instanceof \App\Services\Agents\BaseAgent && $instance->isPrivate()) {
+                    $required = $instance->requiredSecrets();
+                    if (!empty($required)) {
+                        $secrets[$instance->name()] = $required;
+                    }
+                }
+            } catch (\Throwable $e) { continue; }
+        }
+        return $secrets;
+    }
+
+    /**
+     * Save secrets for private agents.
+     */
+    public function updatePrivateAgentSecrets(Request $request, Agent $agent)
+    {
+        $this->authorize("update", $agent);
+
+        $secretsInput = $request->input("agent_secrets", []);
+
+        foreach ($secretsInput as $keyName => $value) {
+            if (empty(trim($value))) continue;
+
+            $existing = $agent->secrets()->where("key_name", $keyName)->first();
+            if ($existing) {
+                $existing->update(["encrypted_value" => encrypt($value)]);
+            } else {
+                $agent->secrets()->create([
+                    "key_name" => $keyName,
+                    "encrypted_value" => encrypt($value),
+                ]);
+            }
+        }
+
+        return back()->with("success", "Secrets des agents prives mis a jour.");
+    }
+
     public function destroy(Request $request, Agent $agent)
     {
         $this->authorize('delete', $agent);

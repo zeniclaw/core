@@ -373,6 +373,63 @@
                 </form>
                 @endif
             </div>
+            {{-- Private agent secrets --}}
+            @php
+                $requiredSecrets = \App\Http\Controllers\AgentController::getPrivateAgentSecrets();
+                $existingSecrets = $agent->secrets()->pluck('key_name')->toArray();
+            @endphp
+
+            @if(!empty($requiredSecrets))
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 mt-4">
+                <div class="px-5 py-4 border-b border-gray-100">
+                    <h3 class="font-semibold text-gray-800">🔑 Secrets — Configuration des agents prives</h3>
+                    <p class="text-xs text-gray-500 mt-1">Configurez les cles API et secrets requis par chaque agent prive.</p>
+                </div>
+
+                <form method="POST" action="{{ route('agents.private-agent-secrets', $agent) }}">
+                    @csrf
+                    <div class="divide-y divide-gray-50">
+                        @foreach($requiredSecrets as $agentKey => $secrets)
+                        @php
+                            $agentMeta = $privateAgents[$agentKey] ?? null;
+                        @endphp
+                        @if($agentMeta)
+                        <div class="px-5 py-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">{{ $agentMeta['icon'] }}</span>
+                                <span class="font-semibold text-sm text-gray-900">{{ $agentMeta['label'] }}</span>
+                            </div>
+
+                            @foreach($secrets as $secret)
+                            <div class="mb-3">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <label class="block text-xs font-medium text-gray-600">{{ $secret['label'] }}</label>
+                                    @if(in_array($secret['key'], $existingSecrets))
+                                        <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-green-100 text-green-700">configure</span>
+                                    @else
+                                        <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-red-100 text-red-700">manquant</span>
+                                    @endif
+                                </div>
+                                <p class="text-[11px] text-gray-400 mb-1">{{ $secret['description'] }}</p>
+                                <input type="password" name="agent_secrets[{{ $secret['key'] }}]"
+                                    class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                                    placeholder="{{ in_array($secret['key'], $existingSecrets) ? '••••••••  (laisser vide pour ne pas changer)' : 'Entrer la valeur...' }}">
+                            </div>
+                            @endforeach
+                        </div>
+                        @endif
+                        @endforeach
+                    </div>
+
+                    <div class="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+                        <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition-colors">
+                            Sauvegarder les secrets
+                        </button>
+                    </div>
+                </form>
+            </div>
+            @endif
+
         </div>
 
         <script>

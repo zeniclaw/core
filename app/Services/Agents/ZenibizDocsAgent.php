@@ -45,6 +45,17 @@ class ZenibizDocsAgent extends BaseAgent
         return '2.0.0';
     }
 
+    public function requiredSecrets(): array
+    {
+        return [
+            [
+                "key" => "ZENIBIZ_DOCS_API_KEY",
+                "label" => "Cle API Zenibiz Docs",
+                "description" => "Token d'authentification pour l'API REST docs-main",
+            ],
+        ];
+    }
+
     public function isPrivate(): bool
     {
         return true;

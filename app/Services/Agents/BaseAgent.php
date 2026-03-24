@@ -44,6 +44,15 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
         return [];
     }
 
+    /**
+     * Secrets required by this agent. Override in private agents.
+     * Return: [["key" => "SECRET_KEY", "label" => "Display Name", "description" => "Help text"], ...]
+     */
+    public function requiredSecrets(): array
+    {
+        return [];
+    }
+
     public function isPrivate(): bool
     {
         return false;
@@ -128,7 +137,7 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
             'agent_id' => $context->agent->id,
             'level' => $level,
             'message' => "[{$this->name()}] {$message}",
-            'context' => array_merge(['from' => $context->from, 'agent' => $this->name()], $extra),
+            'context' => array_merge(['from' => $context->from], $extra),
         ]);
     }
 
