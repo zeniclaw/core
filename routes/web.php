@@ -43,6 +43,10 @@ Route::get('/robots.txt', function () {
 });
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
 
+// Private agent approval (public, token-secured)
+Route::get('/approve/private/{token}', [AgentController::class, 'showPrivateApproval'])->name('approve.private.show');
+Route::post('/approve/private/{token}', [AgentController::class, 'processPrivateApproval'])->name('approve.private.process');
+
 // Model mirror (public — for offline/proxy installs)
 Route::get('/models', [ModelMirrorController::class, 'index'])->name('models.index');
 Route::get('/models/api', [ModelMirrorController::class, 'apiList'])->name('models.api');

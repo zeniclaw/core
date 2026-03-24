@@ -7,6 +7,7 @@ use App\Models\AgentLog;
 use App\Models\UserBriefPreference;
 use App\Models\UserAgentAnalytic;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 
 class AgentController extends Controller
@@ -435,10 +436,14 @@ class AgentController extends Controller
             ->take(50)
             ->get();
 
+        $isPrivate = !empty($meta['is_private']);
+        $allowedPeers = ($agent->private_sub_agents ?? [])[$subAgent] ?? [];
+        $allSessions = $agent->sessions()->orderByDesc('last_message_at')->get();
+
         return view('agents.sub-agent', compact(
             'agent', 'subAgent', 'meta',
             'totalRouted', 'routingHistory', 'modelStats', 'complexityStats',
-            'agentLogs'
+            'agentLogs', 'isPrivate', 'allowedPeers', 'allSessions'
         ));
     }
 
@@ -846,6 +851,73 @@ class AgentController extends Controller
         );
 
         return response()->json(['success' => true, 'skill' => $skill]);
+    }
+
+    /**
+     * Show the private agent approval page (public, token-secured).
+     */
+    public function showPrivateApproval(string $token)
+    {
+        $data = Cache::get("private_approval:{$token}");
+
+        if (!$data) {
+            return response()->view("agents.approve-private", [
+                "expired" => true,
+            ], 404);
+        }
+
+        return view("agents.approve-private", [
+            "expired" => false,
+            "approved" => false,
+            "token" => $token,
+            "data" => $data,
+        ]);
+    }
+
+    /**
+     * Process the private agent approval (public, token-secured).
+     */
+    public function processPrivateApproval(Request $request, string $token)
+    {
+        $data = Cache::pull("private_approval:{$token}");
+
+        if (!$data) {
+            return response()->view("agents.approve-private", [
+                "expired" => true,
+            ], 404);
+        }
+
+        $agent = Agent::find($data["agent_id"]);
+        if (!$agent) {
+            return response()->view("agents.approve-private", [
+                "expired" => true,
+            ], 404);
+        }
+
+        $privateAccess = $agent->private_sub_agents ?? [];
+        $peers = $privateAccess[$data["agent_key"]] ?? [];
+        if (!in_array($data["peer_id"], $peers)) {
+            $peers[] = $data["peer_id"];
+            $privateAccess[$data["agent_key"]] = $peers;
+            $agent->update(["private_sub_agents" => $privateAccess]);
+        }
+
+        AgentLog::create([
+            "agent_id" => $agent->id,
+            "level" => "info",
+            "message" => "Private agent access approved",
+            "context" => [
+                "agent_key" => $data["agent_key"],
+                "peer_id" => $data["peer_id"],
+                "peer_name" => $data["peer_name"],
+            ],
+        ]);
+
+        return view("agents.approve-private", [
+            "expired" => false,
+            "approved" => true,
+            "data" => $data,
+        ]);
     }
 }
 

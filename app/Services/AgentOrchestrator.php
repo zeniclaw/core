@@ -14,7 +14,10 @@ use App\Models\CollaborativeVote;
 use App\Models\UserAgentAnalytic;
 use App\Jobs\AnalyzeSelfImprovementJob;
 use App\Services\ModelResolver;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use App\Http\Controllers\AgentController;
 
 /**
  * AgentOrchestrator v3 — Dynamic agent discovery
@@ -205,6 +208,12 @@ class AgentOrchestrator
                 return $debugToggle;
             }
 
+            // 0b. Check for private agent commands
+            $privateCmd = $this->handlePrivateCommand($context);
+            if ($privateCmd) {
+                return $privateCmd;
+            }
+
             $debug = $context->session->debug_mode ?? false;
             $debugTraces = [];
 
@@ -353,6 +362,7 @@ class AgentOrchestrator
             // (for photo-to-PDF document flow)
             if ($context->hasMedia && $dispatchAgent === 'screenshot') {
                 $mime = $context->mimetype ?? ($context->media['mimetype'] ?? '');
+                AgentLog::create(['agent_id' => $context->agent->id, 'level' => 'info', 'message' => 'ZENIBIZ_REDIRECT_CHECK', 'context' => ['mime' => $mime, 'hasMedia' => $context->hasMedia, 'dispatch' => $dispatchAgent, 'from' => $context->from, 'has_zenibiz' => isset($this->agents['zenibiz_docs']), 'private' => $context->agent->private_sub_agents]]);
                 if (str_starts_with($mime, 'image/') && isset($this->agents['zenibiz_docs'])) {
                     $privateAccess = $context->agent->private_sub_agents ?? [];
                     $allowedPeers = $privateAccess['zenibiz_docs'] ?? [];
@@ -471,6 +481,115 @@ class AgentOrchestrator
     /**
      * Detect debug mode toggle commands and update session accordingly.
      */
+    /**
+     * Handle /private command — list available private agents.
+     */
+    private function handlePrivateCommand(AgentContext $context): ?AgentResult
+    {
+        if (!$context->body) return null;
+
+        $clean = mb_strtolower(trim($context->body));
+
+        $patterns = ['/private', 'private bot', 'bot prive', 'bots prives', 'agents prives', 'agent prive'];
+        $match = false;
+        foreach ($patterns as $pattern) {
+            if ($clean === $pattern || str_contains($clean, $pattern)) {
+                $match = true;
+                break;
+            }
+        }
+        if (!$match) return null;
+
+        $privateAgents = AgentController::getPrivateSubAgents();
+        if (empty($privateAgents)) {
+            return AgentResult::reply("Aucun agent prive disponible.");
+        }
+
+        // Check which ones the peer already has access to
+        $currentAccess = $context->agent->private_sub_agents ?? [];
+        $lines = [];
+        $available = [];
+        $i = 1;
+        foreach ($privateAgents as $key => $meta) {
+            $allowedPeers = $currentAccess[$key] ?? [];
+            $hasAccess = in_array($context->from, $allowedPeers);
+            $status = $hasAccess ? ' _(actif)_' : '';
+            $lines[] = "{$i}. {$meta['icon']} *{$meta['label']}*{$status}
+   _{$meta['description']}_";
+            $available[] = ['key' => $key, 'meta' => $meta, 'has_access' => $hasAccess];
+            $i++;
+        }
+
+        $list = implode("\n\n", $lines);
+        $reply = "🔒 *Agents prives disponibles*\n\n{$list}\n\n_Reponds avec le numero pour demander l'acces._";
+
+        $context->session->update([
+            'pending_agent_context' => [
+                'agent' => '_system',
+                'type' => 'private_select',
+                'agents' => $available,
+                'expires_at' => now()->addMinutes(5)->toISOString(),
+            ],
+        ]);
+
+        return AgentResult::reply($reply);
+    }
+
+    /**
+     * Handle the numeric selection after /private listing.
+     */
+    private function handlePrivateSelect(AgentContext $context, array $pendingCtx): ?AgentResult
+    {
+        $context->session->update(['pending_agent_context' => null]);
+
+        $input = trim($context->body);
+        $agents = $pendingCtx['agents'] ?? [];
+
+        // Parse numeric choice
+        if (!ctype_digit($input) || (int) $input < 1 || (int) $input > count($agents)) {
+            return AgentResult::reply("Choix invalide. Envoie */private* pour revoir la liste.");
+        }
+
+        $choice = $agents[(int) $input - 1];
+        $agentKey = $choice['key'];
+        $meta = $choice['meta'];
+
+        // Already has access?
+        if ($choice['has_access']) {
+            return AgentResult::reply("{$meta['icon']} Tu as deja acces a *{$meta['label']}*. Utilise-le directement !");
+        }
+
+        // Generate approval token
+        $token = Str::random(64);
+        Cache::put("private_approval:{$token}", [
+            'agent_id' => $context->agent->id,
+            'agent_key' => $agentKey,
+            'agent_label' => $meta['label'],
+            'agent_icon' => $meta['icon'],
+            'peer_id' => $context->from,
+            'peer_name' => $context->senderName,
+            'requested_at' => now()->toISOString(),
+        ], now()->addMinutes(30));
+
+        $baseUrl = rtrim(config('app.url'), '/');
+        $approvalUrl = "{$baseUrl}/approve/private/{$token}";
+
+        AgentManager::log($context->agent->id, 'orchestrator', 'Private agent access requested', [
+            'agent_key' => $agentKey,
+            'peer_id' => $context->from,
+            'peer_name' => $context->senderName,
+            'token' => substr($token, 0, 8) . '...',
+        ]);
+
+        return AgentResult::reply(
+            "{$meta['icon']} *Demande d'acces a {$meta['label']}*\n\n"
+            . "Un lien d'approbation a ete genere.\n"
+            . "L'administrateur doit ouvrir ce lien pour valider :\n\n"
+            . "{$approvalUrl}\n\n"
+            . "_Ce lien expire dans 30 minutes._"
+        );
+    }
+
     private function handleDebugToggle(AgentContext $context): ?AgentResult
     {
         if (!$context->body) return null;
@@ -563,6 +682,14 @@ class AgentOrchestrator
                 if ($isNew) {
                     $context->session->update(['pending_agent_context' => null]);
                 } else {
+                    // Handle private agent selection (system-level pending)
+                    if (($pendingCtx['agent'] ?? '') === '_system' && ($pendingCtx['type'] ?? '') === 'private_select') {
+                        $result = $this->handlePrivateSelect($context, $pendingCtx);
+                        if ($result) return $result;
+                        $context->session->update(['pending_agent_context' => null]);
+                        return null;
+                    }
+
                     $agent = $this->agents[$pendingCtx['agent']] ?? null;
                     if ($agent && method_exists($agent, 'handlePendingContext')) {
                         $result = $agent->handlePendingContext($context, $pendingCtx);
