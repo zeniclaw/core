@@ -158,7 +158,11 @@ class ConversationMemoryAgent extends BaseAgent
     public function extractFactsInBackground(AgentContext $context): void
     {
         $body = trim($context->body ?? '');
-        if (!$body || mb_strlen($body) < 10) {
+        if (!$body) {
+            return;
+        }
+        if (mb_strlen($body) < 10) {
+            Log::debug('[ConversationMemory] Skipped short message', ['len' => mb_strlen($body)]);
             return;
         }
 
@@ -181,39 +185,60 @@ class ConversationMemoryAgent extends BaseAgent
                 $prompt,
                 ModelResolver::fast(),
                 <<<'SYSTEM'
-Tu es un extracteur de faits memorables. Analyse le message et extrais UNIQUEMENT les faits importants a retenir pour les futures conversations.
+Tu es un extracteur de faits memorables. Analyse le message et extrais TOUT fait utile a retenir pour personnaliser les futures conversations, meme si le fait est implicite ou mentionne en passant.
 
 Types de faits:
-- project: nom de projet, technologie utilisee, stack technique, URL de depot
-- preference: preferences personnelles, habitudes de travail, style, outils favoris
-- decision: decisions techniques ou personnelles importantes, choix d'architecture
-- skill: competences maitrisees, langages de programmation, domaines d'expertise
+- project: nom de projet, technologie utilisee, stack technique, URL de depot, domaine metier
+- preference: preferences implicites ou explicites, langue utilisee, ton employe, outils, habitudes, style de travail
+- decision: decisions techniques ou personnelles, choix d'architecture, orientations prises
+- skill: competences maitrisees, langages de programmation, domaines d'expertise, niveaux
 - constraint: contraintes de temps, deadlines, limitations techniques ou personnelles
 
-Exemples de ce qu'il faut extraire:
+Exemples de faits a extraire (y compris les implicites):
 - "Je travaille sur ZeniClaw avec Laravel 12" -> project: "Projet ZeniClaw - Laravel 12"
 - "Je prefere TypeScript a JavaScript" -> preference: "Prefere TypeScript a JavaScript"
 - "On a decide d'utiliser Redis pour le cache" -> decision: "Utilisation de Redis pour le cache"
 - "Je maitrise Python et PHP" -> skill: "Maitrise Python et PHP"
 - "Le projet doit etre fini avant le 1er avril" -> constraint: "Deadline: 1er avril"
+- "salut, t'as une minute ?" -> preference: "Utilise un ton informel (tutoiement)"
+- "bonjour, je cherche de l'aide" -> preference: "Communique en francais"
+- "je suis dev freelance" -> skill: "Developpeur freelance"
+- "mon client veut une appli mobile" -> project: "Projet appli mobile pour client"
+- "j'ai pas trop le temps la" -> constraint: "Peu de disponibilite"
 
-Regles strictes:
-1. Ne memorise PAS les salutations, questions generiques, small talk ou commandes d'agent
+Exemple de reponse JSON pour un message banal comme "salut, ca va ?":
+[{"fact_type": "preference", "content": "Utilise un ton informel et familier", "tags": ["langue", "ton"], "action": "create"}]
+
+Regles:
+1. Seuil bas : extrais tout fait meme partiellement utile, y compris les preferences implicites de langue, ton et style
 2. Ne duplique PAS un fait deja memorise (verifie attentivement la liste existante)
 3. Si un fait existant doit etre MIS A JOUR (ex: changement de version, de projet), retourne action "update" avec match_content
 4. Si l'utilisateur abandonne/termine un projet, retourne action "archive" pour l'ancien
 5. Contenu concis et clair (max 100 caracteres)
+6. Retourne [] UNIQUEMENT si le message ne contient vraiment aucune information contextualisable
 
-Reponds UNIQUEMENT en JSON array (ou [] si rien a memoriser):
+Reponds UNIQUEMENT en JSON array (ou [] si absolument rien a memoriser):
 [{"fact_type": "project|preference|decision|skill|constraint", "content": "...", "tags": ["tag1"], "action": "create|update|archive", "match_content": "contenu existant a mettre a jour (si update/archive seulement)"}]
 SYSTEM
             );
 
-            $this->processExtractedFacts($context->from, $response);
+            $saved = $this->processExtractedFacts($context->from, $response);
+
+            Log::info('[ConversationMemory] Facts extracted', ['count' => $saved, 'from' => substr($context->from, -4)]);
+
+            if ($saved === 0) {
+                Log::warning('ConversationMemoryAgent: 0 facts saved for non-trivial message', [
+                    'user_id'      => $context->from,
+                    'message'      => substr($body, 0, 100),
+                    'raw_response' => substr($response ?? '', 0, 200),
+                ]);
+            }
         } catch (\Throwable $e) {
-            Log::warning('ConversationMemoryAgent: background extraction failed', [
-                'error'   => $e->getMessage(),
-                'user_id' => $context->from,
+            Log::error('ConversationMemoryAgent: background extraction failed', [
+                'error'    => $e->getMessage(),
+                'user_id'  => $context->from,
+                'body_len' => mb_strlen($body),
+                'message'  => substr($body, 0, 100),
             ]);
         }
     }
@@ -583,9 +608,12 @@ SYSTEM
         return AgentResult::reply(implode("\n", $lines));
     }
 
-    private function processExtractedFacts(string $userId, ?string $response): void
+    private function processExtractedFacts(string $userId, ?string $response): int
     {
-        if (!$response) return;
+        if (!$response) {
+            Log::debug('ConversationMemoryAgent: empty LLM response, skipping fact extraction', ['user_id' => $userId]);
+            return 0;
+        }
 
         $clean = trim($response);
         if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
@@ -597,12 +625,27 @@ SYSTEM
 
         $facts = json_decode($clean, true);
         if (!is_array($facts) || empty($facts)) {
-            return;
+            Log::warning('ConversationMemoryAgent: LLM returned 0 parseable facts', [
+                'user_id'      => $userId,
+                'raw_response' => substr($response, 0, 200),
+                'json_error'   => json_last_error_msg(),
+            ]);
+            return 0;
         }
+
+        $saved = 0;
+        $total = count($facts);
 
         foreach ($facts as $fact) {
             if (empty($fact['content']) || empty($fact['fact_type'])) continue;
-            if (!in_array($fact['fact_type'], self::VALID_FACT_TYPES)) continue;
+            if (!in_array($fact['fact_type'], self::VALID_FACT_TYPES)) {
+                Log::debug('ConversationMemoryAgent: rejected fact with invalid type', [
+                    'user_id'   => $userId,
+                    'fact_type' => $fact['fact_type'],
+                    'content'   => mb_substr($fact['content'] ?? '', 0, 80),
+                ]);
+                continue;
+            }
 
             // Enforce content length limit
             $fact['content'] = mb_substr(trim($fact['content']), 0, 200);
@@ -615,6 +658,7 @@ SYSTEM
                     ->active()
                     ->where('content', 'like', '%' . $fact['match_content'] . '%')
                     ->update(['status' => 'archived']);
+                $saved++;
                 continue;
             }
 
@@ -629,6 +673,7 @@ SYSTEM
                         'content' => $fact['content'],
                         'tags'    => $fact['tags'] ?? $existing->tags,
                     ]);
+                    $saved++;
                     continue;
                 }
                 // Fall through to create if no match found
@@ -641,6 +686,14 @@ SYSTEM
                 ->where('content', $fact['content'])
                 ->exists();
 
+            if ($duplicate) {
+                Log::debug('ConversationMemoryAgent: duplicate fact skipped', [
+                    'user_id'   => $userId,
+                    'fact_type' => $fact['fact_type'],
+                    'content'   => mb_substr($fact['content'], 0, 80),
+                ]);
+            }
+
             if (!$duplicate) {
                 ConversationMemory::create([
                     'user_id'   => $userId,
@@ -649,10 +702,19 @@ SYSTEM
                     'tags'      => $fact['tags'] ?? [],
                     'status'    => 'active',
                 ]);
+                $saved++;
             }
         }
 
+        if ($saved === 0 && $total > 0) {
+            Log::warning("ConversationMemoryAgent: 0/{$total} facts saved (all filtered/duplicate) for user {$userId}");
+        } else {
+            Log::debug("ConversationMemoryAgent: saved {$saved}/{$total} facts for user {$userId}");
+        }
+
         $this->clearCache($userId);
+
+        return $saved;
     }
 
     private function clearCache(string $userId): void

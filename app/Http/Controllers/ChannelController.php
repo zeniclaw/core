@@ -174,7 +174,7 @@ class ChannelController extends Controller
             }
 
             // Log incoming message (use json() for raw JSON POST bodies)
-            AgentManager::log($agent->id, 'webhook', 'WhatsApp message received', ['payload' => $payload]);
+            AgentManager::log($agent->id, 'webhook', '[channel] WhatsApp message received', ['payload' => $payload]);
 
             // Skip: sent by us, system messages, status broadcasts, or no content at all
             if ($fromMe || !$from || $from === 'status@broadcast' || (!$body && !$hasMedia)) {
@@ -186,7 +186,7 @@ class ChannelController extends Controller
                 $sessionKey = AgentSession::keyFor($agent->id, 'whatsapp', $from);
                 $existing = AgentSession::where('session_key', $sessionKey)->first();
                 if (!$existing || !$existing->whitelisted) {
-                    AgentManager::log($agent->id, 'webhook', 'Blocked by whitelist', ['from' => $from, 'body' => $body], 'warn');
+                    AgentManager::log($agent->id, 'webhook', '[channel] Blocked by whitelist', ['from' => $from, 'body' => $body], 'warn');
                     return response()->json(['ok' => true, 'blocked' => 'whitelist']);
                 }
             }

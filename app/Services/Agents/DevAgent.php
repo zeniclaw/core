@@ -1320,29 +1320,86 @@ PROMPT;
 
     private function cmdListGitlabProjects(AgentContext $context): string
     {
-        $projects = $this->getGitlab()->listProjects();
-        if (!$projects || empty($projects)) {
-            return "Aucun projet trouve sur GitLab.";
+        // 1. Sync GitLab projects to local DB
+        $gitlab = $this->getGitlab();
+        if ($gitlab->isConfigured()) {
+            $gitlabProjects = $gitlab->listProjects();
+            if ($gitlabProjects && !empty($gitlabProjects)) {
+                foreach ($gitlabProjects as $gp) {
+                    $gitlabUrl = $gp['web_url'] ?? $gp['http_url_to_repo'] ?? '';
+                    $name = $gp['name'] ?? '';
+                    if (!$name || !$gitlabUrl) continue;
+
+                    // Check if already exists in DB (by name or gitlab_url)
+                    $exists = Project::where('name', $name)
+                        ->orWhere('gitlab_url', $gitlabUrl)
+                        ->first();
+
+                    if (!$exists) {
+                        // Create as pending — admin validates via web UI
+                        $project = Project::create([
+                            'name' => $name,
+                            'gitlab_url' => $gitlabUrl,
+                            'request_description' => 'Auto-imported from GitLab (' . ($gp['path_with_namespace'] ?? $name) . ')',
+                            'requester_phone' => $context->from,
+                            'requester_name' => $context->senderName ?? 'WhatsApp',
+                            'status' => 'pending',
+                        ]);
+                        $this->log($context, "Auto-imported GitLab project: {$name} (ID: {$project->id}, status: pending)");
+                    }
+                }
+            }
         }
 
-        $displayed = array_slice($projects, 0, 20);
-        $lines = ["*Tes projets GitLab :*\n"];
-        foreach ($displayed as $i => $p) {
-            $name = $p['path_with_namespace'] ?? $p['name'];
-            $updated = isset($p['last_activity_at']) ? substr($p['last_activity_at'], 0, 10) : '?';
-            $lines[] = ($i + 1) . ". *{$name}* (modifie: {$updated})";
+        // 2. List projects from local DB
+        $dbProjects = Project::orderByRaw("
+            CASE status
+                WHEN 'in_progress' THEN 1
+                WHEN 'approved' THEN 2
+                WHEN 'pending' THEN 3
+                WHEN 'completed' THEN 4
+                ELSE 5
+            END
+        ")->orderBy('updated_at', 'desc')->get();
+
+        if ($dbProjects->isEmpty()) {
+            return "Aucun projet disponible. Ajoute-en un via le dashboard ou connecte ton GitLab.";
+        }
+
+        $statusEmoji = [
+            'approved' => '✅',
+            'in_progress' => '🔧',
+            'pending' => '⏳',
+            'completed' => '✔️',
+            'rejected' => '❌',
+        ];
+
+        $lines = ["*Tes projets :*\n"];
+        $items = [];
+        foreach ($dbProjects->take(20) as $i => $p) {
+            $emoji = $statusEmoji[$p->status] ?? '❓';
+            $name = $p->name;
+            $status = $p->status;
+            $updated = $p->updated_at ? $p->updated_at->format('Y-m-d') : '?';
+            $lines[] = ($i + 1) . ". {$emoji} *{$name}* ({$status}, modifie: {$updated})";
+
+            $items[] = [
+                'name' => $name,
+                'path_with_namespace' => $p->gitlab_url ? basename(dirname($p->gitlab_url)) . '/' . $name : $name,
+                'web_url' => $p->gitlab_url ?? '',
+                'http_url_to_repo' => $p->gitlab_url ?? '',
+                'project_id' => $p->id,
+            ];
+        }
+
+        $pendingCount = $dbProjects->where('status', 'pending')->count();
+        if ($pendingCount > 0) {
+            $lines[] = "\n⏳ {$pendingCount} projet(s) en attente de validation admin";
         }
 
         $lines[] = "\nEnvoie le *numero* ou le *nom* du projet pour y acceder !";
 
         // Store list as pending context for follow-up selection
-        $items = array_map(fn($p) => [
-            'name' => $p['name'] ?? '',
-            'path_with_namespace' => $p['path_with_namespace'] ?? '',
-            'web_url' => $p['web_url'] ?? '',
-            'http_url_to_repo' => $p['http_url_to_repo'] ?? '',
-        ], $displayed);
-
         $this->setPendingContext($context, 'list_selection', [
             'items' => $items,
             'action' => 'project_info',
