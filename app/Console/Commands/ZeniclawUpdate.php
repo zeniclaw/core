@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\AgentLog;
-use App\Services\AgentManager;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -147,22 +146,45 @@ class ZeniclawUpdate extends Command
             // ignore
         }
 
-        // Clear caches
-        $this->info('▶ Clearing caches...');
-        try {
-            \Illuminate\Support\Facades\Artisan::call('config:cache');
-            \Illuminate\Support\Facades\Artisan::call('route:cache');
-            \Illuminate\Support\Facades\Artisan::call('view:cache');
-            $this->info('✓ Caches cleared');
-        } catch (\Exception $e) {
-            $this->warn('⚠ Cache clear skipped');
+        // Clear ALL caches (config, routes, views, OPcache, PHP-FPM)
+        $this->info('▶ Clearing all caches...');
+        $cacheScript = base_path('clear-cache.sh');
+        if (file_exists($cacheScript)) {
+            $cacheProcess = new Process(['bash', $cacheScript]);
+            $cacheProcess->setTimeout(30);
+            $cacheProcess->run(fn($type, $buf) => $this->getOutput()->write($buf));
+            $this->info('✓ All caches cleared (via clear-cache.sh)');
+        } else {
+            try {
+                \Illuminate\Support\Facades\Artisan::call('config:cache');
+                \Illuminate\Support\Facades\Artisan::call('route:cache');
+                \Illuminate\Support\Facades\Artisan::call('view:cache');
+                $this->info('✓ Caches cleared (fallback)');
+            } catch (\Exception $e) {
+                $this->warn('⚠ Cache clear skipped');
+            }
+        }
+
+        // Fix permissions (in case update ran as root)
+        $fixScript = base_path('fix-permissions.sh');
+        if (file_exists($fixScript)) {
+            $this->info('▶ Fixing permissions...');
+            $fixProcess = new Process(['bash', $fixScript]);
+            $fixProcess->setTimeout(30);
+            $fixProcess->run(fn($type, $buf) => $this->getOutput()->write($buf));
+            $this->info('✓ Permissions fixed');
         }
 
         // Log
         try {
             $firstAgent = \App\Models\Agent::first();
             if ($firstAgent) {
-                AgentManager::log($firstAgent->id, 'system', "ZeniClaw updated to v{$newVersion}", ['command' => 'zeniclaw:update']);
+                AgentLog::create([
+                    'agent_id' => $firstAgent->id,
+                    'level' => 'info',
+                    'message' => "ZeniClaw updated to v{$newVersion}",
+                    'context' => ['command' => 'zeniclaw:update'],
+                ]);
             }
         } catch (\Exception $e) {
             // non-fatal
