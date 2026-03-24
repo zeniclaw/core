@@ -190,6 +190,49 @@ class ZeniclawUpdate extends Command
             // non-fatal
         }
 
+        // Health check — test web and show errors
+        $this->info('▶ Health check...');
+        try {
+            $url = rtrim(config('app.url'), '/') . '/health';
+            $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url);
+            if ($response->successful()) {
+                $this->info('✓ Health check OK (' . $response->status() . ')');
+            } else {
+                $this->warn('⚠ Health check returned ' . $response->status());
+            }
+        } catch (\Exception $e) {
+            $this->warn('⚠ Health check failed: ' . $e->getMessage());
+        }
+
+        // Check for PHP/Laravel errors by loading a test route
+        try {
+            $testUrl = rtrim(config('app.url'), '/') . '/';
+            $testResponse = \Illuminate\Support\Facades\Http::timeout(10)->get($testUrl);
+            if ($testResponse->status() === 500) {
+                $this->error('✗ App returns 500! Enabling debug mode to diagnose...');
+                // Temporarily enable debug to capture error
+                config(['app.debug' => true]);
+                try {
+                    $agents = \App\Http\Controllers\AgentController::getPrivateAgentSecrets();
+                    $this->info('  getPrivateAgentSecrets: OK (' . count($agents) . ' agents)');
+                } catch (\Throwable $e2) {
+                    $this->error('  getPrivateAgentSecrets FAILED: ' . $e2->getMessage());
+                    $this->error('  File: ' . $e2->getFile() . ':' . $e2->getLine());
+                }
+                try {
+                    $agents = \App\Http\Controllers\AgentController::getPrivateSubAgents();
+                    $this->info('  getPrivateSubAgents: OK (' . count($agents) . ' agents)');
+                } catch (\Throwable $e2) {
+                    $this->error('  getPrivateSubAgents FAILED: ' . $e2->getMessage());
+                    $this->error('  File: ' . $e2->getFile() . ':' . $e2->getLine());
+                }
+            } else {
+                $this->info('✓ App responds OK (' . $testResponse->status() . ')');
+            }
+        } catch (\Exception $e) {
+            $this->warn('⚠ App test failed: ' . $e->getMessage());
+        }
+
         $this->info("✅ Update v{$newVersion} — rebuild started, container will restart.");
         return self::SUCCESS;
     }
