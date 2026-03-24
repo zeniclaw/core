@@ -137,7 +137,7 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
             'agent_id' => $context->agent->id,
             'level' => $level,
             'message' => "[{$this->name()}] {$message}",
-            'context' => array_merge(['from' => $context->from], $extra),
+            'context' => array_merge(['from' => $context->from, 'agent_name' => $this->name()], $extra),
         ]);
     }
 

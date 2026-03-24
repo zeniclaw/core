@@ -20,7 +20,7 @@ class AuditLogListener
 
             AuditLog::logToolCall(
                 userId: $event->context->from ?? 'unknown',
-                agentName: $event->context->routedAgent ?? 'unknown',
+                agentName: $event->context->routedAgent ?? $event->context->agent?->name ?? 'system',
                 toolName: $event->toolName,
                 input: $event->input,
                 status: $status,

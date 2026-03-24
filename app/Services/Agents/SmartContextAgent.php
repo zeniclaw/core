@@ -220,7 +220,12 @@ class SmartContextAgent extends BaseAgent
                 'total_facts'     => count($this->contextStore->retrieve($context->from)),
             ]);
         } catch (\Throwable $e) {
-            Log::warning("SmartContextAgent: extraction failed for {$context->from}: " . $e->getMessage());
+            Log::error('SmartContextAgent: extraction failed', [
+                'error'      => $e->getMessage(),
+                'user_id'    => $context->from,
+                'body_len'   => mb_strlen($body),
+                'message'    => substr($body, 0, 100),
+            ]);
             return AgentResult::silent(['reason' => 'extraction_error']);
         }
     }
@@ -957,7 +962,17 @@ class SmartContextAgent extends BaseAgent
             return [];
         }
 
-        return $this->parseFactsResponse($response);
+        $facts = $this->parseFactsResponse($response);
+
+        if (empty($facts)) {
+            Log::warning('SmartContextAgent: 0 facts extracted from LLM response', [
+                'user_id'        => $context->from,
+                'message_length' => strlen($message),
+                'raw_response'   => substr($response, 0, 200),
+            ]);
+        }
+
+        return $facts;
     }
 
     private function buildExtractionPrompt(array $existingFacts = []): string
@@ -1067,6 +1082,10 @@ PROMPT;
         $parsed = json_decode($clean, true);
 
         if (!$parsed || !isset($parsed['facts']) || !is_array($parsed['facts'])) {
+            Log::warning('SmartContextAgent: JSON parse failed or missing facts key', [
+                'raw_snippet' => substr($clean, 0, 200),
+                'json_error'  => json_last_error_msg(),
+            ]);
             return [];
         }
 
