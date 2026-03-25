@@ -146,10 +146,18 @@ class CustomAgentRunner extends BaseAgent
         $hasTools = !empty($enabledTools);
         $canUseTools = in_array($tier, [ModelTier::Balanced, ModelTier::Powerful]);
 
-        if ($hasTools && $canUseTools) {
+        // Test chat sessions bypass agentic loop (no tool execution needed)
+        $isTestChat = str_starts_with($context->from, 'web-custom-test-');
+
+        if ($hasTools && $canUseTools && !$isTestChat) {
             $result = $this->handleWithTools($context, $systemPrompt, $model, $enabledTools, $ragContext);
+            // Fallback to simple chat if agentic loop failed
+            if (!$result->reply || str_contains($result->reply, 'trop volumineux') || str_contains($result->reply, "n'ai pas pu")) {
+                $this->log($context, "Agentic loop failed, falling back to simple chat");
+                $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier);
+            }
         } else {
-            $result = $this->handleSimpleChat($context, $systemPrompt, $model);
+            $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier);
         }
 
         $this->log($context, "Custom agent replied", [
@@ -214,10 +222,10 @@ class CustomAgentRunner extends BaseAgent
     /**
      * Handle simple chat (no tools, knowledge-only).
      */
-    private function handleSimpleChat(AgentContext $context, string $systemPrompt, string $model): AgentResult
+    private function handleSimpleChat(AgentContext $context, string $systemPrompt, string $model, ModelTier $tier = ModelTier::Balanced): AgentResult
     {
         $history = $this->memory->read($context->agent->id, $context->from);
-        $messages = $this->buildMessages($history, $context);
+        $messages = $this->buildMessages($history, $context, $tier);
 
         // Small on-prem models ignore system prompts — inject context into the user message
         $isOnPrem = !str_starts_with($model, 'claude-') && !str_starts_with($model, 'gpt-');
@@ -308,10 +316,10 @@ class CustomAgentRunner extends BaseAgent
                 'max_chunk_chars' => 300,    // truncate long chunks to fit tiny context
             ],
             ModelTier::Medium => [
-                'limit' => 5,
-                'threshold' => 0.25,
-                'strategy' => 'hybrid',
-                'max_chunk_chars' => 500,
+                'limit' => 3,
+                'threshold' => 0.30,
+                'strategy' => 'semantic',
+                'max_chunk_chars' => 400,
             ],
             ModelTier::Balanced => [
                 'limit' => 8,
@@ -371,48 +379,64 @@ class CustomAgentRunner extends BaseAgent
 
     /**
      * Hybrid search: combine semantic + keyword results, de-duplicate, re-rank.
+     * Loads all chunks once and reuses them for both semantic and keyword passes.
      */
     private function hybridChunkSearch(array $queries, int $limit, float $threshold): array
     {
+        // Load chunks ONCE from DB (biggest perf win for large chunk counts)
+        $allChunks = \App\Models\CustomAgentChunk::where('custom_agent_id', $this->customAgent->id)
+            ->whereNotNull('embedding')
+            ->with('document:id,title')
+            ->get();
+
+        $embedder = new EmbeddingService();
         $allResults = [];
         $seen = [];
 
+        // Semantic search for each query variant
         foreach ($queries as $q) {
-            $semantic = $this->chunker->search($this->customAgent, $q, $limit, $threshold);
-            foreach ($semantic as $r) {
-                $key = $r['chunk_index'] . ':' . ($r['document_title'] ?? '');
+            $queryVector = $embedder->embed($q);
+            if (!$queryVector) continue;
+
+            foreach ($allChunks as $chunk) {
+                $key = $chunk->id;
+                $raw = is_resource($chunk->embedding) ? stream_get_contents($chunk->embedding) : $chunk->embedding;
+                $chunkVector = json_decode($raw, true);
+                if (!$chunkVector) continue;
+
+                $similarity = EmbeddingService::cosineSimilarity($queryVector, $chunkVector);
+                if ($similarity < $threshold) continue;
+
                 if (!isset($seen[$key])) {
-                    $seen[$key] = true;
-                    $allResults[] = $r;
+                    $seen[$key] = round($similarity, 4);
+                    $allResults[$key] = [
+                        'content' => $chunk->content,
+                        'similarity' => round($similarity, 4),
+                        'document_title' => $chunk->document->title ?? 'Unknown',
+                        'chunk_index' => $chunk->chunk_index,
+                    ];
                 } else {
                     // Boost score if found by multiple queries
-                    foreach ($allResults as &$existing) {
-                        $ek = $existing['chunk_index'] . ':' . ($existing['document_title'] ?? '');
-                        if ($ek === $key) {
-                            $existing['similarity'] = min(1.0, $existing['similarity'] + 0.1);
-                            break;
-                        }
-                    }
-                    unset($existing);
+                    $allResults[$key]['similarity'] = min(1.0, $allResults[$key]['similarity'] + 0.1);
                 }
             }
         }
 
-        // Also run keyword search and merge (catches exact matches semantic might miss)
-        $keywordResults = $this->keywordFallbackSearch($queries[0], $limit);
+        // Keyword pass on the same pre-loaded chunks (no extra DB query)
+        $keywordResults = $this->keywordFallbackSearch($queries[0], $limit, $allChunks);
         foreach ($keywordResults as $r) {
-            $key = $r['chunk_index'] . ':' . ($r['document_title'] ?? '');
+            $key = $r['_chunk_id'] ?? ($r['chunk_index'] . ':' . $r['document_title']);
             if (!isset($seen[$key])) {
                 $seen[$key] = true;
-                // Blend: keyword score weighted at 40%
                 $r['similarity'] = round($r['similarity'] * 0.4, 4);
-                $allResults[] = $r;
+                $allResults[$key] = $r;
             }
         }
 
-        usort($allResults, fn($a, $b) => $b['similarity'] <=> $a['similarity']);
+        $results = array_values($allResults);
+        usort($results, fn($a, $b) => $b['similarity'] <=> $a['similarity']);
 
-        return array_slice($allResults, 0, $limit);
+        return array_slice($results, 0, $limit);
     }
 
     /**
@@ -439,6 +463,7 @@ class CustomAgentRunner extends BaseAgent
             }
             if ($score > 0.2) {
                 $results[] = [
+                    '_chunk_id' => $chunk->id,
                     'content' => $chunk->content,
                     'similarity' => round($score, 4),
                     'document_title' => $chunk->document->title ?? 'Unknown',
@@ -575,12 +600,19 @@ class CustomAgentRunner extends BaseAgent
 
     /**
      * Build message string from conversation history.
+     * Limits history depth for on-prem models to keep prompt small.
      */
-    private function buildMessages(array $history, AgentContext $context): string
+    private function buildMessages(array $history, AgentContext $context, ModelTier $tier = ModelTier::Balanced): string
     {
         $messages = '';
         $entries = $history['entries'] ?? [];
-        $recent = array_slice($entries, -5);
+        $historyDepth = match ($tier) {
+            ModelTier::Small => 1,
+            ModelTier::Medium => 2,
+            ModelTier::Balanced => 5,
+            ModelTier::Powerful => 8,
+        };
+        $recent = array_slice($entries, -$historyDepth);
         foreach ($recent as $entry) {
             if (!empty($entry['sender_message'])) {
                 $messages .= "Utilisateur: {$entry['sender_message']}\n";
