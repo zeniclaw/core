@@ -274,12 +274,16 @@ fi
 WAHA_TO_APP=$(docker exec zeniclaw_waha node -e "
     const http = require('http');
     const start = Date.now();
+    let done = false;
     const req = http.get('http://app:80/health', {timeout: 5000}, (res) => {
+        if (done) return;
+        done = true;
         const ms = Date.now() - start;
         process.stdout.write(res.statusCode + ':' + ms + 'ms');
+        process.exit(0);
     });
-    req.on('error', (e) => process.stdout.write('err:' + e.code));
-    req.on('timeout', () => { req.destroy(); process.stdout.write('timeout'); });
+    req.on('error', (e) => { if (!done) { done = true; process.stdout.write('err:' + e.code); process.exit(1); } });
+    req.on('timeout', () => { if (!done) { done = true; req.destroy(); process.stdout.write('timeout'); process.exit(1); } });
 " 2>/dev/null || echo "node_fail")
 
 if echo "$WAHA_TO_APP" | grep -q "^200:"; then
@@ -427,7 +431,8 @@ header "9/12" "WAHA Chats & Groups"
 
 # List recent chats to verify WAHA sees conversations
 CHATS_JSON=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: ${WAHA_KEY}" "${WAHA_BASE}/api/default/chats?limit=10&sortBy=lastMessageAt&sortOrder=desc" 2>/dev/null || echo "[]")
-CHAT_COUNT=$(echo "$CHATS_JSON" | grep -oP '"id"\s*:' | wc -l || echo "0")
+CHAT_COUNT=$(echo "$CHATS_JSON" | grep -oP '"id"\s*:' | wc -l 2>/dev/null || true)
+CHAT_COUNT=$(echo "${CHAT_COUNT:-0}" | tr -d '[:space:]')
 
 if [ "$CHAT_COUNT" -gt 0 ]; then
     ok "WAHA sees $CHAT_COUNT recent chats"
