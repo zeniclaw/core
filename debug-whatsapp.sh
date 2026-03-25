@@ -174,6 +174,64 @@ if [ "$MEDIA_WARNINGS" -gt 0 ]; then
     done
 fi
 
+# ── 5b. Internal connectivity (WAHA → App) ────────────────────────
+echo -e "\n${BOLD}[5b/9] Internal Connectivity${NC}"
+
+# Check nginx is running inside app container
+NGINX_STATUS=$(docker exec zeniclaw_app supervisorctl status nginx 2>/dev/null | head -1 || echo "unknown")
+if echo "$NGINX_STATUS" | grep -q "RUNNING"; then
+    ok "Nginx: running"
+else
+    fail "Nginx: $NGINX_STATUS"
+    ISSUES+=("Nginx is not running inside zeniclaw_app")
+    ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx")
+fi
+
+# Check php-fpm is running
+FPM_STATUS=$(docker exec zeniclaw_app supervisorctl status php-fpm 2>/dev/null | head -1 || echo "unknown")
+if echo "$FPM_STATUS" | grep -q "RUNNING"; then
+    ok "PHP-FPM: running"
+else
+    fail "PHP-FPM: $FPM_STATUS"
+    ISSUES+=("PHP-FPM is not running inside zeniclaw_app")
+    ACTIONS+=("docker exec zeniclaw_app supervisorctl restart php-fpm")
+fi
+
+# App responds internally on port 80?
+APP_SELF_HTTP=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:80/health 2>/dev/null || echo "000")
+if [ "$APP_SELF_HTTP" = "200" ]; then
+    ok "App self-check: HTTP 200 (localhost:80/health)"
+else
+    fail "App self-check: HTTP $APP_SELF_HTTP (localhost:80/health)"
+    ISSUES+=("App is not responding on port 80 internally — nginx or PHP-FPM may be down")
+    ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
+fi
+
+# WAHA can reach app on port 80?
+WAHA_TO_APP=$(docker exec zeniclaw_waha wget -qO- --timeout=5 http://app:80/health 2>&1 || echo "TIMEOUT_OR_ERROR")
+if echo "$WAHA_TO_APP" | grep -qi "ok\|healthy\|{"; then
+    ok "WAHA → App: reachable (http://app:80/health)"
+else
+    fail "WAHA → App: unreachable or timeout"
+    info "Response: $(echo "$WAHA_TO_APP" | head -1 | cut -c1-150)"
+    ISSUES+=("WAHA cannot reach app on port 80 — webhook delivery will fail")
+    ACTIONS+=("Check nginx/php-fpm in app container: docker exec zeniclaw_app supervisorctl status")
+fi
+
+# Webhook response time (is it slow?)
+APP_RESPONSE_TIME=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{time_total}" --max-time 10 http://localhost:80/health 2>/dev/null || echo "timeout")
+if [ "$APP_RESPONSE_TIME" != "timeout" ]; then
+    # Compare as float — bash doesn't do floats, use awk
+    SLOW=$(echo "$APP_RESPONSE_TIME" | awk '{print ($1 > 3.0) ? "yes" : "no"}')
+    if [ "$SLOW" = "yes" ]; then
+        warn "App response time: ${APP_RESPONSE_TIME}s (slow — WAHA may timeout)"
+        ISSUES+=("App response time is slow (${APP_RESPONSE_TIME}s) — WAHA webhooks may timeout")
+        ACTIONS+=("Check PHP-FPM processes and database connections")
+    else
+        ok "App response time: ${APP_RESPONSE_TIME}s"
+    fi
+fi
+
 # ── 6. App health ───────────────────────────────────────────────
 echo -e "\n${BOLD}[6/9] App Health${NC}"
 
@@ -189,6 +247,52 @@ else
     ISSUES+=("Queue workers are down — messages won't be processed")
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart queue-default:* queue-low")
 fi
+
+# DB connectivity
+DB_CHECK=$(docker exec zeniclaw_app php -r "
+try {
+    \$pdo = new PDO('pgsql:host='.getenv('DB_HOST').';dbname='.getenv('DB_DATABASE'), getenv('DB_USERNAME'), getenv('DB_PASSWORD'));
+    echo 'ok';
+} catch (Exception \$e) {
+    echo 'fail: '.\$e->getMessage();
+}
+" 2>/dev/null || echo "fail: php error")
+if echo "$DB_CHECK" | grep -q "^ok"; then
+    ok "Database: reachable"
+else
+    fail "Database: $DB_CHECK"
+    ISSUES+=("Database connection failed — app cannot process messages")
+    ACTIONS+=("Check DB container: docker compose up -d db")
+fi
+
+# Redis connectivity
+REDIS_CHECK=$(docker exec zeniclaw_app php -r "
+try {
+    \$r = new Redis(); \$r->connect(getenv('REDIS_HOST') ?: 'redis', 6379);
+    echo 'ok';
+} catch (Exception \$e) {
+    echo 'fail: '.\$e->getMessage();
+}
+" 2>/dev/null || echo "fail: php error")
+if echo "$REDIS_CHECK" | grep -q "^ok"; then
+    ok "Redis: reachable"
+else
+    fail "Redis: $REDIS_CHECK"
+    ISSUES+=("Redis connection failed — queue and cache broken")
+    ACTIONS+=("Check Redis container: docker compose up -d redis")
+fi
+
+# Supervisord full status
+info "Supervisord services:"
+docker exec zeniclaw_app supervisorctl status 2>/dev/null | while read -r line; do
+    if echo "$line" | grep -q "RUNNING"; then
+        echo -e "    ${GREEN}✓${NC} $line"
+    elif echo "$line" | grep -q "STOPPED\|FATAL\|EXITED"; then
+        echo -e "    ${RED}✗${NC} $line"
+    else
+        echo -e "    ${YELLOW}?${NC} $line"
+    fi
+done
 
 if [ "$APP_ERRORS" -gt 0 ]; then
     warn "App errors in last 5 min: $APP_ERRORS"
@@ -254,6 +358,21 @@ if [ "$WAHA_ERR_COUNT" -gt 0 ]; then
     echo "$WAHA_RECENT" | grep -i "error\|fail\|exception" | tail -5 | while read -r line; do
         echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
     done
+
+    # Detect specific known issues
+    WEBHOOK_DELIVERY_FAILS=$(echo "$WAHA_RECENT" | grep -c "Webhook delivery failed" 2>/dev/null || true)
+    WEBHOOK_DELIVERY_FAILS=${WEBHOOK_DELIVERY_FAILS:-0}
+    if [ "$WEBHOOK_DELIVERY_FAILS" -gt 0 ]; then
+        ISSUES+=("WAHA webhook delivery failed $WEBHOOK_DELIVERY_FAILS time(s) — app not responding to WAHA")
+        ACTIONS+=("Check nginx/php-fpm: docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
+    fi
+
+    TIMEOUT_ERRS=$(echo "$WAHA_RECENT" | grep -c "aborted due to timeout" 2>/dev/null || true)
+    TIMEOUT_ERRS=${TIMEOUT_ERRS:-0}
+    if [ "$TIMEOUT_ERRS" -gt 0 ]; then
+        ISSUES+=("WAHA → App timeout ($TIMEOUT_ERRS time(s)) — app too slow or unreachable on port 80")
+        ACTIONS+=("Restart app services: docker exec zeniclaw_app supervisorctl restart all")
+    fi
 fi
 
 # ── 9. App logs deep dive ────────────────────────────────────────
