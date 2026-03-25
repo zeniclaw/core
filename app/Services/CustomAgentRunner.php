@@ -126,14 +126,10 @@ class CustomAgentRunner extends BaseAgent
     {
         $this->log($context, "Custom agent '{$this->customAgent->name}' handling message");
 
-        // 1. Resolve model — prefer custom agent's model, then parent agent's, then fast default
-        if ($this->customAgent->model !== 'default') {
-            $model = $this->customAgent->model;
-        } elseif ($context->agent->model) {
-            $model = $context->agent->model;
-        } else {
-            $model = $this->resolveModel($context);
-        }
+        // 1. Resolve model — prefer custom agent's explicit model, otherwise use routing/fast default
+        $model = $this->customAgent->model !== 'default'
+            ? $this->customAgent->model
+            : $this->resolveModel($context);
 
         // 2. Classify model capabilities
         $tier = $this->classifyModel($model);
