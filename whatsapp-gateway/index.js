@@ -134,8 +134,40 @@ async function connectWhatsApp() {
         );
         if (hasMedia && sock) {
           try {
-            const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
-            const buffer = await downloadMediaMessage(msg, "buffer", {});
+            const { downloadMediaMessage, downloadContentFromMessage, getContentType } = await import("@whiskeysockets/baileys");
+            let buffer = null;
+
+            // Method 1: downloadMediaMessage with proper options
+            try {
+              buffer = await downloadMediaMessage(msg, "buffer", {
+                logger: pino({ level: "silent" }),
+                reuploadRequest: sock.updateMediaMessage,
+              });
+            } catch (err1) {
+              logger.warn({ error: err1.message, msgId: msg.key?.id }, "downloadMediaMessage failed, trying fallback...");
+
+              // Method 2: downloadContentFromMessage (works with more baileys versions)
+              try {
+                const mediaType = msg.message?.imageMessage ? "imageMessage"
+                  : msg.message?.audioMessage ? "audioMessage"
+                  : msg.message?.videoMessage ? "videoMessage"
+                  : msg.message?.documentMessage ? "documentMessage"
+                  : msg.message?.stickerMessage ? "stickerMessage"
+                  : null;
+
+                if (mediaType && msg.message?.[mediaType]) {
+                  const stream = await downloadContentFromMessage(msg.message[mediaType], mediaType.replace("Message", ""));
+                  const chunks = [];
+                  for await (const chunk of stream) {
+                    chunks.push(chunk);
+                  }
+                  buffer = Buffer.concat(chunks);
+                }
+              } catch (err2) {
+                logger.warn({ error: err2.message, msgId: msg.key?.id }, "downloadContentFromMessage also failed");
+              }
+            }
+
             if (buffer && buffer.length > 0) {
               const mediaId = msg.key?.id || Date.now().toString();
               const mediaDir = "/data/media";
@@ -144,14 +176,17 @@ async function connectWhatsApp() {
                 : msg.message?.audioMessage ? "ogg"
                 : msg.message?.videoMessage ? "mp4"
                 : msg.message?.documentMessage ? "bin"
+                : msg.message?.stickerMessage ? "webp"
                 : "bin";
               const mediaFile = `${mediaDir}/${mediaId}.${ext}`;
               fs.writeFileSync(mediaFile, buffer);
               mediaUrl = `http://waha:${PORT}/media/${mediaId}.${ext}`;
-              logger.info({ mediaId, size: buffer.length }, "Media downloaded");
+              logger.info({ mediaId, size: buffer.length, ext }, "Media downloaded");
+            } else {
+              logger.warn({ msgId: msg.key?.id, hasMedia }, "Media download returned empty buffer");
             }
           } catch (err) {
-            logger.warn({ error: err.message }, "Media download failed");
+            logger.error({ error: err.message, msgId: msg.key?.id }, "Media download failed completely");
           }
         }
 
