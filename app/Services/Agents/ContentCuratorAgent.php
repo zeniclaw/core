@@ -184,12 +184,17 @@ class ContentCuratorAgent extends BaseAgent
             'highlights', 'points clés', 'points cles', 'takeaways', 'essentiel',
             'news liées', 'news liees', 'actualités liées', 'actualites liees', 'related news',
             'en rapport', 'lié à mes bookmarks', 'lie a mes bookmarks',
+            // v1.17.0
+            'défi lecture', 'defi lecture', 'reading challenge', 'challenge lecture',
+            'analytics bookmarks', 'stats bookmarks', 'dashboard lecture',
+            // v1.18.0
+            'note', 'annoter', 'objectif lecture', 'reading goal', 'goal lecture',
         ];
     }
 
     public function version(): string
     {
-        return '1.16.0';
+        return '1.18.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -197,7 +202,7 @@ class ContentCuratorAgent extends BaseAgent
         if (!$context->body) return false;
 
         return (bool) preg_match(
-            '/\b(digest|trending|tendances?|follow|suivre|unfollow|ne\s+plus\s+suivre|veille|curation|bookmark|sauvegarder|save|daily\s+digest|resume\s+quotidien|newsletter|flux\s+rss|mes\s+inter[eé]ts?|hackernews|reddit|news|actualit[eé]s?|mes\s+bookmarks?|mes\s+articles?|supprimer\s+(bookmark|article)|cherche|recherche|search|stats\s+digest|historique\s+digest|mon\s+historique|pr[eé]f[eé]rences?|mes\s+sources?|r[eé]sum[eé]|resumer|summarize|recommande|recommandation|suggestions?|pour\s+moi|vider\s+bookmarks?|quoi\s+lire|effacer\s+tout|flash|news\s+rapides|quoi\s+de\s+neuf|trouver\s+dans\s+mes\s+articles|exporter?\s+bookmarks?|exporter?\s+mes\s+articles?|confirmer\s+vider|vider\s+confirmer|lire\s+#?\d+|ouvrir\s+#?\d+|read\s+#?\d+|best\s+of|top\s+du\s+jour|meilleurs?\s+articles?|briefing|matin|renommer\s+#?\d+|rename\s+#?\d+|bilan\s+semaine|mes\s+lectures|bilan\s+lecture|r[eé]sum[eé]\s+semaine|tldr|en\s+bref|r[eé]sum[eé]\s+rapide|compare|comparer|comparaison|cite|citation|extrait|top\s+sources?|sources?\s+populaires?|meilleures?\s+sources?|surprends?\s+moi|hasard|al[eé]atoire|article\s+surprise|article\s+al[eé]atoire|digest\s+express|digest\s+rapide|quick\s+digest|aujourd.?hui|cette\s+semaine|ce\s+mois|analyser?\s+mes\s+bookmarks?|profil\s+lecture|analyse\s+biblio|r[eé]sum[eé]\s+biblio|intelligence\s+lecture|article\s+du\s+jour|lecture\s+du\s+jour|deep\s+read|s[eé]lection\s+du\s+jour|que\s+lire\s+aujourd.?hui|partager\s+#?\d+|share\s+#?\d+|envoyer\s+#?\d+|similaire\s+#?\d+|similar\s+#?\d+|comme\s+#?\d+|quiz\s+#?\d+|inspire\s*moi|d[ée]tends?\s*moi|positif|bonne\s+nouvelle|feel\s*good|motivant|mood\s+\S+|highlights?\s+#?\d+|points?\s+cl[eé]s?\s+#?\d+|takeaways?\s+#?\d+|essentiel\s+#?\d+|news\s+li[eé]es?|actualit[eé]s?\s+li[eé]es?|related\s+news|en\s+rapport|li[eé]\s+[àa]\s+mes\s+bookmarks?)\b/iu',
+            '/\b(digest|trending|tendances?|follow|suivre|unfollow|ne\s+plus\s+suivre|veille|curation|bookmark|sauvegarder|save|daily\s+digest|resume\s+quotidien|newsletter|flux\s+rss|mes\s+inter[eé]ts?|hackernews|reddit|news|actualit[eé]s?|mes\s+bookmarks?|mes\s+articles?|supprimer\s+(bookmark|article)|cherche|recherche|search|stats\s+digest|historique\s+digest|mon\s+historique|pr[eé]f[eé]rences?|mes\s+sources?|r[eé]sum[eé]|resumer|summarize|recommande|recommandation|suggestions?|pour\s+moi|vider\s+bookmarks?|quoi\s+lire|effacer\s+tout|flash|news\s+rapides|quoi\s+de\s+neuf|trouver\s+dans\s+mes\s+articles|exporter?\s+bookmarks?|exporter?\s+mes\s+articles?|confirmer\s+vider|vider\s+confirmer|lire\s+#?\d+|ouvrir\s+#?\d+|read\s+#?\d+|best\s+of|top\s+du\s+jour|meilleurs?\s+articles?|briefing|matin|renommer\s+#?\d+|rename\s+#?\d+|bilan\s+semaine|mes\s+lectures|bilan\s+lecture|r[eé]sum[eé]\s+semaine|tldr|en\s+bref|r[eé]sum[eé]\s+rapide|compare|comparer|comparaison|cite|citation|extrait|top\s+sources?|sources?\s+populaires?|meilleures?\s+sources?|surprends?\s+moi|hasard|al[eé]atoire|article\s+surprise|article\s+al[eé]atoire|digest\s+express|digest\s+rapide|quick\s+digest|aujourd.?hui|cette\s+semaine|ce\s+mois|analyser?\s+mes\s+bookmarks?|profil\s+lecture|analyse\s+biblio|r[eé]sum[eé]\s+biblio|intelligence\s+lecture|article\s+du\s+jour|lecture\s+du\s+jour|deep\s+read|s[eé]lection\s+du\s+jour|que\s+lire\s+aujourd.?hui|partager\s+#?\d+|share\s+#?\d+|envoyer\s+#?\d+|similaire\s+#?\d+|similar\s+#?\d+|comme\s+#?\d+|quiz\s+#?\d+|inspire\s*moi|d[ée]tends?\s*moi|positif|bonne\s+nouvelle|feel\s*good|motivant|mood\s+\S+|highlights?\s+#?\d+|points?\s+cl[eé]s?\s+#?\d+|takeaways?\s+#?\d+|essentiel\s+#?\d+|news\s+li[eé]es?|actualit[eé]s?\s+li[eé]es?|related\s+news|en\s+rapport|li[eé]\s+[àa]\s+mes\s+bookmarks?|d[eé]fi\s+lecture|reading\s+challenge|challenge\s+lecture|analytics?\s+bookmarks?|stats?\s+bookmarks?|dashboard\s+lecture|note\s+#?\d+|objectif\s+lecture|reading\s+goal|goal\s+lecture)\b/iu',
             $context->body
         );
     }
@@ -471,6 +476,27 @@ class ContentCuratorAgent extends BaseAgent
             return $this->handleRelatedNews($context);
         }
 
+        // Défi lecture quotidien (NEW v1.17.0)
+        if (preg_match('/^(d[eé]fi\s+lecture|reading\s+challenge|d[eé]fi\s+du\s+jour|challenge\s+lecture)\s*$/iu', $body)) {
+            return $this->handleReadingChallenge($context);
+        }
+
+        // Stats bookmarks avancées (NEW v1.17.0)
+        if (preg_match('/^(analytics?\s+bookmarks?|stats?\s+bookmarks?|mes\s+analytics?|dashboard\s+lecture)\s*$/iu', $body)) {
+            return $this->handleBookmarkAnalytics($context);
+        }
+
+        // Note sur un bookmark (NEW v1.18.0)
+        if (preg_match('/^note\s+#?(\d+)\s+(.+)$/iu', $body, $m)) {
+            return $this->handleBookmarkNote($context, (int) $m[1], trim($m[2]));
+        }
+
+        // Objectif de lecture hebdomadaire (NEW v1.18.0)
+        if (preg_match('/^(objectif\s+lecture|reading\s+goal|goal\s+lecture)\s*(\d+)?\s*$/iu', $body, $m)) {
+            $target = isset($m[2]) && $m[2] !== '' ? (int) $m[2] : null;
+            return $this->handleReadingGoal($context, $target);
+        }
+
         // Digest par mood/ambiance (NEW v1.15.0)
         if (preg_match('/^(inspire\s*moi|d[ée]tends?\s*moi|positif|bonne\s+nouvelle|feel\s*good|motivant|mood\s+.+)\s*$/iu', $body, $m)) {
             return $this->handleMoodDigest($context, trim($m[1]));
@@ -536,8 +562,14 @@ class ContentCuratorAgent extends BaseAgent
             }
 
             $label  = $normalized ? ucfirst($normalized) : implode(' + ', array_map('ucfirst', array_slice($categories, 0, 3)));
+            $hour   = (int) now()->format('H');
+            $greet  = match (true) {
+                $hour < 12  => '☀️ Bon matin',
+                $hour < 18  => '📰 Cet après-midi',
+                default     => '🌙 Ce soir',
+            };
             $output = "*⚡ FLASH NEWS — {$label}*\n";
-            $output .= "_" . now()->format('H:i') . " · Top " . count($articles) . " du moment_\n\n";
+            $output .= "_{$greet} · " . now()->format('H:i') . " · Top " . count($articles) . " du moment_\n\n";
 
             foreach ($articles as $i => $article) {
                 $title  = $article['title'] ?? 'Sans titre';
@@ -986,12 +1018,15 @@ PROMPT;
                 return AgentResult::reply("❌ Impossible de générer le résumé. Réessaie dans quelques instants.");
             }
 
-            $output = "*📖 RÉSUMÉ D'ARTICLE*\n";
+            // Detect article language from content
+            $langHint = preg_match('/[àâéèêëïîôùûüç]{3,}/u', $text) ? '🇫🇷' : '🇬🇧';
+
+            $output = "*📖 RÉSUMÉ D'ARTICLE* {$langHint}\n";
             if ($title) $output .= "*" . mb_strimwidth($title, 0, 80, '...') . "*\n";
             $output .= "🔗 {$url}\n";
-            $output .= "⏱️ ~{$readingMins} min de lecture\n\n";
+            $output .= "⏱️ ~{$readingMins} min de lecture · ~{$wordCount} mots\n\n";
             $output .= $summary . "\n\n";
-            $output .= "_💡 *save {$url}* pour bookmarker cet article_";
+            $output .= "_💡 *save {$url}* pour bookmarker · *tldr {$url}* pour la version express_";
 
             Cache::put($cacheKey, $output, 3600); // 1 heure
 
@@ -1053,14 +1088,14 @@ PROMPT;
             }
 
             $currentDate  = now()->translatedFormat('F Y');
+            $dayOfWeek    = now()->translatedFormat('l');
             $systemPrompt = <<<PROMPT
-Tu es un conseiller expert en veille informationnelle (date actuelle : {$currentDate}). Analyse le profil de lecture d'un utilisateur et identifie les 3 sujets les plus pertinents à explorer MAINTENANT.
+Tu es un conseiller expert en veille informationnelle (date actuelle : {$dayOfWeek}, {$currentDate}). Analyse le profil de lecture et identifie 3 sujets pertinents à explorer MAINTENANT.
 
 FORMAT DE RÉPONSE (JSON array, exactement 3 éléments):
 [
-  {"topic": "sujet court en anglais (2-4 mots max, idéal pour recherche d'articles)", "label": "intitulé affiché en français", "reason": "pourquoi ce sujet est important MAINTENANT en 1 phrase directe"},
-  {"topic": "...", "label": "...", "reason": "..."},
-  {"topic": "...", "label": "...", "reason": "..."}
+  {"topic": "sujet court en anglais (2-4 mots max, idéal pour recherche d'articles)", "label": "intitulé affiché en français", "reason": "pourquoi ce sujet est important MAINTENANT en 1 phrase directe", "difficulty": "débutant|intermédiaire|avancé"},
+  ...
 ]
 
 RÈGLES STRICTES:
@@ -1069,6 +1104,8 @@ RÈGLES STRICTES:
 - Prioritise les sujets qui émergent ou évoluent rapidement en 2026
 - Diversifie les 3 sujets (évite 3 sujets trop similaires entre eux)
 - Chaque reason doit mentionner un fait concret ou une tendance récente
+- Le champ difficulty doit refléter la complexité du sujet pour adapter les recherches
+- Si l'utilisateur a des bookmarks récents, propose des sujets complémentaires (pas identiques)
 - Retourne UNIQUEMENT le JSON valide, aucun texte avant ou après
 PROMPT;
 
@@ -1091,10 +1128,14 @@ PROMPT;
             $output .= "_Basées sur tes " . (count($categories) + count($keywords)) . " centre(s) d'intérêt_\n\n";
 
             $output .= "*🎯 Sujets recommandés :*\n";
+            $diffIcons = ['débutant' => '🟢', 'intermédiaire' => '🟡', 'avancé' => '🔴'];
             foreach ($topics as $i => $t) {
-                $label  = $t['label'] ?? $t['topic'] ?? "Sujet " . ($i + 1);
-                $reason = $t['reason'] ?? '';
+                $label      = $t['label'] ?? $t['topic'] ?? "Sujet " . ($i + 1);
+                $reason     = $t['reason'] ?? '';
+                $difficulty = $t['difficulty'] ?? '';
+                $diffIcon   = $diffIcons[$difficulty] ?? '';
                 $output .= "  " . ($i + 1) . ". *{$label}*";
+                if ($diffIcon) $output .= " {$diffIcon}";
                 if ($reason) $output .= " — _{$reason}_";
                 $output .= "\n";
             }
@@ -1297,12 +1338,20 @@ PROMPT;
         $total        = SavedArticle::where('user_phone', $userPhone)->count();
         $displayTitle = $title ?: $url;
         $titleNote    = $customTitle ? " _(titre personnalisé)_" : '';
+
+        // Milestone celebrations
+        $milestone = '';
+        if ($total === 10)  $milestone = "\n🎉 *10 bookmarks !* Tu construis une belle bibliothèque.";
+        if ($total === 50)  $milestone = "\n🏆 *50 bookmarks !* Lecteur confirmé. Essaie *profil lecture* !";
+        if ($total === 100) $milestone = "\n🌟 *100 bookmarks !* Bibliothèque impressionnante. *analytics bookmarks* pour voir tes stats.";
+
         return AgentResult::reply(
             "🔖 Article sauvegardé !\n\n"
             . "*{$displayTitle}*{$titleNote}\n"
             . "_{$source}_\n"
             . "🔗 {$url}\n\n"
-            . "_Tu as maintenant {$total} bookmark(s). *mes bookmarks* pour voir ta liste · *résume {$url}* pour lire._"
+            . "📚 Bookmark #{$total}{$milestone}\n"
+            . "_*résume {$url}* pour lire · *similaire #{$total}* pour des articles proches_"
         );
     }
 
@@ -1470,8 +1519,19 @@ PROMPT;
             'url'      => $article->url,
         ]);
 
-        // Delegate to URL summarizer — reuse all its logic (cache, og:, etc.)
-        return $this->handleSummarizeUrl($context, $article->url);
+        // Show note if present (v1.18.0)
+        $noteKey = "content_curator:note:{$article->id}";
+        $note    = Cache::get($noteKey);
+
+        $result = $this->handleSummarizeUrl($context, $article->url);
+
+        if ($note && $result->text) {
+            $result = AgentResult::reply(
+                $result->text . "\n\n📝 *Ta note :* _{$note}_"
+            );
+        }
+
+        return $result;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -4104,6 +4164,362 @@ PROMPT;
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // DÉFI LECTURE QUOTIDIEN (NEW v1.17.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleReadingChallenge(AgentContext $context): AgentResult
+    {
+        $userPhone = $context->from;
+
+        // One challenge per day per user
+        $today    = now()->format('Y-m-d');
+        $cacheKey = "content_curator:challenge:{$userPhone}:{$today}";
+        $cached   = Cache::get($cacheKey);
+        if ($cached) {
+            return AgentResult::reply($cached);
+        }
+
+        $prefs      = UserContentPreference::where('user_phone', $userPhone)->get();
+        $categories = $prefs->where('category', '!=', 'custom')->pluck('category')->toArray();
+
+        // Pick 3 diverse categories (user prefs + random fill)
+        $allCats     = self::VALID_CATEGORIES;
+        $challengeCats = [];
+        if (!empty($categories)) {
+            $challengeCats = array_slice($categories, 0, 2);
+        }
+        $remaining = array_diff($allCats, $challengeCats);
+        shuffle($remaining);
+        while (count($challengeCats) < 3 && !empty($remaining)) {
+            $challengeCats[] = array_shift($remaining);
+        }
+
+        $this->log($context, 'Reading challenge requested', ['categories' => $challengeCats]);
+
+        try {
+            $articles = [];
+            foreach ($challengeCats as $cat) {
+                $trending = $this->aggregator->getTrending($cat, 5);
+                if (!empty($trending)) {
+                    // Pick a random one from top 5
+                    $pick = $trending[array_rand($trending)];
+                    $pick['_cat'] = $cat;
+                    $articles[] = $pick;
+                }
+            }
+
+            if (count($articles) < 2) {
+                return AgentResult::reply(
+                    "📚 Pas assez d'articles disponibles pour le défi du jour.\n"
+                    . "_Réessaie dans quelques heures ou utilise *digest* pour ton feed._"
+                );
+            }
+
+            $streak     = $this->computeStreak($userPhone);
+            $dayNumber  = (int) Cache::get("content_curator:challenge_count:{$userPhone}", 0) + 1;
+            Cache::put("content_curator:challenge_count:{$userPhone}", $dayNumber, 86400 * 30);
+
+            $output  = "*🏆 DÉFI LECTURE DU JOUR — Jour #{$dayNumber}*\n";
+            if ($streak > 1) {
+                $output .= "🔥 Streak actuel : {$streak} jour(s)\n";
+            }
+            $output .= "\n";
+            $output .= "_Lis au moins 1 de ces 3 articles et sauvegarde-le !_\n\n";
+
+            foreach ($articles as $i => $article) {
+                $num    = $i + 1;
+                $title  = $article['title'] ?? 'Sans titre';
+                $source = $article['source'] ?? '';
+                $url    = $article['url'] ?? '';
+                $cat    = $article['_cat'] ?? '';
+                $icon   = self::CATEGORY_ICONS[$cat] ?? '📄';
+
+                $output .= "*{$num}. {$icon} {$title}*\n";
+                if ($source) $output .= "_{$source}_ · {$cat}\n";
+                if ($url) $output .= "🔗 {$url}\n";
+                $output .= "\n";
+            }
+
+            $output .= "───────────────\n";
+            $output .= "✅ *save [url]* quand tu as lu un article\n";
+            $output .= "📖 *résume [url]* ou *tldr [url]* pour un aperçu rapide\n";
+            $output .= "🧠 Après, essaie *quiz #N* pour tester ta compréhension !\n\n";
+            $output .= "_Nouveau défi demain · *best of* pour le top du moment_";
+
+            Cache::put($cacheKey, $output, 3600 * 6); // 6h
+
+            return AgentResult::reply($output);
+
+        } catch (\Throwable $e) {
+            Log::error("[content_curator] ReadingChallenge failed: " . $e->getMessage());
+            return AgentResult::reply("❌ Erreur lors de la génération du défi. Réessaie dans quelques instants.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STATS AVANCÉES BOOKMARKS (NEW v1.17.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleBookmarkAnalytics(AgentContext $context): AgentResult
+    {
+        $userPhone = $context->from;
+
+        $articles = SavedArticle::where('user_phone', $userPhone)
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($articles->isEmpty()) {
+            return AgentResult::reply(
+                "Tu n'as aucun bookmark pour analyser.\n"
+                . "_Utilise *save [url]* pour en ajouter._"
+            );
+        }
+
+        $total = $articles->count();
+
+        // Sources breakdown
+        $sourceCounts = $articles->groupBy('source')
+            ->map(fn($group) => $group->count())
+            ->sortDesc()
+            ->take(5);
+
+        // Weekly pace (last 4 weeks)
+        $weeklyPace = [];
+        for ($w = 0; $w < 4; $w++) {
+            $start = now()->subWeeks($w + 1)->startOfWeek();
+            $end   = now()->subWeeks($w)->startOfWeek();
+            $count = $articles->filter(fn($a) => $a->created_at >= $start && $a->created_at < $end)->count();
+            $weeklyPace[] = $count;
+        }
+        $avgPace = count($weeklyPace) > 0 ? round(array_sum($weeklyPace) / count($weeklyPace), 1) : 0;
+
+        // Activity by day of week
+        $dayActivity = $articles->groupBy(fn($a) => $a->created_at->locale('fr')->dayName)
+            ->map(fn($group) => $group->count())
+            ->sortDesc();
+        $bestDay = $dayActivity->keys()->first() ?? '—';
+
+        // Most recent and oldest
+        $newest  = $articles->first();
+        $oldest  = $articles->last();
+        $spanDays = $newest && $oldest ? $oldest->created_at->diffInDays($newest->created_at) : 0;
+
+        // Monthly trend (last 3 months)
+        $monthlyTrend = [];
+        for ($m = 0; $m < 3; $m++) {
+            $start = now()->subMonths($m + 1)->startOfMonth();
+            $end   = now()->subMonths($m)->startOfMonth();
+            $count = $articles->filter(fn($a) => $a->created_at >= $start && $a->created_at < $end)->count();
+            $label = $start->translatedFormat('M');
+            $monthlyTrend[$label] = $count;
+        }
+
+        // Build output
+        $output  = "*📊 ANALYTICS BOOKMARKS*\n";
+        $output .= "_{$total} bookmark(s) · {$spanDays} jours d'activité_\n\n";
+
+        // Top sources
+        $output .= "*🏠 Top sources :*\n";
+        foreach ($sourceCounts as $source => $count) {
+            $pct     = round(($count / $total) * 100);
+            $bar     = str_repeat('▓', (int) round($pct / 10)) . str_repeat('░', 10 - (int) round($pct / 10));
+            $output .= "  {$bar} {$source} ({$count} · {$pct}%)\n";
+        }
+        $output .= "\n";
+
+        // Pace
+        $output .= "*📈 Rythme de lecture :*\n";
+        $output .= "  • Moyenne : *{$avgPace} bookmarks/semaine*\n";
+        $output .= "  • Jour le plus actif : *{$bestDay}*\n";
+
+        // Monthly trend
+        if (!empty($monthlyTrend)) {
+            $output .= "  • Tendance : ";
+            $parts = [];
+            foreach (array_reverse($monthlyTrend) as $label => $count) {
+                $parts[] = "{$label} ({$count})";
+            }
+            $output .= implode(' → ', $parts) . "\n";
+        }
+        $output .= "\n";
+
+        // Diversity score (0-100 based on source distribution)
+        $uniqueSources = $articles->pluck('source')->unique()->count();
+        $diversityScore = $total > 0 ? min(100, (int) round(($uniqueSources / max($total, 1)) * 100 * 2)) : 0;
+        $diversityBar   = str_repeat('▓', (int) round($diversityScore / 10)) . str_repeat('░', 10 - (int) round($diversityScore / 10));
+        $diversityLabel = match (true) {
+            $diversityScore >= 70 => 'Excellent ! 🌈',
+            $diversityScore >= 40 => 'Correct 👍',
+            default               => 'À diversifier 🔄',
+        };
+
+        $output .= "*🌐 Diversité des sources :*\n";
+        $output .= "  {$diversityBar} {$diversityScore}/100 — {$diversityLabel}\n";
+        $output .= "  _{$uniqueSources} source(s) unique(s) sur {$total} bookmark(s)_\n\n";
+
+        // Quick insights
+        $output .= "*💡 En bref :*\n";
+        if ($total >= 10 && $sourceCounts->count() <= 2) {
+            $output .= "  • 🔄 Tu lis surtout 1-2 sources. Essaie *recommande* pour diversifier !\n";
+        }
+        if ($avgPace >= 5) {
+            $output .= "  • 🔥 Lecteur assidu ! Plus de {$avgPace} saves/semaine.\n";
+        } elseif ($avgPace <= 1) {
+            $output .= "  • 💤 Rythme calme. Essaie *défi lecture* pour te motiver !\n";
+        }
+        $streak = $this->computeStreak($userPhone);
+        if ($streak > 0) {
+            $output .= "  • 🔥 Streak digest : {$streak} jour(s) consécutif(s)\n";
+        }
+
+        // Reading goal progress (v1.18.0)
+        $goalKey  = "content_curator:reading_goal:{$userPhone}";
+        $goal     = Cache::get($goalKey);
+        if ($goal) {
+            $thisWeekCount = $articles->filter(fn($a) => $a->created_at >= now()->startOfWeek())->count();
+            $goalPct       = min(100, (int) round(($thisWeekCount / max($goal, 1)) * 100));
+            $goalBar       = str_repeat('▓', (int) round($goalPct / 10)) . str_repeat('░', 10 - (int) round($goalPct / 10));
+            $output .= "  • 🎯 Objectif : {$goalBar} {$thisWeekCount}/{$goal} cette semaine ({$goalPct}%)\n";
+        }
+        $output .= "\n";
+
+        $output .= "_*profil lecture* pour une analyse IA · *objectif lecture 5* pour fixer un goal_";
+
+        return AgentResult::reply($output);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NOTES SUR BOOKMARK (NEW v1.18.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleBookmarkNote(AgentContext $context, int $position, string $note): AgentResult
+    {
+        $userPhone = $context->from;
+
+        $articles = SavedArticle::where('user_phone', $userPhone)
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($articles->isEmpty()) {
+            return AgentResult::reply(
+                "Tu n'as aucun bookmark.\n"
+                . "_Utilise *save [url]* pour en ajouter._"
+            );
+        }
+
+        if ($position < 1 || $position > $articles->count()) {
+            return AgentResult::reply(
+                "❌ Position #{$position} invalide. Tu as {$articles->count()} bookmark(s).\n"
+                . "_Dis *mes bookmarks* pour voir la liste._"
+            );
+        }
+
+        $article = $articles[$position - 1];
+        $title   = $article->title ?: $article->url;
+
+        if (mb_strlen($note) > 500) {
+            return AgentResult::reply("❌ Note trop longue (max 500 caractères). Raccourcis ta note et réessaie.");
+        }
+
+        // Store note in cache (keyed per bookmark ID, 90 days TTL)
+        $noteKey = "content_curator:note:{$article->id}";
+
+        if (mb_strtolower(trim($note)) === 'supprimer') {
+            Cache::forget($noteKey);
+            $this->log($context, 'Bookmark note deleted', ['bookmark_id' => $article->id]);
+            return AgentResult::reply(
+                "🗑️ Note supprimée pour *" . mb_strimwidth($title, 0, 60, '...') . "*"
+            );
+        }
+
+        Cache::put($noteKey, $note, 86400 * 90);
+        $this->log($context, 'Bookmark note saved', ['bookmark_id' => $article->id, 'note_len' => mb_strlen($note)]);
+
+        return AgentResult::reply(
+            "📝 Note ajoutée au bookmark #{$position} !\n\n"
+            . "*" . mb_strimwidth($title, 0, 60, '...') . "*\n"
+            . "💬 _{$note}_\n\n"
+            . "_*note #{$position} supprimer* pour effacer · *lire #{$position}* pour résumer_"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBJECTIF LECTURE HEBDOMADAIRE (NEW v1.18.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleReadingGoal(AgentContext $context, ?int $target): AgentResult
+    {
+        $userPhone = $context->from;
+        $goalKey   = "content_curator:reading_goal:{$userPhone}";
+
+        // Show current goal status if no target given
+        if ($target === null) {
+            $goal = Cache::get($goalKey);
+            if (!$goal) {
+                return AgentResult::reply(
+                    "🎯 Tu n'as pas d'objectif de lecture.\n\n"
+                    . "_Fixe un objectif : *objectif lecture 5* (5 bookmarks/semaine)_\n"
+                    . "_Ou : *objectif lecture 3* pour commencer doucement_"
+                );
+            }
+
+            $thisWeekCount = SavedArticle::where('user_phone', $userPhone)
+                ->where('created_at', '>=', now()->startOfWeek())
+                ->count();
+
+            $pct    = min(100, (int) round(($thisWeekCount / max($goal, 1)) * 100));
+            $bar    = str_repeat('▓', (int) round($pct / 10)) . str_repeat('░', 10 - (int) round($pct / 10));
+            $status = $thisWeekCount >= $goal ? '✅ Objectif atteint !' : "⏳ Continue, il reste " . ($goal - $thisWeekCount) . " article(s) !";
+
+            $daysLeft = 7 - (int) now()->dayOfWeek;
+
+            return AgentResult::reply(
+                "*🎯 OBJECTIF LECTURE*\n\n"
+                . "Objectif : *{$goal} bookmark(s)/semaine*\n"
+                . "Progression : {$bar} {$thisWeekCount}/{$goal} ({$pct}%)\n"
+                . "{$status}\n\n"
+                . "_{$daysLeft} jour(s) restant(s) cette semaine_\n"
+                . "_*objectif lecture 0* pour supprimer · *objectif lecture 7* pour changer_"
+            );
+        }
+
+        // Remove goal
+        if ($target === 0) {
+            Cache::forget($goalKey);
+            $this->log($context, 'Reading goal removed');
+            return AgentResult::reply("🎯 Objectif de lecture supprimé. Tu peux en fixer un nouveau quand tu veux.");
+        }
+
+        // Validate
+        if ($target < 1 || $target > 50) {
+            return AgentResult::reply("❌ Objectif invalide. Choisis entre 1 et 50 bookmarks par semaine.");
+        }
+
+        // Store goal (no expiry — persistent)
+        Cache::put($goalKey, $target, 86400 * 365);
+        $this->log($context, 'Reading goal set', ['target' => $target]);
+
+        $thisWeekCount = SavedArticle::where('user_phone', $userPhone)
+            ->where('created_at', '>=', now()->startOfWeek())
+            ->count();
+
+        $remaining = max(0, $target - $thisWeekCount);
+        $pct       = min(100, (int) round(($thisWeekCount / max($target, 1)) * 100));
+        $bar       = str_repeat('▓', (int) round($pct / 10)) . str_repeat('░', 10 - (int) round($pct / 10));
+
+        $output  = "*🎯 Objectif fixé : {$target} bookmark(s)/semaine !*\n\n";
+        $output .= "Progression cette semaine : {$bar} {$thisWeekCount}/{$target} ({$pct}%)\n";
+        if ($remaining > 0) {
+            $output .= "📖 Plus que {$remaining} article(s) pour cette semaine !\n";
+        } else {
+            $output .= "✅ Tu as déjà atteint ton objectif cette semaine ! 🎉\n";
+        }
+        $output .= "\n_*objectif lecture* pour voir ta progression · *défi lecture* pour des suggestions_";
+
+        return AgentResult::reply($output);
+    }
+
     private function showHelp(): AgentResult
     {
         $v = $this->version();
@@ -4148,11 +4564,16 @@ PROMPT;
             . "  • *exporter bookmarks* — Exporter TOUS les bookmarks\n"
             . "  • *cherche bookmarks laravel* — Filtrer tes bookmarks\n"
             . "  • *renommer #3 Mon titre* — Renommer un bookmark\n"
-            . "  • *partager #3* — Générer un message prêt à transférer _(nouveau v1.14)_\n"
-            . "  • *similaire #3* — Trouver des articles similaires à un bookmark _(nouveau v1.14)_\n"
+            . "  • *note #3 Mon commentaire* — Ajouter une note à un bookmark _(nouveau v1.18)_\n"
+            . "  • *partager #3* — Générer un message prêt à transférer\n"
+            . "  • *similaire #3* — Trouver des articles similaires à un bookmark\n"
             . "  • *supprimer 3* — Effacer le bookmark n°3\n"
             . "  • *vider bookmarks* — Effacer tous (confirmation requise)\n\n"
             . "*📊 Stats & Bilan :*\n"
+            . "  • *objectif lecture 5* — Fixer un objectif hebdomadaire _(nouveau v1.18)_\n"
+            . "  • *objectif lecture* — Voir ta progression\n"
+            . "  • *défi lecture* — Défi quotidien (3 articles variés)\n"
+            . "  • *analytics bookmarks* — Dashboard de tes habitudes de lecture\n"
             . "  • *bilan semaine* — Résumé de ta semaine de lecture\n"
             . "  • *stats digest* — Historique, streak et statistiques\n"
             . "  • *top sources* — Tes sources les plus bookmarkées\n\n"
@@ -4162,14 +4583,16 @@ PROMPT;
             . "  • *preferences* — Voir tes intérêts + catégories disponibles\n\n"
             . "*Catégories :* 💻 technology · 🔬 science · 💼 business · ❤️ health · ⚽ sports\n"
             . "🎬 entertainment · 🎮 gaming · 🤖 ai · 🪙 crypto · 🚀 startup · 🎨 design · 🔒 security\n\n"
-            . "*🆕 Nouveau v1.16 :*\n"
-            . "  • *highlights #3* / *points clés #3* — Takeaways clés d'un bookmark _(nouveau)_\n"
-            . "  • *news liées* — Articles frais liés à tes bookmarks récents _(nouveau)_\n"
-            . "  • Protection SSRF sur toutes les commandes URL\n"
-            . "  • Validation améliorée (catégories flash, longueur de recherche)\n\n"
-            . "*Nouveau v1.15 :*\n"
-            . "  • *quiz #3* — Mini-quiz de 3 questions sur un bookmark\n"
-            . "  • *inspire moi* / *positif* / *détends moi* — Digest filtré par mood IA"
+            . "*🆕 Nouveau v1.18 :*\n"
+            . "  • *note #3 [texte]* — Annoter tes bookmarks avec des notes personnelles\n"
+            . "  • *objectif lecture N* — Objectif hebdomadaire avec barre de progression\n"
+            . "  • Flash news avec salutation selon l'heure ☀️📰🌙\n"
+            . "  • Résumés enrichis (langue détectée, compteur de mots)\n"
+            . "  • Save avec milestones (10, 50, 100 bookmarks) 🎉\n"
+            . "  • Analytics avec score de diversité des sources\n\n"
+            . "*Nouveau v1.17 :*\n"
+            . "  • *défi lecture* — Défi quotidien (3 articles variés)\n"
+            . "  • *analytics bookmarks* — Dashboard habitudes de lecture"
         );
     }
 }

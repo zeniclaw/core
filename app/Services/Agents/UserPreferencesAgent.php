@@ -240,7 +240,7 @@ class UserPreferencesAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion des préférences utilisateur. Permet de configurer la langue, le fuseau horaire, le format de date, le système d\'unités (métrique/impérial), le style de communication, les notifications, le téléphone et l\'email. Affiche le profil complet, l\'heure locale (avec numéro de semaine), les personnalisations actives, modifie un ou plusieurs paramètres à la fois, compare des fuseaux horaires, affiche une horloge mondiale multi-villes, vérifie les heures ouvrables d\'une ville, planifie des réunions entre fuseaux (meeting planner), recherche des fuseaux par région/pays, exporte/importe les préférences, réinitialise aux valeurs par défaut, affiche un compte à rebours jusqu\'à une date cible, donne les informations sur l\'heure d\'été/hiver (DST), convertit une heure spécifique d\'un fuseau à un autre (convert_time), affiche le calendrier de la semaine courante (calendar_week), affiche le calendrier mensuel (calendar_month), affiche les heures de lever/coucher du soleil (sun_times), calcule le temps restant avant une heure cible (time_until), affiche la progression de l\'année en cours avec jour de l\'année et semaine ISO (year_progress), affiche un aperçu rapide d\'une ville combinant heure, heures ouvrables et DST en un message (quick_brief), audite les préférences personnalisées vs valeurs par défaut (preferences_audit), convertit des timestamps Unix en dates et inversement (unix_timestamp), convertit une heure vers plusieurs fuseaux horaires simultanément (multi_convert), affiche une carte jour/nuit mondiale indiquant quelles villes dorment ou sont éveillées (day_night_map), calcule les prochaines occurrences d\'un événement récurrent (repeat_event), affiche les prochains jours fériés par pays ou internationaux (holiday_info), et convertit un numéro de semaine ISO en dates lundi-dimanche (week_to_dates).';
+        return 'Agent de gestion des préférences utilisateur. Permet de configurer la langue, le fuseau horaire, le format de date, le système d\'unités (métrique/impérial), le style de communication, les notifications, le téléphone et l\'email. Affiche le profil complet, l\'heure locale (avec numéro de semaine), les personnalisations actives, modifie un ou plusieurs paramètres à la fois, compare des fuseaux horaires, affiche une horloge mondiale multi-villes, vérifie les heures ouvrables d\'une ville, planifie des réunions entre fuseaux (meeting planner), recherche des fuseaux par région/pays, exporte/importe les préférences, réinitialise aux valeurs par défaut, affiche un compte à rebours jusqu\'à une date cible, donne les informations sur l\'heure d\'été/hiver (DST), convertit une heure spécifique d\'un fuseau à un autre (convert_time), affiche le calendrier de la semaine courante (calendar_week), affiche le calendrier mensuel (calendar_month), affiche les heures de lever/coucher du soleil (sun_times), calcule le temps restant avant une heure cible (time_until), affiche la progression de l\'année en cours avec jour de l\'année et semaine ISO (year_progress), affiche un aperçu rapide d\'une ville combinant heure, heures ouvrables et DST en un message (quick_brief), audite les préférences personnalisées vs valeurs par défaut (preferences_audit), convertit des timestamps Unix en dates et inversement (unix_timestamp), convertit une heure vers plusieurs fuseaux horaires simultanément (multi_convert), affiche une carte jour/nuit mondiale indiquant quelles villes dorment ou sont éveillées (day_night_map), calcule les prochaines occurrences d\'un événement récurrent (repeat_event), affiche les prochains jours fériés par pays ou internationaux (holiday_info), convertit un numéro de semaine ISO en dates lundi-dimanche (week_to_dates), calcule la durée écoulée entre deux heures ou dates (elapsed_time), et trouve les créneaux de travail profond (focus/deep work) entre le fuseau de l\'utilisateur et une ville cible (focus_window).';
     }
 
     public function keywords(): array
@@ -393,12 +393,51 @@ class UserPreferencesAgent extends BaseAgent
             'semaine numero', 'semaine numéro', 'week number',
             'dates de la semaine', 'dates semaine', 'quelle semaine',
             'semaine iso', 'week to dates', 'week dates',
+            // timezone_abbrev — v1.20.0
+            'abbreviation', 'abréviation', 'abreviation', 'que veut dire',
+            'c est quoi', "c'est quoi", 'signifie', 'PST', 'EST', 'CET',
+            'GMT', 'JST', 'IST', 'timezone abbreviation',
+            // pomodoro — v1.20.0
+            'pomodoro', 'tomate', 'sessions travail', 'focus timer',
+            'technique pomodoro', 'minuteur travail', 'planning pomodoro',
+            // elapsed_time — v1.21.0
+            'duree entre', 'durée entre', 'elapsed time', 'temps ecoule', 'temps écoulé',
+            'combien de temps entre', 'duration', 'heures entre',
+            'de 9h a 17h', 'de 9h à 17h', 'temps de travail', 'heures travaillees',
+            'heures travaillées', 'calculer duree', 'calculer durée',
+            // focus_window — v1.21.0
+            'focus window', 'fenetre focus', 'fenêtre focus', 'deep work',
+            'heures calmes', 'quiet hours', 'creneau focus', 'créneau focus',
+            'quand travailler tranquille', 'plage de concentration',
+            'focus time', 'heures tranquilles', 'travail profond',
+            // time_add — v1.22.0
+            'dans combien il sera', 'quelle heure dans', 'heure plus',
+            'timer', 'minuteur', 'dans 2h', 'dans 1h', 'dans 3h',
+            'dans 30 minutes', 'dans 45 minutes', 'dans 1h30',
+            'heure + ', 'ajouter temps', 'add time', 'time add',
+            'si je pars dans', 'quand je finis', 'dans combien je finis',
+            // meeting_suggest — v1.22.0
+            'meilleur horaire', 'meilleur creneau', 'meilleur créneau',
+            'suggest meeting', 'meeting suggest', 'creneau ideal', 'créneau idéal',
+            'top horaires', 'meilleur moment reunion', 'meilleur moment réunion',
+            'best meeting time', 'optimal meeting', 'suggestion reunion',
+            'suggestion réunion', 'horaire optimal', 'score reunion',
+            // timezone_summary — v1.23.0
+            'résumé fuseau', 'resume fuseau', 'timezone summary', 'infos fuseau',
+            'mon fuseau', 'profil fuseau', 'timezone info', 'tz info',
+            'détails fuseau', 'details fuseau', 'fuseau complet',
+            // date_range — v1.23.0
+            'plage de dates', 'date range', 'tous les lundis', 'tous les mardis',
+            'tous les mercredis', 'tous les jeudis', 'tous les vendredis',
+            'every monday', 'every tuesday', 'every friday',
+            'dates entre', 'liste de dates', 'jours entre',
+            'calendrier entre', 'dates récurrentes', 'dates recurrentes',
         ];
     }
 
     public function version(): string
     {
-        return '1.19.0';
+        return '1.23.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -453,6 +492,12 @@ class UserPreferencesAgent extends BaseAgent
             return AgentResult::reply($this->formatShowPreferences($prefs), ['action' => 'show_preferences', 'reason' => 'empty_body']);
         }
 
+        // Truncate excessively long messages to avoid wasting LLM tokens
+        if (mb_strlen($body) > 2000) {
+            $body = mb_substr($body, 0, 2000);
+            $this->log($context, "Message truncated to 2000 chars", [], 'info');
+        }
+
         $prefs = PreferencesManager::getPreferences($userId);
 
         // Pre-detect export blocks pasted by the user (bypass LLM for reliability)
@@ -473,18 +518,41 @@ class UserPreferencesAgent extends BaseAgent
             ]);
             return AgentResult::reply(
                 "⚠️ Je n'ai pas pu analyser ta demande. Réessaie ou tape *aide preferences* pour voir les commandes.\n\n"
-                . "_Exemples : mon profil, quelle heure, timezone Europe/Paris_"
+                . "_Exemples : mon profil, quelle heure, timezone Europe/Paris_",
+                ['action' => 'error', 'error_type' => 'llm_null_response']
             );
         }
 
         $parsed = $this->parseJson($response);
 
+        // Retry once on parse failure with a stricter prompt
         if (!$parsed || empty($parsed['action'])) {
-            Log::warning('UserPreferencesAgent: failed to parse LLM response', [
+            Log::info('UserPreferencesAgent: first parse failed, retrying with stricter prompt', [
                 'body'     => mb_substr($body, 0, 200),
-                'response' => mb_substr($response, 0, 300),
+                'response' => mb_substr($response ?? '', 0, 300),
             ]);
-            return AgentResult::reply($this->formatShowPreferences($prefs));
+
+            $retryResponse = $this->claude->chat(
+                "IMPORTANT: Réponds UNIQUEMENT avec un objet JSON valide, sans texte ni backticks.\n\nMessage utilisateur: \"{$body}\"",
+                $this->resolveModel($context),
+                $systemPrompt
+            );
+
+            $parsed = $this->parseJson($retryResponse);
+
+            if (!$parsed || empty($parsed['action'])) {
+                Log::warning('UserPreferencesAgent: failed to parse LLM response after retry', [
+                    'body'     => mb_substr($body, 0, 200),
+                    'response' => mb_substr($response ?? '', 0, 300),
+                    'retry'    => mb_substr($retryResponse ?? '', 0, 300),
+                ]);
+                return AgentResult::reply(
+                    "⚠️ Je n'ai pas compris ta demande. Essaie de la reformuler.\n\n"
+                    . "_Exemples : mon profil, quelle heure à Tokyo, timezone Europe/Paris_\n"
+                    . "_Tape *aide preferences* pour la liste complète._",
+                    ['action' => 'error', 'error_type' => 'parse_failure']
+                );
+            }
         }
 
         return match ($parsed['action']) {
@@ -530,7 +598,20 @@ class UserPreferencesAgent extends BaseAgent
             'repeat_event'     => $this->handleRepeatEvent($parsed, $prefs),
             'holiday_info'     => $this->handleHolidayInfo($parsed, $prefs),
             'week_to_dates'    => $this->handleWeekToDates($parsed, $prefs),
-            default            => AgentResult::reply($this->formatShowPreferences($prefs)),
+            'timezone_abbrev'  => $this->handleTimezoneAbbrev($parsed, $prefs),
+            'pomodoro'         => $this->handlePomodoro($parsed, $prefs),
+            'elapsed_time'     => $this->handleElapsedTime($parsed, $prefs),
+            'focus_window'     => $this->handleFocusWindow($parsed, $prefs),
+            'time_add'         => $this->handleTimeAdd($parsed, $prefs),
+            'meeting_suggest'  => $this->handleMeetingSuggest($parsed, $prefs),
+            'timezone_summary' => $this->handleTimezoneSummary($parsed, $prefs),
+            'date_range'       => $this->handleDateRange($parsed, $prefs),
+            default            => AgentResult::reply(
+                "🤔 Action non reconnue : *{$parsed['action']}*\n\n"
+                . "Tape *aide preferences* pour voir toutes les commandes disponibles.\n"
+                . "_Ou tape *mon profil* pour voir tes préférences actuelles._",
+                ['action' => 'unknown_action', 'received' => $parsed['action']]
+            ),
         };
     }
 
@@ -917,6 +998,92 @@ Convertir un numéro de semaine ISO en dates (lundi à dimanche):
 - "semaine 20 2026" / "dates semaine 20 en 2026" → {"action": "week_to_dates", "week": 20, "year": 2026}
 - "quelles dates sont en semaine 1 2027" → {"action": "week_to_dates", "week": 1, "year": 2027}
 - IMPORTANT: week est le numéro de semaine ISO (1-53). year est optionnel (défaut: année courante).
+
+Décoder une abréviation de fuseau horaire (PST, CET, EST, etc.) ou lister les abréviations courantes:
+{"action": "timezone_abbrev", "abbreviation": "PST"}
+{"action": "timezone_abbrev", "abbreviation": "CET"}
+{"action": "timezone_abbrev", "abbreviation": ""}
+
+- "c'est quoi PST" / "que veut dire CET" / "signification EST" → {"action": "timezone_abbrev", "abbreviation": "PST"}
+- "abréviation PST" / "timezone abbreviation JST" / "decode GMT" → {"action": "timezone_abbrev", "abbreviation": "GMT"}
+- "abréviations fuseaux" / "liste abréviations" / "timezone abbreviations" → {"action": "timezone_abbrev", "abbreviation": ""}
+- IMPORTANT: abbreviation doit être en majuscules (PST, CET, etc.). Si l'utilisateur demande juste la liste, laisser vide.
+
+Calculer un planning Pomodoro (sessions de travail avec pauses):
+{"action": "pomodoro"}
+{"action": "pomodoro", "sessions": 6}
+{"action": "pomodoro", "sessions": 4, "work_minutes": 50, "break_minutes": 10}
+{"action": "pomodoro", "sessions": 8, "work_minutes": 25, "break_minutes": 5, "long_break_minutes": 20}
+
+- "pomodoro" / "lance un pomodoro" / "planning pomodoro" → {"action": "pomodoro"}
+- "pomodoro 6 sessions" / "6 pomodoros" → {"action": "pomodoro", "sessions": 6}
+- "pomodoro 50 minutes" / "pomodoro 50min travail 10min pause" → {"action": "pomodoro", "work_minutes": 50, "break_minutes": 10}
+- "technique pomodoro" / "minuteur pomodoro" / "focus timer" → {"action": "pomodoro"}
+- IMPORTANT: sessions max 12, work_minutes entre 5-120 (défaut 25), break_minutes entre 1-30 (défaut 5), long_break_minutes entre 5-60 (défaut 15). Longue pause toutes les 4 sessions.
+
+Calculer la durée écoulée entre deux heures (même jour) ou deux dates+heures:
+{"action": "elapsed_time", "from_time": "09:00", "to_time": "17:30"}
+{"action": "elapsed_time", "from_time": "08:30", "to_time": "12:45"}
+{"action": "elapsed_time", "from_datetime": "2026-03-25 09:00", "to_datetime": "2026-03-27 17:30"}
+
+- "durée entre 9h et 17h30" / "combien de temps entre 9h et 17h30" → {"action": "elapsed_time", "from_time": "09:00", "to_time": "17:30"}
+- "temps de travail de 8h30 à 12h45" / "heures entre 8h30 et 12h45" → {"action": "elapsed_time", "from_time": "08:30", "to_time": "12:45"}
+- "elapsed time 14h to 22h15" / "durée de 14h à 22h15" → {"action": "elapsed_time", "from_time": "14:00", "to_time": "22:15"}
+- "durée entre 2026-03-25 09:00 et 2026-03-27 17:30" → {"action": "elapsed_time", "from_datetime": "2026-03-25 09:00", "to_datetime": "2026-03-27 17:30"}
+- IMPORTANT: from_time/to_time pour le même jour, from_datetime/to_datetime pour des dates différentes. Heures au format HH:MM, dates au format AAAA-MM-JJ HH:MM.
+
+Trouver les créneaux de travail profond (focus/deep work) entre le fuseau de l'utilisateur et une ville cible (heures où les deux sont hors bureau 9h-18h):
+{"action": "focus_window", "target": "Tokyo"}
+{"action": "focus_window", "target": "New York"}
+
+- "focus window Tokyo" / "fenêtre focus avec Tokyo" / "deep work avec New York" → {"action": "focus_window", "target": "Tokyo"}
+- "heures calmes entre moi et Tokyo" / "quiet hours avec Londres" → {"action": "focus_window", "target": "London"}
+- "quand travailler tranquille avec Dubai" / "créneau focus Singapore" → {"action": "focus_window", "target": "Singapore"}
+- "plage de concentration avec Sydney" / "focus time avec Tokyo" → {"action": "focus_window", "target": "Tokyo"}
+- IMPORTANT: target est une ville ou un fuseau IANA. Retourne les plages horaires où les deux zones sont hors heures ouvrables (avant 9h ou après 18h).
+
+Calculer l'heure qu'il sera après une durée donnée (ajouter du temps à maintenant ou à une heure spécifique):
+{"action": "time_add", "duration": "2h30"}
+{"action": "time_add", "duration": "45min"}
+{"action": "time_add", "duration": "1h30", "from_time": "14:00"}
+{"action": "time_add", "duration": "3h", "target": "Tokyo"}
+
+- "dans 2h30 il sera quelle heure" / "quelle heure dans 2h" / "heure + 2h30" → {"action": "time_add", "duration": "2h30"}
+- "dans 45 minutes" / "dans 45min quelle heure" → {"action": "time_add", "duration": "45min"}
+- "timer 1h30" / "minuteur 90 minutes" → {"action": "time_add", "duration": "1h30"}
+- "si je pars dans 3h quelle heure à Tokyo" / "dans 2h il sera quelle heure à New York" → {"action": "time_add", "duration": "2h", "target": "Tokyo"}
+- "14h + 3h45" / "à partir de 14h dans 3h" → {"action": "time_add", "duration": "3h45", "from_time": "14:00"}
+- "dans combien de temps je finis si je travaille 4h" → {"action": "time_add", "duration": "4h"}
+- IMPORTANT: duration accepte: 2h, 2h30, 45min, 90min, 1:30, 2.5h. from_time optionnel (HH:MM). target optionnel (ville pour voir l'heure d'arrivée ailleurs).
+
+Suggérer les meilleurs créneaux de réunion entre plusieurs villes avec un score de compatibilité:
+{"action": "meeting_suggest", "cities": ["Tokyo", "Paris", "New York"]}
+{"action": "meeting_suggest", "cities": ["London", "Dubai", "Sydney"], "duration_hours": 2}
+
+- "meilleur horaire réunion Paris Tokyo New York" / "suggest meeting Paris Tokyo NYC" → {"action": "meeting_suggest", "cities": ["Paris", "Tokyo", "New York"]}
+- "quel est le meilleur moment pour une réunion avec Tokyo et New York" → {"action": "meeting_suggest", "cities": ["Tokyo", "New York"]}
+- "créneau idéal London Dubai Sydney" / "top horaires London Dubai Sydney" → {"action": "meeting_suggest", "cities": ["London", "Dubai", "Sydney"]}
+- "meilleur créneau pour 2h de réunion avec Tokyo" → {"action": "meeting_suggest", "cities": ["Tokyo"], "duration_hours": 2}
+- IMPORTANT: cities est une liste de 1+ villes. duration_hours optionnel (défaut 1). Retourne les 3 meilleurs créneaux avec un score de compatibilité.
+
+Afficher un résumé complet du fuseau horaire de l'utilisateur ou d'une ville (offset, DST, villes proches, heure locale):
+{"action": "timezone_summary"}
+{"action": "timezone_summary", "target": "Tokyo"}
+
+- "résumé de mon fuseau" / "infos fuseau" / "timezone summary" / "tz info" → {"action": "timezone_summary"}
+- "infos fuseau Tokyo" / "résumé fuseau New York" / "timezone info London" → {"action": "timezone_summary", "target": "Tokyo"}
+- "mon fuseau en détail" / "détails de mon fuseau horaire" / "profil fuseau" → {"action": "timezone_summary"}
+- IMPORTANT: Si target est absent, utilise le fuseau de l'utilisateur.
+
+Générer une liste de dates entre deux bornes, avec un filtre optionnel par jour de la semaine:
+{"action": "date_range", "from_date": "2026-04-01", "to_date": "2026-06-30", "day_filter": "monday"}
+{"action": "date_range", "from_date": "2026-04-01", "to_date": "2026-04-30"}
+
+- "tous les lundis entre le 1er avril et le 30 juin 2026" → {"action": "date_range", "from_date": "2026-04-01", "to_date": "2026-06-30", "day_filter": "monday"}
+- "dates entre 2026-04-01 et 2026-04-30" / "liste de dates en avril" → {"action": "date_range", "from_date": "2026-04-01", "to_date": "2026-04-30"}
+- "tous les vendredis de mai 2026" → {"action": "date_range", "from_date": "2026-05-01", "to_date": "2026-05-31", "day_filter": "friday"}
+- "every tuesday in june 2026" → {"action": "date_range", "from_date": "2026-06-01", "to_date": "2026-06-30", "day_filter": "tuesday"}
+- IMPORTANT: from_date et to_date au format AAAA-MM-JJ. day_filter optionnel: monday, tuesday, wednesday, thursday, friday, saturday, sunday. Sans day_filter, liste tous les jours.
 
 - Si le message est ambigu ou demande de l'aide → {"action": "help"}
 
@@ -4790,6 +4957,788 @@ PROMPT;
         }
     }
 
+    // -------------------------------------------------------------------------
+    // timezone_abbrev — v1.20.0
+    // -------------------------------------------------------------------------
+
+    private const TIMEZONE_ABBREVIATIONS = [
+        'CET'  => ['name' => 'Central European Time',          'offset' => 'UTC+1',  'iana' => 'Europe/Paris',       'region' => 'Europe'],
+        'CEST' => ['name' => 'Central European Summer Time',   'offset' => 'UTC+2',  'iana' => 'Europe/Paris',       'region' => 'Europe'],
+        'WET'  => ['name' => 'Western European Time',          'offset' => 'UTC+0',  'iana' => 'Europe/Lisbon',      'region' => 'Europe'],
+        'WEST' => ['name' => 'Western European Summer Time',   'offset' => 'UTC+1',  'iana' => 'Europe/Lisbon',      'region' => 'Europe'],
+        'EET'  => ['name' => 'Eastern European Time',          'offset' => 'UTC+2',  'iana' => 'Europe/Helsinki',    'region' => 'Europe'],
+        'EEST' => ['name' => 'Eastern European Summer Time',   'offset' => 'UTC+3',  'iana' => 'Europe/Helsinki',    'region' => 'Europe'],
+        'GMT'  => ['name' => 'Greenwich Mean Time',            'offset' => 'UTC+0',  'iana' => 'Europe/London',      'region' => 'Europe/Afrique'],
+        'BST'  => ['name' => 'British Summer Time',            'offset' => 'UTC+1',  'iana' => 'Europe/London',      'region' => 'Europe'],
+        'IST'  => ['name' => 'India Standard Time',            'offset' => 'UTC+5:30', 'iana' => 'Asia/Kolkata',     'region' => 'Asie'],
+        'JST'  => ['name' => 'Japan Standard Time',            'offset' => 'UTC+9',  'iana' => 'Asia/Tokyo',         'region' => 'Asie'],
+        'KST'  => ['name' => 'Korea Standard Time',            'offset' => 'UTC+9',  'iana' => 'Asia/Seoul',         'region' => 'Asie'],
+        'CST'  => ['name' => 'China Standard Time',            'offset' => 'UTC+8',  'iana' => 'Asia/Shanghai',      'region' => 'Asie'],
+        'HKT'  => ['name' => 'Hong Kong Time',                 'offset' => 'UTC+8',  'iana' => 'Asia/Hong_Kong',     'region' => 'Asie'],
+        'SGT'  => ['name' => 'Singapore Time',                 'offset' => 'UTC+8',  'iana' => 'Asia/Singapore',     'region' => 'Asie'],
+        'ICT'  => ['name' => 'Indochina Time',                 'offset' => 'UTC+7',  'iana' => 'Asia/Bangkok',       'region' => 'Asie'],
+        'GST'  => ['name' => 'Gulf Standard Time',             'offset' => 'UTC+4',  'iana' => 'Asia/Dubai',         'region' => 'Moyen-Orient'],
+        'AST'  => ['name' => 'Arabia Standard Time',           'offset' => 'UTC+3',  'iana' => 'Asia/Riyadh',        'region' => 'Moyen-Orient'],
+        'PST'  => ['name' => 'Pacific Standard Time',          'offset' => 'UTC-8',  'iana' => 'America/Los_Angeles','region' => 'Amérique du Nord'],
+        'PDT'  => ['name' => 'Pacific Daylight Time',          'offset' => 'UTC-7',  'iana' => 'America/Los_Angeles','region' => 'Amérique du Nord'],
+        'MST'  => ['name' => 'Mountain Standard Time',         'offset' => 'UTC-7',  'iana' => 'America/Denver',     'region' => 'Amérique du Nord'],
+        'MDT'  => ['name' => 'Mountain Daylight Time',         'offset' => 'UTC-6',  'iana' => 'America/Denver',     'region' => 'Amérique du Nord'],
+        'EST'  => ['name' => 'Eastern Standard Time',          'offset' => 'UTC-5',  'iana' => 'America/New_York',   'region' => 'Amérique du Nord'],
+        'EDT'  => ['name' => 'Eastern Daylight Time',          'offset' => 'UTC-4',  'iana' => 'America/New_York',   'region' => 'Amérique du Nord'],
+        'AKST' => ['name' => 'Alaska Standard Time',           'offset' => 'UTC-9',  'iana' => 'America/Anchorage',  'region' => 'Amérique du Nord'],
+        'AKDT' => ['name' => 'Alaska Daylight Time',           'offset' => 'UTC-8',  'iana' => 'America/Anchorage',  'region' => 'Amérique du Nord'],
+        'HST'  => ['name' => 'Hawaii Standard Time',           'offset' => 'UTC-10', 'iana' => 'Pacific/Honolulu',   'region' => 'Pacifique'],
+        'BRT'  => ['name' => 'Brasília Time',                  'offset' => 'UTC-3',  'iana' => 'America/Sao_Paulo',  'region' => 'Amérique du Sud'],
+        'ART'  => ['name' => 'Argentina Time',                 'offset' => 'UTC-3',  'iana' => 'America/Argentina/Buenos_Aires', 'region' => 'Amérique du Sud'],
+        'AEST' => ['name' => 'Australian Eastern Standard Time','offset' => 'UTC+10', 'iana' => 'Australia/Sydney',  'region' => 'Océanie'],
+        'AEDT' => ['name' => 'Australian Eastern Daylight Time','offset' => 'UTC+11', 'iana' => 'Australia/Sydney',  'region' => 'Océanie'],
+        'ACST' => ['name' => 'Australian Central Standard Time','offset' => 'UTC+9:30','iana' => 'Australia/Adelaide','region' => 'Océanie'],
+        'AWST' => ['name' => 'Australian Western Standard Time','offset' => 'UTC+8',  'iana' => 'Australia/Perth',   'region' => 'Océanie'],
+        'NZST' => ['name' => 'New Zealand Standard Time',      'offset' => 'UTC+12', 'iana' => 'Pacific/Auckland',   'region' => 'Océanie'],
+        'NZDT' => ['name' => 'New Zealand Daylight Time',      'offset' => 'UTC+13', 'iana' => 'Pacific/Auckland',   'region' => 'Océanie'],
+        'WAT'  => ['name' => 'West Africa Time',               'offset' => 'UTC+1',  'iana' => 'Africa/Lagos',       'region' => 'Afrique'],
+        'CAT'  => ['name' => 'Central Africa Time',            'offset' => 'UTC+2',  'iana' => 'Africa/Johannesburg','region' => 'Afrique'],
+        'EAT'  => ['name' => 'East Africa Time',               'offset' => 'UTC+3',  'iana' => 'Africa/Nairobi',     'region' => 'Afrique'],
+    ];
+
+    private function handleTimezoneAbbrev(array $parsed, array $prefs): AgentResult
+    {
+        $query = strtoupper(trim($parsed['abbreviation'] ?? ''));
+
+        // If no abbreviation given, show a list of common ones
+        if ($query === '') {
+            $userTz = $prefs['timezone'] ?? 'UTC';
+            try {
+                $now   = new DateTimeImmutable('now', new DateTimeZone($userTz));
+                $abbr  = $now->format('T');
+                $lines = [
+                    "🔤 *ABRÉVIATIONS DE FUSEAUX HORAIRES*",
+                    "────────────────",
+                    "",
+                    "📍 Ton fuseau ({$userTz}) : *{$abbr}*",
+                    "",
+                    "*Courants :*",
+                ];
+                $common = ['CET', 'GMT', 'EST', 'PST', 'JST', 'IST', 'CST', 'AEST', 'GST'];
+                foreach ($common as $a) {
+                    $info = self::TIMEZONE_ABBREVIATIONS[$a] ?? null;
+                    if ($info) {
+                        $lines[] = "• *{$a}* — {$info['name']} ({$info['offset']})";
+                    }
+                }
+                $lines[] = "";
+                $lines[] = "💡 _Tape ex: c'est quoi PST, que veut dire CET_";
+
+                return AgentResult::reply(implode("\n", $lines), ['action' => 'timezone_abbrev', 'mode' => 'list']);
+            } catch (\Exception $e) {
+                Log::warning('UserPreferencesAgent: timezone_abbrev list error', ['error' => $e->getMessage()]);
+                return AgentResult::reply("⚠️ Erreur lors de l'affichage des abréviations.");
+            }
+        }
+
+        $info = self::TIMEZONE_ABBREVIATIONS[$query] ?? null;
+
+        if (!$info) {
+            // Fuzzy search: find abbreviations that contain the query
+            $matches = [];
+            foreach (self::TIMEZONE_ABBREVIATIONS as $abbr => $data) {
+                if (str_contains($abbr, $query) || str_contains(strtoupper($data['name']), $query)) {
+                    $matches[$abbr] = $data;
+                }
+            }
+
+            if (empty($matches)) {
+                return AgentResult::reply(
+                    "⚠️ Abréviation *{$query}* non reconnue.\n\n"
+                    . "💡 _Exemples : PST, CET, EST, JST, IST, GMT, AEST_\n"
+                    . "_Tape *abréviations fuseaux* pour voir la liste complète._"
+                );
+            }
+
+            $lines = ["🔍 *RÉSULTATS POUR \"{$query}\"*", "────────────────", ""];
+            foreach (array_slice($matches, 0, 8) as $abbr => $data) {
+                $lines[] = "• *{$abbr}* — {$data['name']}";
+                $lines[] = "  {$data['offset']} · {$data['iana']} · {$data['region']}";
+            }
+
+            return AgentResult::reply(implode("\n", $lines), ['action' => 'timezone_abbrev', 'mode' => 'search']);
+        }
+
+        // Found exact match — show detailed info
+        try {
+            $tz  = new DateTimeZone($info['iana']);
+            $now = new DateTimeImmutable('now', $tz);
+
+            $userTz  = $prefs['timezone'] ?? 'UTC';
+            $userNow = new DateTimeImmutable('now', new DateTimeZone($userTz));
+            $diffH   = ((int) $now->format('Z') - (int) $userNow->format('Z')) / 3600;
+            $diffStr = $diffH >= 0 ? "+{$diffH}h" : "{$diffH}h";
+
+            $lines = [
+                "🔤 *{$query}* — {$info['name']}",
+                "────────────────",
+                "",
+                "📌 *Offset :* {$info['offset']}",
+                "🌍 *Région :* {$info['region']}",
+                "🏷 *Fuseau IANA :* {$info['iana']}",
+                "🕐 *Heure actuelle :* {$now->format('H:i')} ({$now->format('l')})",
+                "",
+                "📍 Par rapport à toi ({$userTz}) : *{$diffStr}*",
+                "",
+                "💡 _Tape ex: heure à {$info['iana']}, compare timezone {$info['iana']}_",
+            ];
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'       => 'timezone_abbrev',
+                'abbreviation' => $query,
+                'iana'         => $info['iana'],
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: timezone_abbrev error', [
+                'abbreviation' => $query,
+                'error'        => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "🔤 *{$query}* — {$info['name']}\n"
+                . "Offset : {$info['offset']} · Région : {$info['region']}\n"
+                . "IANA : {$info['iana']}"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // pomodoro — v1.20.0
+    // -------------------------------------------------------------------------
+
+    private function handlePomodoro(array $parsed, array $prefs): AgentResult
+    {
+        $sessions  = min(max((int) ($parsed['sessions'] ?? 4), 1), 12);
+        $workMin   = min(max((int) ($parsed['work_minutes'] ?? 25), 5), 120);
+        $breakMin  = min(max((int) ($parsed['break_minutes'] ?? 5), 1), 30);
+        $longBreak = min(max((int) ($parsed['long_break_minutes'] ?? 15), 5), 60);
+
+        $userTz = $prefs['timezone'] ?? 'UTC';
+
+        try {
+            $tz  = new DateTimeZone($userTz);
+            $now = new DateTimeImmutable('now', $tz);
+
+            $lines = [
+                "🍅 *PLANNING POMODORO*",
+                "────────────────",
+                "",
+                "⚙️ *Config :* {$workMin}min travail / {$breakMin}min pause / {$longBreak}min longue pause",
+                "📍 Début : *{$now->format('H:i')}* ({$userTz})",
+                "",
+            ];
+
+            $cursor        = $now;
+            $totalWork     = 0;
+            $totalBreak    = 0;
+
+            for ($i = 1; $i <= $sessions; $i++) {
+                $workEnd = $cursor->modify("+{$workMin} minutes");
+                $lines[] = "🍅 *Session {$i}* : {$cursor->format('H:i')} → {$workEnd->format('H:i')}  _{$workMin}min travail_";
+                $totalWork += $workMin;
+
+                if ($i < $sessions) {
+                    // Every 4 sessions, take a long break
+                    $isLong    = ($i % 4 === 0);
+                    $brkLen    = $isLong ? $longBreak : $breakMin;
+                    $brkLabel  = $isLong ? 'longue pause' : 'pause';
+                    $breakEnd  = $workEnd->modify("+{$brkLen} minutes");
+                    $lines[]   = "  ☕ _{$brkLabel} : {$workEnd->format('H:i')} → {$breakEnd->format('H:i')} ({$brkLen}min)_";
+                    $totalBreak += $brkLen;
+                    $cursor     = $breakEnd;
+                } else {
+                    $cursor = $workEnd;
+                }
+            }
+
+            $totalMinutes = $totalWork + $totalBreak;
+            $endTime      = $cursor->format('H:i');
+            $totalHours   = intdiv($totalMinutes, 60);
+            $totalMins    = $totalMinutes % 60;
+            $durationStr  = $totalHours > 0
+                ? "{$totalHours}h" . ($totalMins > 0 ? sprintf('%02d', $totalMins) : '')
+                : "{$totalMins}min";
+
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = "✅ *Fin prévue :* {$endTime}";
+            $lines[] = "⏱ *Durée totale :* {$durationStr} ({$totalWork}min travail + {$totalBreak}min pauses)";
+            $lines[] = "📊 *Sessions :* {$sessions} × {$workMin}min = " . ($totalWork >= 60 ? intdiv($totalWork, 60) . "h" . (($totalWork % 60) > 0 ? sprintf('%02d', $totalWork % 60) : '') : "{$totalWork}min") . " de focus";
+            $lines[] = "";
+            $lines[] = "💡 _Ex : pomodoro 6 sessions, pomodoro 50min travail 10min pause_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'   => 'pomodoro',
+                'sessions' => $sessions,
+                'work_min' => $workMin,
+                'end_time' => $endTime,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: pomodoro error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors du calcul du planning Pomodoro.\n"
+                . "_Vérifie ton fuseau horaire avec *mon profil*._"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // elapsed_time — v1.21.0
+    // -------------------------------------------------------------------------
+
+    private function handleElapsedTime(array $parsed, array $prefs): AgentResult
+    {
+        $lang = $prefs['language'] ?? 'fr';
+
+        try {
+            // Mode 1: Same-day (from_time / to_time)
+            $fromTime = $parsed['from_time'] ?? null;
+            $toTime   = $parsed['to_time'] ?? null;
+
+            // Mode 2: Cross-day (from_datetime / to_datetime)
+            $fromDt = $parsed['from_datetime'] ?? null;
+            $toDt   = $parsed['to_datetime'] ?? null;
+
+            if ($fromDt && $toDt) {
+                // Cross-day mode
+                $start = new DateTimeImmutable($fromDt);
+                $end   = new DateTimeImmutable($toDt);
+            } elseif ($fromTime && $toTime) {
+                // Same-day mode
+                $parsedFrom = $this->parseTimeString($fromTime);
+                $parsedTo   = $this->parseTimeString($toTime);
+
+                if (!$parsedFrom || !$parsedTo) {
+                    return AgentResult::reply(
+                        "⚠️ Format d'heure invalide. Utilise *HH:MM*, *14h30*, *2pm*, etc.\n\n"
+                        . "_Exemples : durée entre 9h et 17h30, elapsed time 8:00 to 18:30_"
+                    );
+                }
+
+                $tzName = $prefs['timezone'] ?? 'UTC';
+                $tz     = new DateTimeZone($tzName);
+                $today  = (new DateTimeImmutable('now', $tz))->format('Y-m-d');
+                $start  = new DateTimeImmutable("{$today} {$parsedFrom}", $tz);
+                $end    = new DateTimeImmutable("{$today} {$parsedTo}", $tz);
+
+                // If end is before start, assume next day
+                if ($end <= $start) {
+                    $end = $end->modify('+1 day');
+                }
+            } else {
+                return AgentResult::reply(
+                    "⚠️ Précise les deux heures à comparer.\n\n"
+                    . "_Exemples :_\n"
+                    . "• _durée entre 9h et 17h30_\n"
+                    . "• _temps entre 2026-03-25 09:00 et 2026-03-27 17:30_"
+                );
+            }
+
+            $interval    = $start->diff($end);
+            $totalMinutes = ($interval->days * 24 * 60) + ($interval->h * 60) + $interval->i;
+
+            // Format duration
+            $days  = $interval->days;
+            $hours = $interval->h;
+            $mins  = $interval->i;
+
+            $parts = [];
+            if ($days > 0) {
+                $parts[] = "*{$days}* jour" . ($days > 1 ? 's' : '');
+            }
+            if ($hours > 0) {
+                $parts[] = "*{$hours}* heure" . ($hours > 1 ? 's' : '');
+            }
+            if ($mins > 0) {
+                $parts[] = "*{$mins}* minute" . ($mins > 1 ? 's' : '');
+            }
+
+            $durationStr = implode(', ', $parts) ?: '*0* minutes';
+
+            // Compact format
+            $compactParts = [];
+            if ($days > 0) {
+                $compactParts[] = "{$days}j";
+            }
+            $compactParts[] = sprintf('%02dh%02d', $hours, $mins);
+            $compact = implode(' ', $compactParts);
+
+            $lines = [
+                "⏱ *DURÉE CALCULÉE*",
+                "────────────────",
+            ];
+
+            if ($fromDt && $toDt) {
+                $lines[] = "📍 De : *{$start->format('d/m/Y H:i')}*";
+                $lines[] = "📍 À : *{$end->format('d/m/Y H:i')}*";
+            } else {
+                $lines[] = "📍 De *{$parsedFrom}* à *{$parsedTo}*";
+            }
+
+            $lines[] = "";
+            $lines[] = "⏳ Durée : {$durationStr}";
+            $lines[] = "🔢 Compact : *{$compact}*";
+            $lines[] = "📊 Total : *{$totalMinutes}* minutes";
+
+            // If > 60 minutes, show decimal hours too
+            if ($totalMinutes >= 60) {
+                $decimalHours = round($totalMinutes / 60, 2);
+                $lines[] = "📈 Décimal : *{$decimalHours}h*";
+            }
+
+            $lines[] = "────────────────";
+            $lines[] = "💡 _Ex : durée entre 8h et 18h30, temps entre 2026-04-01 09:00 et 2026-04-03 17:00_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'        => 'elapsed_time',
+                'total_minutes' => $totalMinutes,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: elapsed_time error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors du calcul de la durée.\n"
+                . "_Vérifie le format des heures : 9h, 14:30, 2pm, ou 2026-03-25 09:00._"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // focus_window — v1.21.0
+    // -------------------------------------------------------------------------
+
+    private function handleFocusWindow(array $parsed, array $prefs): AgentResult
+    {
+        $target = $parsed['target'] ?? '';
+        $lang   = $prefs['language'] ?? 'fr';
+        $userTz = $prefs['timezone'] ?? 'UTC';
+
+        if (empty($target)) {
+            return AgentResult::reply(
+                "⚠️ Précise une ville ou un fuseau horaire.\n\n"
+                . "_Exemples : focus window Tokyo, deep work New York, heures calmes Londres_"
+            );
+        }
+
+        $targetTz = $this->resolveTimezoneString($target);
+        if (!$targetTz) {
+            $suggestion = $this->suggestTimezone($target);
+            $extra      = $suggestion ? "\n💡 Suggestion : _{$suggestion}_" : '';
+            return AgentResult::reply(
+                "⚠️ Fuseau horaire non trouvé pour *{$target}*.{$extra}\n\n"
+                . "_Exemples : focus window Tokyo, deep work America/New_York_"
+            );
+        }
+
+        try {
+            $userZone   = new DateTimeZone($userTz);
+            $targetZone = new DateTimeZone($targetTz);
+            $now        = new DateTimeImmutable('now', $userZone);
+
+            // Build a 24-hour map of focus windows
+            // Focus = hours where BOTH timezones are outside 9:00-18:00 (business hours)
+            $focusSlots    = [];
+            $earlySlots    = []; // Only user is off (target in business)
+            $lateSlots     = []; // Only target is off (user in business)
+
+            for ($h = 0; $h < 24; $h++) {
+                $userTime   = $now->setTime($h, 0);
+                $targetTime = $userTime->setTimezone($targetZone);
+
+                $userHour   = (int) $userTime->format('G');
+                $targetHour = (int) $targetTime->format('G');
+
+                $userInBusiness   = ($userHour >= 9 && $userHour < 18);
+                $targetInBusiness = ($targetHour >= 9 && $targetHour < 18);
+
+                if (!$userInBusiness && !$targetInBusiness) {
+                    $focusSlots[] = $h;
+                } elseif (!$userInBusiness && $targetInBusiness) {
+                    $earlySlots[] = $h;
+                } elseif ($userInBusiness && !$targetInBusiness) {
+                    $lateSlots[] = $h;
+                }
+            }
+
+            // Format time ranges from consecutive hours
+            $formatRanges = function (array $hours) use ($userTz, $targetTz, $userZone, $targetZone, $now): array {
+                if (empty($hours)) {
+                    return [];
+                }
+
+                $ranges = [];
+                $start  = $hours[0];
+                $prev   = $hours[0];
+
+                for ($i = 1; $i <= count($hours); $i++) {
+                    if ($i < count($hours) && $hours[$i] === $prev + 1) {
+                        $prev = $hours[$i];
+                        continue;
+                    }
+
+                    $startUser   = $now->setTime($start, 0);
+                    $endUser     = $now->setTime($prev + 1, 0);
+                    $startTarget = $startUser->setTimezone($targetZone);
+                    $endTarget   = $endUser->setTimezone($targetZone);
+
+                    $ranges[] = sprintf(
+                        '%s–%s _(→ %s–%s %s)_',
+                        $startUser->format('H:i'),
+                        $endUser->format('H:i'),
+                        $startTarget->format('H:i'),
+                        $endTarget->format('H:i'),
+                        $this->getShortTzName($targetTz)
+                    );
+
+                    if ($i < count($hours)) {
+                        $start = $hours[$i];
+                        $prev  = $hours[$i];
+                    }
+                }
+
+                return $ranges;
+            };
+
+            // Get timezone offset difference
+            $userOffset   = $userZone->getOffset($now) / 3600;
+            $targetOffset = $targetZone->getOffset($now) / 3600;
+            $diff         = $targetOffset - $userOffset;
+            $diffStr      = ($diff >= 0 ? '+' : '') . $diff . 'h';
+
+            $displayTarget = ucfirst($target);
+
+            $lines = [
+                "🎯 *FENÊTRE FOCUS* — {$displayTarget}",
+                "────────────────",
+                "🏠 Toi : *{$userTz}* (UTC" . ($userOffset >= 0 ? '+' : '') . "{$userOffset})",
+                "🌍 Cible : *{$targetTz}* (UTC" . ($targetOffset >= 0 ? '+' : '') . "{$targetOffset})",
+                "⏱ Décalage : *{$diffStr}*",
+                "",
+            ];
+
+            // Mutual focus (both off work)
+            if (!empty($focusSlots)) {
+                $lines[] = "🟢 *Focus mutuel* (les 2 hors bureau) :";
+                foreach ($formatRanges($focusSlots) as $range) {
+                    $lines[] = "  • {$range}";
+                }
+            } else {
+                $lines[] = "🔴 *Aucun créneau focus mutuel* — les heures de bureau se chevauchent complètement.";
+            }
+
+            $lines[] = "";
+
+            // User off, target working
+            if (!empty($earlySlots)) {
+                $lines[] = "🟡 *Toi libre, {$displayTarget} au bureau* :";
+                foreach ($formatRanges($earlySlots) as $range) {
+                    $lines[] = "  • {$range}";
+                }
+                $lines[] = "";
+            }
+
+            // User working, target off
+            if (!empty($lateSlots)) {
+                $lines[] = "🟠 *Toi au bureau, {$displayTarget} libre* :";
+                foreach ($formatRanges($lateSlots) as $range) {
+                    $lines[] = "  • {$range}";
+                }
+                $lines[] = "";
+            }
+
+            $lines[] = "────────────────";
+            $lines[] = "📌 _Heures de bureau : 9h–18h lun–ven_";
+            $lines[] = "💡 _Ex : focus window London, deep work Singapore_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'            => 'focus_window',
+                'target'            => $targetTz,
+                'focus_hours_count' => count($focusSlots),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: focus_window error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors du calcul des créneaux focus.\n"
+                . "_Vérifie ton fuseau horaire avec *mon profil*._"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // time_add — v1.22.0
+    // -------------------------------------------------------------------------
+
+    private function handleTimeAdd(array $parsed, array $prefs): AgentResult
+    {
+        $durationStr = trim($parsed['duration'] ?? '');
+        $fromTime    = $parsed['from_time'] ?? null;
+        $target      = $parsed['target'] ?? '';
+        $userTz      = $prefs['timezone'] ?? 'UTC';
+        $lang        = $prefs['language'] ?? 'fr';
+        $dateFmt     = $prefs['date_format'] ?? 'd/m/Y';
+
+        if (empty($durationStr)) {
+            return AgentResult::reply(
+                "⚠️ Précise une durée.\n\n"
+                . "_Exemples : dans 2h30, timer 45min, heure + 1h30_"
+            );
+        }
+
+        // Parse duration string into total minutes
+        $totalMinutes = $this->parseDurationToMinutes($durationStr);
+        if ($totalMinutes === null || $totalMinutes <= 0) {
+            return AgentResult::reply(
+                "⚠️ Durée invalide : *{$durationStr}*\n\n"
+                . "_Formats acceptés : 2h, 2h30, 45min, 90min, 1:30, 2.5h_"
+            );
+        }
+
+        try {
+            $userZone = new DateTimeZone($userTz);
+            $now      = new DateTimeImmutable('now', $userZone);
+
+            // Determine start time
+            if ($fromTime) {
+                $parsedTime = $this->parseTimeString($fromTime);
+                if (!$parsedTime) {
+                    return AgentResult::reply("⚠️ Heure de départ invalide : *{$fromTime}*\n_Formats : 14:30, 14h30, 2pm_");
+                }
+                [$h, $m] = explode(':', $parsedTime);
+                $start = $now->setTime((int) $h, (int) $m);
+            } else {
+                $start = $now;
+            }
+
+            $end = $start->modify("+{$totalMinutes} minutes");
+
+            $durationH = intdiv($totalMinutes, 60);
+            $durationM = $totalMinutes % 60;
+            $durationDisplay = $durationH > 0
+                ? ($durationM > 0 ? "{$durationH}h{$durationM:02d}" : "{$durationH}h")
+                : "{$durationM}min";
+
+            $dayName    = $this->getDayName((int) $end->format('w'), $lang, short: true);
+            $isNextDay  = $end->format('Y-m-d') !== $start->format('Y-m-d');
+            $dayNote    = $isNextDay ? " _{$dayName} " . $end->format($dateFmt) . "_" : '';
+
+            $lines = [
+                "⏱ *CALCUL DE DURÉE*",
+                "────────────────",
+                "🕐 Départ : *{$start->format('H:i')}* ({$userTz})",
+                "➕ Durée : *{$durationDisplay}*",
+                "🏁 Arrivée : *{$end->format('H:i')}*{$dayNote}",
+            ];
+
+            // If target city requested, show time there too
+            if (!empty($target)) {
+                $targetTz = $this->resolveTimezoneString($target);
+                if ($targetTz) {
+                    $targetZone = new DateTimeZone($targetTz);
+                    $endTarget  = $end->setTimezone($targetZone);
+                    $targetDay  = $this->getDayName((int) $endTarget->format('w'), $lang, short: true);
+                    $lines[]    = "🌍 À *" . ucfirst($target) . "* : *{$endTarget->format('H:i')}* ({$targetDay})";
+                } else {
+                    $lines[] = "⚠️ Ville non reconnue : _{$target}_";
+                }
+            }
+
+            $lines[] = "────────────────";
+            $lines[] = "💡 _Ex : dans 3h, timer 45min, 14h + 2h30, dans 1h à Tokyo_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'        => 'time_add',
+                'duration_min'  => $totalMinutes,
+                'start'         => $start->format('H:i'),
+                'end'           => $end->format('H:i'),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: time_add error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors du calcul.\n_Vérifie ton fuseau avec *mon profil*._"
+            );
+        }
+    }
+
+    /**
+     * Parse a duration string into total minutes.
+     * Accepts: 2h, 2h30, 45min, 90min, 1:30, 2.5h
+     */
+    private function parseDurationToMinutes(string $duration): ?int
+    {
+        $duration = trim(mb_strtolower($duration));
+
+        // Format: 2h30, 1h45, 0h15
+        if (preg_match('/^(\d+)h(\d{1,2})$/i', $duration, $m)) {
+            return ((int) $m[1]) * 60 + (int) $m[2];
+        }
+
+        // Format: 2h, 3h (hours only)
+        if (preg_match('/^(\d+)h$/i', $duration, $m)) {
+            return ((int) $m[1]) * 60;
+        }
+
+        // Format: 45min, 90min
+        if (preg_match('/^(\d+)\s*min$/i', $duration, $m)) {
+            return (int) $m[1];
+        }
+
+        // Format: 1:30, 2:45 (H:MM)
+        if (preg_match('/^(\d+):(\d{2})$/', $duration, $m)) {
+            return ((int) $m[1]) * 60 + (int) $m[2];
+        }
+
+        // Format: 2.5h, 1.25h (decimal hours)
+        if (preg_match('/^(\d+(?:\.\d+)?)h$/i', $duration, $m)) {
+            return (int) round((float) $m[1] * 60);
+        }
+
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // meeting_suggest — v1.22.0
+    // -------------------------------------------------------------------------
+
+    private function handleMeetingSuggest(array $parsed, array $prefs): AgentResult
+    {
+        $cities       = $parsed['cities'] ?? [];
+        $durationH    = min((int) ($parsed['duration_hours'] ?? 1), 4);
+        $userTz       = $prefs['timezone'] ?? 'UTC';
+        $lang         = $prefs['language'] ?? 'fr';
+
+        if (empty($cities) || !is_array($cities)) {
+            return AgentResult::reply(
+                "⚠️ Précise au moins une ville.\n\n"
+                . "_Exemples : meilleur horaire réunion Tokyo Paris, suggest meeting London Dubai Sydney_"
+            );
+        }
+
+        if ($durationH < 1) {
+            $durationH = 1;
+        }
+
+        try {
+            // Resolve all timezones (user + cities)
+            $zones = [['name' => 'Toi', 'tz' => $userTz, 'zone' => new DateTimeZone($userTz)]];
+
+            foreach ($cities as $city) {
+                $resolved = $this->resolveTimezoneString(trim($city));
+                if (!$resolved) {
+                    return AgentResult::reply("⚠️ Ville non reconnue : *{$city}*\n_Vérifie l'orthographe ou utilise un fuseau IANA._");
+                }
+                $zones[] = ['name' => ucfirst(trim($city)), 'tz' => $resolved, 'zone' => new DateTimeZone($resolved)];
+            }
+
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+            // Score each hour slot (0-23 UTC) for business compatibility
+            $slots = [];
+            for ($utcHour = 0; $utcHour < 24; $utcHour++) {
+                $testTime = $now->setTime($utcHour, 0);
+                $score    = 0;
+                $details  = [];
+
+                foreach ($zones as $z) {
+                    $local = $testTime->setTimezone($z['zone']);
+                    $h     = (int) $local->format('G');
+                    $dow   = (int) $local->format('N'); // 1=Mon, 7=Sun
+
+                    // Score based on how "comfortable" the hour is
+                    if ($h >= 9 && $h < 18 && $dow <= 5) {
+                        // Core business hours = high score
+                        $score += ($h >= 10 && $h < 17) ? 10 : 8;
+                    } elseif (($h >= 8 && $h < 9) || ($h >= 18 && $h < 19)) {
+                        // Early morning / just after work = acceptable
+                        $score += 4;
+                    } elseif (($h >= 7 && $h < 8) || ($h >= 19 && $h < 21)) {
+                        // Stretch hours = low score
+                        $score += 2;
+                    } else {
+                        // Night hours = penalty
+                        $score += 0;
+                    }
+
+                    // Check duration compatibility (all hours in the block should be decent)
+                    if ($durationH > 1) {
+                        for ($d = 1; $d < $durationH; $d++) {
+                            $laterH = ($h + $d) % 24;
+                            if ($laterH >= 9 && $laterH < 18) {
+                                $score += 3;
+                            } elseif ($laterH >= 7 && $laterH < 21) {
+                                $score += 1;
+                            }
+                        }
+                    }
+
+                    $details[] = ['name' => $z['name'], 'hour' => $local->format('H:i')];
+                }
+
+                $slots[] = [
+                    'utc_hour' => $utcHour,
+                    'score'    => $score,
+                    'details'  => $details,
+                ];
+            }
+
+            // Sort by score descending, take top 3
+            usort($slots, fn($a, $b) => $b['score'] <=> $a['score']);
+            $topSlots = array_slice($slots, 0, 3);
+
+            $maxScore = $topSlots[0]['score'] ?? 1;
+
+            $lines = [
+                "🏆 *MEILLEURS CRÉNEAUX DE RÉUNION*",
+                "────────────────",
+                "👥 Participants : *" . implode(', ', array_map(fn($z) => $z['name'], $zones)) . "*",
+                "⏱ Durée : *{$durationH}h*",
+                "",
+            ];
+
+            $medals = ['🥇', '🥈', '🥉'];
+            foreach ($topSlots as $i => $slot) {
+                $medal      = $medals[$i] ?? '•';
+                $pct        = $maxScore > 0 ? (int) round(($slot['score'] / $maxScore) * 100) : 0;
+                $bar        = str_repeat('█', (int) round($pct / 10)) . str_repeat('░', 10 - (int) round($pct / 10));
+                $cityTimes  = array_map(fn($d) => "*{$d['name']}* {$d['hour']}", $slot['details']);
+
+                $lines[] = "{$medal} *Créneau " . ($i + 1) . "* — Score : {$bar} {$pct}%";
+                $lines[] = "   " . implode(' · ', $cityTimes);
+
+                if ($i < count($topSlots) - 1) {
+                    $lines[] = "";
+                }
+            }
+
+            $lines[] = "────────────────";
+            $lines[] = "📌 _Score basé sur heures ouvrables 9h–18h lun–ven_";
+            $lines[] = "💡 _Ex : suggest meeting Tokyo London, meilleur créneau 2h Paris Dubai_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'    => 'meeting_suggest',
+                'cities'    => array_map(fn($z) => $z['tz'], $zones),
+                'top_score' => $topSlots[0]['score'] ?? 0,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: meeting_suggest error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de la suggestion de créneaux.\n"
+                . "_Vérifie les noms de villes et ton fuseau avec *mon profil*._"
+            );
+        }
+    }
+
+    /**
+     * Get a short display name for a timezone (last segment of IANA id).
+     */
+    private function getShortTzName(string $tz): string
+    {
+        $parts = explode('/', $tz);
+        return str_replace('_', ' ', end($parts));
+    }
+
     /**
      * Parse a human-written time string into HH:MM (24h).
      * Accepts: 14:30, 14h30, 9h, 9h00, 2pm, 2:30pm, 14h, etc.
@@ -5219,6 +6168,12 @@ PROMPT;
             "• _toutes les 2 semaines à partir du 1er avril_ — récurrence",
             "• _jours fériés France_ — prochains jours fériés",
             "• _semaine 15 2026_ — dates d'une semaine ISO",
+            "• _c'est quoi PST_ — décoder une abréviation",
+            "• _pomodoro 6 sessions_ — planning Pomodoro",
+            "• _durée entre 9h et 17h30_ — temps écoulé",
+            "• _focus window Tokyo_ — créneaux deep work",
+            "• _dans 2h30 quelle heure_ — calcul de durée",
+            "• _meilleur horaire réunion Tokyo Paris NYC_ — suggestion",
             "• _exporter mes préférences_",
             "• _reset all_",
             "• _aide preferences_",
@@ -5442,6 +6397,29 @@ PROMPT;
             "• _semaine 15_ / _dates de la semaine 20_ / _week 15 2026_",
             "• _quelles dates sont en semaine 1 2027_",
             "• Convertit un numéro de semaine en dates lundi–dimanche",
+            "",
+            "*🔤 Abréviations de fuseaux horaires :*",
+            "• _c'est quoi PST_ / _que veut dire CET_ / _signification EST_",
+            "• _abréviations fuseaux_ / _liste abréviations_",
+            "• Décode PST, CET, GMT, JST, IST et 30+ abréviations",
+            "",
+            "*🍅 Planning Pomodoro :*",
+            "• _pomodoro_ — 4 sessions de 25min par défaut",
+            "• _pomodoro 6 sessions_ / _6 pomodoros_",
+            "• _pomodoro 50min travail 10min pause_",
+            "• Calcule les horaires de chaque session et pause",
+            "",
+            "*⏱ Durée écoulée (elapsed time) :*",
+            "• _durée entre 9h et 17h30_ / _combien de temps entre 8h30 et 12h45_",
+            "• _elapsed time 14h to 22h15_ / _temps de travail de 9h à 18h_",
+            "• _durée entre 2026-03-25 09:00 et 2026-03-27 17:30_ — cross-day",
+            "• Affiche durée en h/min, décimal, et total minutes",
+            "",
+            "*🎯 Fenêtre Focus / Deep Work :*",
+            "• _focus window Tokyo_ / _deep work New York_",
+            "• _heures calmes entre moi et Londres_ / _quiet hours Dubai_",
+            "• _créneau focus Singapore_ / _plage de concentration Sydney_",
+            "• Trouve les créneaux où les 2 fuseaux sont hors bureau",
         ];
 
         return implode("\n", $lines);
@@ -5489,10 +6467,15 @@ PROMPT;
 
         $clean = trim($response);
 
-        // Strip markdown code blocks
+        // Strip markdown code blocks (```json ... ``` or ``` ... ```)
         if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
             $clean = $m[1];
         }
+
+        // Strip leading/trailing prose that some LLMs add (e.g. "Here is the JSON:")
+        $clean = preg_replace('/^[^{\[]*(?=[{\[])/', '', $clean);
+        $clean = preg_replace('/[^}\]]*$/', '', $clean);
+        $clean = trim($clean);
 
         // Handle array response — take first object
         $trimmed = ltrim($clean);
@@ -5510,6 +6493,11 @@ PROMPT;
 
         // Strip trailing commas before closing braces (common LLM error)
         $clean = preg_replace('/,\s*([}\]])/', '$1', $clean);
+
+        // Fix single quotes used instead of double quotes (common LLM error)
+        if (!str_contains($clean, '"') && str_contains($clean, "'")) {
+            $clean = str_replace("'", '"', $clean);
+        }
 
         $decoded = json_decode($clean, true);
 
