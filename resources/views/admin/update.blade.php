@@ -92,10 +92,10 @@
             },
 
             startRebuildPolling() {
-                this.rebuildLog = 'Waiting for container to come back online...\n';
+                this.rebuildLog = 'Waiting for container rebuild...\n';
                 let attempts = 0;
                 let wasDown = false;
-                let backOnline = false;
+                let noLogCount = 0;
                 this.rebuildPolling = setInterval(async () => {
                     attempts++;
                     try {
@@ -103,21 +103,30 @@
                         if (r.ok) {
                             const d = await r.json();
                             if (wasDown) {
-                                backOnline = true;
+                                // Container came back after being down
+                                clearInterval(this.rebuildPolling);
+                                this.rebuildPolling = null;
+                                this.rebuildLog += (d.log || '') + '\nContainer restarted successfully.\n';
+                                this.phase = 'done';
+                                this.error = false;
+                                return;
                             }
                             if (d.log) {
                                 this.rebuildLog = d.log;
+                                noLogCount = 0;
+                            } else {
+                                noLogCount++;
                             }
                             if (d.finished) {
                                 clearInterval(this.rebuildPolling);
                                 this.rebuildPolling = null;
                                 this.phase = 'done';
                                 this.error = !d.success;
-                            } else if (backOnline && !d.log) {
-                                // Container is back but no rebuild log = update completed via restart
+                            } else if (noLogCount >= 10) {
+                                // No rebuild log after 30s+ and container still up = rebuild happened via restart
                                 clearInterval(this.rebuildPolling);
                                 this.rebuildPolling = null;
-                                this.rebuildLog += '\nContainer restarted successfully.\n';
+                                this.rebuildLog += '\nRebuild complete (container restarted).\n';
                                 this.phase = 'done';
                                 this.error = false;
                             }
@@ -126,12 +135,11 @@
                             this.rebuildLog = 'Container is rebuilding and restarting...\n';
                         }
                     } catch(e) {
-                        // Container is down — this is expected during rebuild
                         wasDown = true;
                         this.rebuildLog = 'Container is rebuilding and restarting...\n';
                     }
-                    // Safety: stop after 10 minutes
-                    if (attempts > 300) {
+                    // Safety: stop after 5 minutes
+                    if (attempts > 100) {
                         clearInterval(this.rebuildPolling);
                         this.rebuildPolling = null;
                         this.rebuildLog += '\n[Timeout — check container logs manually]\n';
