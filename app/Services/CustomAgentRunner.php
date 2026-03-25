@@ -126,10 +126,14 @@ class CustomAgentRunner extends BaseAgent
     {
         $this->log($context, "Custom agent '{$this->customAgent->name}' handling message");
 
-        // 1. Resolve model
-        $model = $this->customAgent->model !== 'default'
-            ? $this->customAgent->model
-            : $this->resolveModel($context);
+        // 1. Resolve model — prefer custom agent's model, then parent agent's, then fast default
+        if ($this->customAgent->model !== 'default') {
+            $model = $this->customAgent->model;
+        } elseif ($context->agent->model) {
+            $model = $context->agent->model;
+        } else {
+            $model = $this->resolveModel($context);
+        }
 
         // 2. Classify model capabilities
         $tier = $this->classifyModel($model);
@@ -154,10 +158,10 @@ class CustomAgentRunner extends BaseAgent
             // Fallback to simple chat if agentic loop failed
             if (!$result->reply || str_contains($result->reply, 'trop volumineux') || str_contains($result->reply, "n'ai pas pu")) {
                 $this->log($context, "Agentic loop failed, falling back to simple chat");
-                $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier);
+                $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier, $ragContext);
             }
         } else {
-            $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier);
+            $result = $this->handleSimpleChat($context, $systemPrompt, $model, $tier, $ragContext);
         }
 
         $this->log($context, "Custom agent replied", [
@@ -222,7 +226,7 @@ class CustomAgentRunner extends BaseAgent
     /**
      * Handle simple chat (no tools, knowledge-only).
      */
-    private function handleSimpleChat(AgentContext $context, string $systemPrompt, string $model, ModelTier $tier = ModelTier::Balanced): AgentResult
+    private function handleSimpleChat(AgentContext $context, string $systemPrompt, string $model, ModelTier $tier = ModelTier::Balanced, array $ragContext = []): AgentResult
     {
         $history = $this->memory->read($context->agent->id, $context->from);
         $messages = $this->buildMessages($history, $context, $tier);
@@ -235,6 +239,22 @@ class CustomAgentRunner extends BaseAgent
         }
 
         $response = $this->claude->chat($messages, $model, $systemPrompt);
+
+        // Fallback to on-prem if cloud model failed (e.g. OAuth CLI unavailable)
+        if (!$response && (str_starts_with($model, 'claude-') || str_starts_with($model, 'gpt-'))) {
+            $onpremModel = 'qwen2.5:7b';
+            $this->log($context, "Cloud model failed, falling back to on-prem", ['from' => $model, 'to' => $onpremModel]);
+            // Build ultra-minimal prompt for on-prem (keep it very short to avoid timeout)
+            $compactMsg = '';
+            if (!empty($ragContext)) {
+                foreach (array_slice($ragContext, 0, 2) as $c) {
+                    $compactMsg .= mb_substr($c['content'], 0, 150) . "\n";
+                }
+                $compactMsg .= "\n";
+            }
+            $compactMsg .= "Question: " . ($context->body ?? '') . "\nReponds brievement:";
+            $response = $this->claude->chat($compactMsg, $onpremModel, '', 200);
+        }
 
         if (!$response) {
             return AgentResult::reply("Désolé, je n'ai pas pu traiter votre message. Réessayez.");
