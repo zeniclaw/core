@@ -35,8 +35,10 @@ fi
 git clean -fd --exclude=.env --exclude=storage/ --exclude=node_modules/ 2>/dev/null || true
 git checkout -- . 2>/dev/null || true
 
-# Read version from Dockerfile
-VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
+# Read version from Dockerfile (supports both old and new version location)
+VERSION=$(grep -oP 'echo "\K[^"]+(?=" > /tmp/\.zeniclaw-version)' Dockerfile 2>/dev/null || \
+          grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile 2>/dev/null || \
+          echo "unknown")
 echo "VERSION=$VERSION"
 
 # Detect container runtime

@@ -203,8 +203,10 @@ git clean -fd --exclude=.env --exclude=storage/ --exclude=node_modules/ 2>/dev/n
 git checkout -- . 2>/dev/null || true
 success "Code updated and cleaned"
 
-# 2. Read new version
-VERSION=$(grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile || echo "unknown")
+# 2. Read new version (supports both old and new version location in Dockerfile)
+VERSION=$(grep -oP 'echo "\K[^"]+(?=" > /tmp/\.zeniclaw-version)' Dockerfile 2>/dev/null || \
+          grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile 2>/dev/null || \
+          echo "unknown")
 info "New version: v${VERSION}"
 
 # 3. Clean up old images/build cache to free disk space
