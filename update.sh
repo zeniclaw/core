@@ -181,17 +181,28 @@ fi
 echo -e "\n${BOLD}${CYAN}=== ZeniClaw Update ===${NC}"
 echo -e "${DIM}Runtime: $CONTAINER_CMD | Compose: $COMPOSE${NC}\n"
 
-# 1. Git pull
-info "Pulling latest code from GitLab..."
-
-# Try to get token from the running app container
-TOKEN=""
-if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
-    TOKEN=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('gitlab_access_token');" 2>/dev/null || true)
+# 1. Git pull — migrate remote from GitLab to GitHub if needed
+CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
+if echo "$CURRENT_REMOTE" | grep -q "gitlab.com/zenidev/zeniclaw"; then
+    info "Migrating git remote from GitLab to GitHub..."
+    git remote set-url origin "https://github.com/zeniclaw/core.git"
+    success "Remote updated to GitHub"
 fi
 
+info "Pulling latest code..."
+
+# Try GitHub token first, then GitLab token for legacy setups
+TOKEN=""
+if $CONTAINER_CMD inspect zeniclaw_app &>/dev/null; then
+    TOKEN=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('github_access_token') ?? '';" 2>/dev/null || true)
+    if [ -z "$TOKEN" ]; then
+        TOKEN=$($CONTAINER_CMD exec zeniclaw_app php artisan tinker --execute="echo App\Models\AppSetting::get('gitlab_access_token') ?? '';" 2>/dev/null || true)
+    fi
+fi
+
+REMOTE_HOST=$(git remote get-url origin | grep -oP '://\K[^/]+' || echo "github.com")
 if [ -n "$TOKEN" ]; then
-    git -c "url.https://oauth2:${TOKEN}@gitlab.com/.insteadOf=https://gitlab.com/" pull origin main
+    git -c "url.https://x-access-token:${TOKEN}@${REMOTE_HOST}/.insteadOf=https://${REMOTE_HOST}/" pull origin main
 else
     git pull origin main
 fi
