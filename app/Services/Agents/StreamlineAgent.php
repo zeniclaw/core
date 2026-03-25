@@ -154,12 +154,15 @@ class StreamlineAgent extends BaseAgent
             'classement workflows', 'ranking workflows', 'workflow perf',
             'workflow whatif', 'workflow what-if', 'impact etape', 'que se passe si', 'simuler retrait',
             'impact suppression etape', 'workflow impact',
+            'workflow rate', 'noter workflow', 'evaluer workflow', 'etoiles workflow',
+            'workflow alias', 'raccourci workflow', 'shortcut workflow',
+            'workflow top-rated', 'mieux notes', 'meilleurs workflows', 'top rated workflows',
         ];
     }
 
     public function version(): string
     {
-        return '1.44.0';
+        return '1.45.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -534,6 +537,9 @@ class StreamlineAgent extends BaseAgent
             'summary-all', 'summaryall'     => $this->commandSummaryAll($context),
             'benchmark', 'bench', 'perf'    => $this->commandBenchmark($context, $arg1),
             'whatif', 'what-if', 'impact'   => $this->commandWhatIf($context, $arg1, $arg2),
+            'rate', 'noter', 'evaluer'      => $this->commandRate($context, $arg1, $arg2),
+            'alias', 'shortcut', 'raccourci' => $this->commandAlias($context, $arg1, $arg2),
+            'top-rated', 'toprated', 'mieux-notes' => $this->commandTopRated($context),
             'help'                          => $this->showHelp($context, $arg1),
             default                         => $this->handleUnknownCommand($context, $action),
         };
@@ -1321,6 +1327,15 @@ class StreamlineAgent extends BaseAgent
             Log::info("StreamlineAgent: NLU input truncated", ['from' => $context->from, 'original_len' => mb_strlen($context->body ?? '')]);
         }
 
+        // Sanitize input: strip control characters and excessive whitespace to reduce noise
+        $body = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $body);
+        $body = preg_replace('/\s{3,}/', '  ', $body);
+        $body = trim($body);
+
+        if (empty($body)) {
+            return $this->showHelp($context);
+        }
+
         $model         = $this->resolveModel($context);
         $contextMemory = $this->formatContextMemoryForPrompt($context->from, $context);
 
@@ -1346,7 +1361,7 @@ class StreamlineAgent extends BaseAgent
             . "- Disambiguation: 'montre/affiche' → show, 'info/resume rapide' → info, 'explique/comment ca marche' → explain, 'analyse/rapport' → analyze, 'resume d'activite/bilan' → recap\n\n"
             . "Format de reponse:\n"
             . "{\n"
-            . "  \"action\": \"create|list|trigger|delete|show|info|enable|disable|rename|duplicate|stats|history|dryrun|run-all|summary|step-config|suggest|health|quick|search|export|pin|unpin|reset-stats|notes|batch|tags|template|last|schedule|merge|optimize|swap|undo|dashboard|retry|clean|status|graph|recent|test-step|disable-step|enable-step|chain|analyze|snapshot|restore|validate|bulk-tag|compare-stats|recap|profile|bulk-action|dependencies|export-all|explain|timeline|estimate|watch|split|reorder|archive|unarchive|compact|go|diagnose|streak|focus|quick-create|overview|clone-steps|kpi|help-search|summary-all|benchmark|whatif|help\",\n"
+            . "  \"action\": \"create|list|trigger|delete|show|info|enable|disable|rename|duplicate|stats|history|dryrun|run-all|summary|step-config|suggest|health|quick|search|export|pin|unpin|reset-stats|notes|batch|tags|template|last|schedule|merge|optimize|swap|undo|dashboard|retry|clean|status|graph|recent|test-step|disable-step|enable-step|chain|analyze|snapshot|restore|validate|bulk-tag|compare-stats|recap|profile|bulk-action|dependencies|export-all|explain|timeline|estimate|watch|split|reorder|archive|unarchive|compact|go|diagnose|streak|focus|quick-create|overview|clone-steps|kpi|help-search|summary-all|benchmark|whatif|rate|alias|top-rated|help\",\n"
             . "  \"name\": \"nom-en-kebab-case-sans-espaces (requis sauf pour list/help/status/stats/dashboard/health)\",\n"
             . "  \"input\": \"contexte optionnel pour trigger (ex: 'focus finances', 'urgent seulement') — passe a chaque etape\",\n"
             . "  \"steps\": [\n"
@@ -1380,6 +1395,14 @@ class StreamlineAgent extends BaseAgent
             . "- user_preferences : preferences utilisateur, parametres personnels, configuration du profil\n"
             . "- daily_brief : briefing quotidien, resume du jour, morning check, vue d'ensemble\n"
             . "- game_master : jeux interactifs, trivia, divertissement, quiz fun\n"
+            . "- recipe : recettes de cuisine, idees repas, ingredients\n"
+            . "- flashcard : cartes memoire, revision, apprentissage espace\n"
+            . "- budget_tracker : suivi budget detaille, categorisation depenses\n"
+            . "- project : gestion de projet, milestones, suivi avancement\n"
+            . "- smart_meeting : notes de reunion, comptes-rendus, actions a suivre\n"
+            . "- mood_check : suivi humeur, bien-etre, journal emotionnel\n"
+            . "- time_blocker : blocs de temps, planning journalier, time boxing\n"
+            . "- collaborative_task : taches collaboratives, assignation, suivi equipe\n"
             . "Si l'agent n'est pas evident, laisse null (auto-detection).\n\n"
             . "REGLES DE DISAMBIGUATION AVANCEES:\n"
             . "- Si le message est vague (ex: 'workflow', 'aide'), utilise action=\"help\"\n"
@@ -1395,7 +1418,10 @@ class StreamlineAgent extends BaseAgent
             . "- 'diagnostique/probleme/pourquoi ca marche pas/debug' → diagnose\n"
             . "- 'go/vite/rapide + nom' → go (trigger rapide du workflow le plus proche)\n"
             . "- 'benchmark/classement/ranking/performance globale' → benchmark\n"
-            . "- 'que se passe si/impact/retrait/whatif + etape' → whatif\n\n"
+            . "- 'que se passe si/impact/retrait/whatif + etape' → whatif\n"
+            . "- 'noter/evaluer/etoiles/score + nom' → rate (evaluer la qualite d'un workflow de 1 a 5)\n"
+            . "- 'alias/raccourci/shortcut + nom + alias' → alias (creer un raccourci pour un workflow)\n"
+            . "- 'mieux notes/top rated/meilleurs workflows/classement notes' → top-rated\n\n"
             . "Actions supportees:\n"
             . "- create : creer un nouveau workflow (necessite name + steps)\n"
             . "- list : lister les workflows existants\n"
@@ -1477,6 +1503,9 @@ class StreamlineAgent extends BaseAgent
             . "- summary-all : resume IA compact de tous les workflows (pas de name requis)\n"
             . "- benchmark : classement comparatif des workflows par performance (name=nombre optionnel, defaut 10)\n"
             . "- whatif : simuler l'impact du retrait d'une etape (necessite name, reply=numero de l'etape)\n"
+            . "- rate : noter/evaluer un workflow de 1 a 5 etoiles (necessite name, reply=note de 1 a 5)\n"
+            . "- alias : creer un raccourci/alias pour un workflow (necessite name, reply=alias en kebab-case)\n"
+            . "- top-rated : classement des workflows par notes utilisateur (pas de name requis)\n"
             . "- help : si l'intention est ambigue ou non reconnue\n\n"
             . "Regles:\n"
             . "- Nom de workflow: kebab-case obligatoire (ex: morning-brief, daily-check, weekly-review)\n"
@@ -1605,7 +1634,13 @@ class StreamlineAgent extends BaseAgent
             . "  \"quel workflow est le plus performant\" → {\"action\":\"benchmark\"}\n"
             . "  \"que se passe-t-il si je retire l'etape 2 de morning-brief\" → {\"action\":\"whatif\",\"name\":\"morning-brief\",\"reply\":\"2\"}\n"
             . "  \"impact de supprimer l'etape 3 de daily-check\" → {\"action\":\"whatif\",\"name\":\"daily-check\",\"reply\":\"3\"}\n"
-            . "  \"simule le retrait de l'etape 1\" → {\"action\":\"whatif\",\"name\":\"...\",\"reply\":\"1\"}",
+            . "  \"simule le retrait de l'etape 1\" → {\"action\":\"whatif\",\"name\":\"...\",\"reply\":\"1\"}\n"
+            . "  \"note morning-brief 4 etoiles\" → {\"action\":\"rate\",\"name\":\"morning-brief\",\"reply\":\"4\"}\n"
+            . "  \"evaluer le workflow daily-check\" → {\"action\":\"rate\",\"name\":\"daily-check\"}\n"
+            . "  \"cree un alias mb pour morning-brief\" → {\"action\":\"alias\",\"name\":\"morning-brief\",\"reply\":\"mb\"}\n"
+            . "  \"raccourci dc pour daily-check\" → {\"action\":\"alias\",\"name\":\"daily-check\",\"reply\":\"dc\"}\n"
+            . "  \"mes workflows les mieux notes\" → {\"action\":\"top-rated\"}\n"
+            . "  \"classement par notes\" → {\"action\":\"top-rated\"}",
             self::NLU_MAX_TOKENS
         );
         } catch (\Throwable $e) {
@@ -1759,6 +1794,9 @@ class StreamlineAgent extends BaseAgent
             'summary-all'   => $this->commandSummaryAll($context),
             'copy-step'     => $this->commandCopyStep($context, $parsed['name'] ?? ''),
             'preview'       => $this->commandTrigger($context, $parsed['name'] ?? '', '--preview ' . ($parsed['input'] ?? '')),
+            'rate'          => $this->commandRate($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'alias'         => $this->commandAlias($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'top-rated'     => $this->commandTopRated($context),
             default         => AgentResult::reply($parsed['reply'] ?? $this->getHelpText()),
         };
     }
@@ -1778,7 +1816,7 @@ class StreamlineAgent extends BaseAgent
             return AgentResult::reply("Un workflow peut contenir au maximum 10 etapes (recu: " . count($data['steps']) . ").\nDecoupe ton workflow en plusieurs plus petits.");
         }
 
-        $validAgents = ['chat', 'dev', 'todo', 'reminder', 'event_reminder', 'finance', 'music', 'habit', 'pomodoro', 'content_summarizer', 'code_review', 'web_search', 'document', 'analysis', 'streamline', 'interactive_quiz', 'content_curator', 'user_preferences'];
+        $validAgents = ['chat', 'dev', 'todo', 'reminder', 'event_reminder', 'finance', 'music', 'habit', 'pomodoro', 'content_summarizer', 'code_review', 'web_search', 'document', 'analysis', 'streamline', 'interactive_quiz', 'content_curator', 'user_preferences', 'daily_brief', 'game_master', 'recipe', 'flashcard', 'budget_tracker', 'project', 'smart_meeting', 'mood_check', 'time_blocker', 'collaborative_task'];
 
         // Normalize step fields with defaults + validation
         $data['steps'] = array_map(function (array $step) use ($validAgents) {
@@ -2731,6 +2769,15 @@ class StreamlineAgent extends BaseAgent
             }
         }
 
+        // 5. Alias match: check workflow aliases stored in conditions
+        $allWorkflows = $allWorkflows ?? Workflow::forUser($userPhone)->get();
+        foreach ($allWorkflows as $wf) {
+            $wfAliases = $wf->conditions['aliases'] ?? [];
+            if (in_array($lowerName, $wfAliases, true)) {
+                return $wf;
+            }
+        }
+
         // Multiple matches or no match at all: return null (caller should use findWorkflowOrAmbiguous)
         return null;
     }
@@ -2759,8 +2806,17 @@ class StreamlineAgent extends BaseAgent
             ->get();
 
         if ($matches->count() === 0) {
+            // Try alias match before giving up
+            $allWorkflows = Workflow::forUser($userPhone)->get();
+            foreach ($allWorkflows as $wf) {
+                $wfAliases = $wf->conditions['aliases'] ?? [];
+                if (in_array($lowerName, $wfAliases, true)) {
+                    return [$wf, null];
+                }
+            }
+
             // Try Levenshtein suggestion
-            $allNames  = Workflow::forUser($userPhone)->pluck('name');
+            $allNames  = $allWorkflows->pluck('name');
             $suggest   = null;
             $bestDist  = 4;
             foreach ($allNames as $wfName) {
@@ -6475,7 +6531,8 @@ class StreamlineAgent extends BaseAgent
             'timeline', 'estimate', 'watch', 'rename-step', 'pause', 'split',
             'reorder', 'archive', 'unarchive', 'compact', 'go', 'diagnose',
             'quick-create', 'overview', 'preflight', 'streak', 'focus',
-            'clone-steps', 'kpi', 'help-search', 'summary-all', 'help',
+            'clone-steps', 'kpi', 'help-search', 'summary-all', 'benchmark',
+            'whatif', 'what-if', 'rate', 'alias', 'top-rated', 'help',
         ];
 
         // Find closest match (Levenshtein distance <= 3)
@@ -7370,7 +7427,10 @@ class StreamlineAgent extends BaseAgent
             . "  /workflow help-search [terme] — chercher une commande\n"
             . "  /workflow summary-all — resume IA de tous les workflows\n"
             . "  /workflow benchmark — classement par performance\n"
-            . "  /workflow whatif [nom] [etape] — simuler le retrait\n\n"
+            . "  /workflow whatif [nom] [etape] — simuler le retrait\n"
+            . "  /workflow rate [nom] [1-5] — noter un workflow\n"
+            . "  /workflow top-rated — classement par notes\n"
+            . "  /workflow alias [nom] [alias] — raccourci\n\n"
             . "_Aide par categorie: /workflow help [gestion|execution|etapes|analyse|avance]_";
     }
 
@@ -8501,9 +8561,21 @@ class StreamlineAgent extends BaseAgent
     {
         $arg = trim($arg);
 
-        // If a name is given, find and trigger it directly
+        // If a name is given, find and trigger it directly (also check aliases)
         if (!empty($arg)) {
             $workflow = $this->findWorkflow($context->from, $arg);
+            // Alias fallback: search aliases if no direct match
+            if (!$workflow) {
+                $aliasLower = mb_strtolower($arg);
+                $allWf = Workflow::forUser($context->from)->get();
+                foreach ($allWf as $wf) {
+                    $wfAliases = $wf->conditions['aliases'] ?? [];
+                    if (in_array($aliasLower, $wfAliases, true)) {
+                        $workflow = $wf;
+                        break;
+                    }
+                }
+            }
             if (!$workflow) {
                 return AgentResult::reply(
                     "Aucun workflow correspondant a \"{$arg}\".\n"
@@ -10016,6 +10088,270 @@ class StreamlineAgent extends BaseAgent
         $lines[] = "→ /workflow dryrun {$workflow->name} — simuler en l'etat";
 
         $this->log($context, 'whatif', ['workflow' => $workflow->name, 'step' => $stepNum, 'impacts' => count($impacts)]);
+        return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Rate a workflow from 1 to 5 stars.
+     * Stores the rating in workflow conditions for quality tracking.
+     */
+    private function commandRate(AgentContext $context, string $name, string $ratingArg): AgentResult
+    {
+        if (empty($name)) {
+            return AgentResult::reply(
+                "*Evaluer un workflow*\n\n"
+                . "Attribue une note de 1 a 5 etoiles pour evaluer la qualite d'un workflow.\n\n"
+                . "Utilisation: /workflow rate [nom] [1-5]\n"
+                . "Exemple: /workflow rate morning-brief 4\n\n"
+                . "Les notes sont visibles dans /workflow info et /workflow dashboard."
+            );
+        }
+
+        [$workflow, $errResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errResult) return $errResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nVerifie avec /workflow list");
+        }
+
+        $rating = (int) trim($ratingArg);
+        if ($rating < 1 || $rating > 5) {
+            return AgentResult::reply(
+                "Note invalide. Donne une note entre *1* et *5*.\n\n"
+                . "  1 ⭐ — Mauvais\n"
+                . "  2 ⭐⭐ — Moyen\n"
+                . "  3 ⭐⭐⭐ — Correct\n"
+                . "  4 ⭐⭐⭐⭐ — Bon\n"
+                . "  5 ⭐⭐⭐⭐⭐ — Excellent\n\n"
+                . "Exemple: /workflow rate {$workflow->name} 4"
+            );
+        }
+
+        $conditions = $workflow->conditions ?? [];
+        $ratings = $conditions['ratings'] ?? [];
+        $ratings[] = [
+            'score' => $rating,
+            'at'    => now()->toIso8601String(),
+        ];
+        // Keep only last 20 ratings
+        if (count($ratings) > 20) {
+            $ratings = array_slice($ratings, -20);
+        }
+        $conditions['ratings'] = $ratings;
+        $workflow->conditions = $conditions;
+        $workflow->save();
+
+        $avgRating = collect($ratings)->avg('score');
+        $stars = str_repeat('⭐', $rating);
+        $avgStars = str_repeat('⭐', (int) round($avgRating));
+        $totalRatings = count($ratings);
+
+        $this->log($context, "Workflow rated: {$workflow->name}", [
+            'rating'  => $rating,
+            'average' => round($avgRating, 1),
+            'total'   => $totalRatings,
+        ]);
+
+        $reply = "*Note enregistree: {$workflow->name}*\n\n"
+            . "Ta note: {$stars} ({$rating}/5)\n"
+            . "Moyenne: {$avgStars} (" . round($avgRating, 1) . "/5 sur {$totalRatings} evaluation" . ($totalRatings > 1 ? 's' : '') . ")\n\n"
+            . "→ /workflow info {$workflow->name}\n"
+            . "→ /workflow optimize {$workflow->name}";
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
+    /**
+     * Create or manage aliases (shortcuts) for workflows.
+     * Aliases are stored in workflow conditions for quick access.
+     */
+    private function commandAlias(AgentContext $context, string $name, string $aliasArg): AgentResult
+    {
+        if (empty($name)) {
+            // Show all aliases for this user
+            $workflows = Workflow::forUser($context->from)->get();
+            $aliases = [];
+            foreach ($workflows as $wf) {
+                $wfAliases = $wf->conditions['aliases'] ?? [];
+                foreach ($wfAliases as $alias) {
+                    $aliases[] = "  *{$alias}* → {$wf->name}";
+                }
+            }
+
+            if (empty($aliases)) {
+                return AgentResult::reply(
+                    "*Aliases de workflows*\n\n"
+                    . "Aucun alias configure.\n\n"
+                    . "Cree un raccourci:\n"
+                    . "  /workflow alias [nom-workflow] [alias]\n\n"
+                    . "Exemples:\n"
+                    . "  /workflow alias morning-brief mb\n"
+                    . "  /workflow alias daily-check dc\n\n"
+                    . "Utilise ensuite: /workflow go mb"
+                );
+            }
+
+            return AgentResult::reply(
+                "*Aliases de workflows*\n\n"
+                . implode("\n", $aliases) . "\n\n"
+                . "Ajouter: /workflow alias [nom] [alias]\n"
+                . "Supprimer: /workflow alias [nom] --remove [alias]\n"
+                . "Utiliser: /workflow go [alias]"
+            );
+        }
+
+        [$workflow, $errResult] = $this->findWorkflowOrAmbiguous($context->from, $name);
+        if ($errResult) return $errResult;
+        if (!$workflow) {
+            return AgentResult::reply("Workflow \"{$name}\" introuvable.\nVerifie avec /workflow list");
+        }
+
+        $aliasArg = trim($aliasArg);
+        $isRemove = str_starts_with($aliasArg, '--remove ');
+        if ($isRemove) {
+            $aliasArg = trim(mb_substr($aliasArg, 9));
+        }
+
+        if (empty($aliasArg)) {
+            $existing = $workflow->conditions['aliases'] ?? [];
+            if (empty($existing)) {
+                return AgentResult::reply(
+                    "Aucun alias pour *{$workflow->name}*.\n\n"
+                    . "Ajouter: /workflow alias {$workflow->name} [alias]\n"
+                    . "Exemple: /workflow alias {$workflow->name} " . mb_substr($workflow->name, 0, 2)
+                );
+            }
+            return AgentResult::reply(
+                "*Aliases de {$workflow->name}:*\n"
+                . implode(', ', array_map(fn($a) => "*{$a}*", $existing)) . "\n\n"
+                . "Supprimer: /workflow alias {$workflow->name} --remove [alias]"
+            );
+        }
+
+        // Validate alias format
+        $alias = mb_strtolower($aliasArg);
+        if (!preg_match('/^[a-z0-9\-_]{1,20}$/', $alias)) {
+            return AgentResult::reply(
+                "Alias invalide: \"{$alias}\"\n"
+                . "Utilise uniquement lettres minuscules, chiffres, tirets (max 20 car.).\n"
+                . "Exemple: /workflow alias {$workflow->name} mb"
+            );
+        }
+
+        // Check alias doesn't conflict with existing workflow names or other aliases
+        $conflict = Workflow::forUser($context->from)->where('name', $alias)->first();
+        if ($conflict) {
+            return AgentResult::reply("⚠ \"{$alias}\" est deja un nom de workflow. Choisis un alias different.");
+        }
+
+        // Check for alias conflicts across all workflows
+        $allWorkflows = Workflow::forUser($context->from)->get();
+        foreach ($allWorkflows as $wf) {
+            if ($wf->id === $workflow->id) continue;
+            $wfAliases = $wf->conditions['aliases'] ?? [];
+            if (in_array($alias, $wfAliases, true)) {
+                return AgentResult::reply("⚠ L'alias \"{$alias}\" est deja utilise par *{$wf->name}*.");
+            }
+        }
+
+        $conditions = $workflow->conditions ?? [];
+        $aliases = $conditions['aliases'] ?? [];
+
+        if ($isRemove) {
+            if (!in_array($alias, $aliases, true)) {
+                return AgentResult::reply("L'alias \"{$alias}\" n'existe pas sur *{$workflow->name}*.");
+            }
+            $aliases = array_values(array_filter($aliases, fn($a) => $a !== $alias));
+            $conditions['aliases'] = $aliases;
+            $workflow->conditions = $conditions;
+            $workflow->save();
+
+            $this->log($context, "Alias removed: {$alias} from {$workflow->name}");
+            $reply = "Alias *{$alias}* supprime de *{$workflow->name}*.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply);
+        }
+
+        // Add alias
+        if (in_array($alias, $aliases, true)) {
+            return AgentResult::reply("L'alias \"{$alias}\" existe deja pour *{$workflow->name}*.");
+        }
+
+        if (count($aliases) >= 5) {
+            return AgentResult::reply(
+                "⚠ Maximum 5 aliases par workflow.\n"
+                . "Aliases actuels: " . implode(', ', $aliases) . "\n\n"
+                . "Supprime un alias d'abord: /workflow alias {$workflow->name} --remove [alias]"
+            );
+        }
+
+        $aliases[] = $alias;
+        $conditions['aliases'] = $aliases;
+        $workflow->conditions = $conditions;
+        $workflow->save();
+
+        $this->log($context, "Alias created: {$alias} for {$workflow->name}");
+        $reply = "Alias *{$alias}* cree pour *{$workflow->name}*.\n\n"
+            . "Utilise: /workflow go {$alias}\n"
+            . "Tous les aliases: " . implode(', ', array_map(fn($a) => "*{$a}*", $aliases));
+
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
+    }
+
+    /**
+     * Show workflows ranked by user ratings (top-rated).
+     */
+    private function commandTopRated(AgentContext $context): AgentResult
+    {
+        $workflows = Workflow::forUser($context->from)->get();
+
+        $rated = [];
+        foreach ($workflows as $wf) {
+            $ratings = $wf->conditions['ratings'] ?? [];
+            if (empty($ratings)) continue;
+            $avg = collect($ratings)->avg('score');
+            $rated[] = [
+                'workflow' => $wf,
+                'avg'      => round($avg, 1),
+                'count'    => count($ratings),
+                'stars'    => str_repeat('⭐', (int) round($avg)),
+            ];
+        }
+
+        if (empty($rated)) {
+            return AgentResult::reply(
+                "*Classement par notes*\n\n"
+                . "Aucun workflow n'a encore ete note.\n\n"
+                . "Note un workflow:\n"
+                . "  /workflow rate [nom] [1-5]\n"
+                . "  Ex: /workflow rate morning-brief 4"
+            );
+        }
+
+        usort($rated, fn($a, $b) => $b['avg'] <=> $a['avg'] ?: $b['count'] <=> $a['count']);
+        $rated = array_slice($rated, 0, 10);
+
+        $medals = ['🥇', '🥈', '🥉'];
+        $lines = ["⭐ *Classement par notes*", str_repeat('━', 28), ""];
+
+        foreach ($rated as $i => $item) {
+            $medal  = $medals[$i] ?? '  ' . ($i + 1) . '.';
+            $wf     = $item['workflow'];
+            $status = $wf->is_active ? '' : ' ⏸';
+
+            $lines[] = "{$medal} *{$wf->name}*{$status}";
+            $lines[] = "   {$item['stars']} {$item['avg']}/5 · {$item['count']} evaluation" . ($item['count'] > 1 ? 's' : '');
+            $lines[] = "";
+        }
+
+        $unrated = $workflows->count() - count($rated);
+        if ($unrated > 0) {
+            $lines[] = str_repeat('─', 24);
+            $lines[] = "{$unrated} workflow(s) non note(s) — /workflow rate [nom] [1-5]";
+        }
+
+        $this->log($context, 'top-rated', ['rated_count' => count($rated)]);
         return AgentResult::reply(implode("\n", $lines));
     }
 
