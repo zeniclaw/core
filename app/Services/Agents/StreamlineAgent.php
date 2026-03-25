@@ -157,12 +157,16 @@ class StreamlineAgent extends BaseAgent
             'workflow rate', 'noter workflow', 'evaluer workflow', 'etoiles workflow',
             'workflow alias', 'raccourci workflow', 'shortcut workflow',
             'workflow top-rated', 'mieux notes', 'meilleurs workflows', 'top rated workflows',
+            'workflow random', 'workflow aleatoire', 'workflow au hasard', 'lancer un workflow au hasard',
+            'random workflow', 'surprise workflow', 'un workflow au pif',
+            'workflow changelog', 'changelog workflows', 'historique modifications', 'derniers changements',
+            'activite recente workflows', 'workflow changes', 'journal workflows',
         ];
     }
 
     public function version(): string
     {
-        return '1.45.0';
+        return '1.46.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -540,6 +544,8 @@ class StreamlineAgent extends BaseAgent
             'rate', 'noter', 'evaluer'      => $this->commandRate($context, $arg1, $arg2),
             'alias', 'shortcut', 'raccourci' => $this->commandAlias($context, $arg1, $arg2),
             'top-rated', 'toprated', 'mieux-notes' => $this->commandTopRated($context),
+            'random', 'aleatoire', 'hasard' => $this->commandRandom($context),
+            'changelog', 'changes'          => $this->commandChangelog($context, $arg1),
             'help'                          => $this->showHelp($context, $arg1),
             default                         => $this->handleUnknownCommand($context, $action),
         };
@@ -1797,6 +1803,12 @@ class StreamlineAgent extends BaseAgent
             'rate'          => $this->commandRate($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
             'alias'         => $this->commandAlias($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
             'top-rated'     => $this->commandTopRated($context),
+            'benchmark'     => $this->commandBenchmark($context, $parsed['name'] ?? ''),
+            'whatif'        => $this->commandWhatIf($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'kpi'           => $this->commandKpi($context, $parsed['name'] ?? ''),
+            'clone-steps'   => $this->commandCloneSteps($context, $parsed['name'] ?? '', $parsed['reply'] ?? ''),
+            'random'        => $this->commandRandom($context),
+            'changelog'     => $this->commandChangelog($context, $parsed['name'] ?? ''),
             default         => AgentResult::reply($parsed['reply'] ?? $this->getHelpText()),
         };
     }
@@ -6532,7 +6544,8 @@ class StreamlineAgent extends BaseAgent
             'reorder', 'archive', 'unarchive', 'compact', 'go', 'diagnose',
             'quick-create', 'overview', 'preflight', 'streak', 'focus',
             'clone-steps', 'kpi', 'help-search', 'summary-all', 'benchmark',
-            'whatif', 'what-if', 'rate', 'alias', 'top-rated', 'help',
+            'whatif', 'what-if', 'rate', 'alias', 'top-rated', 'random',
+            'changelog', 'changes', 'help',
         ];
 
         // Find closest match (Levenshtein distance <= 3)
@@ -7430,7 +7443,9 @@ class StreamlineAgent extends BaseAgent
             . "  /workflow whatif [nom] [etape] — simuler le retrait\n"
             . "  /workflow rate [nom] [1-5] — noter un workflow\n"
             . "  /workflow top-rated — classement par notes\n"
-            . "  /workflow alias [nom] [alias] — raccourci\n\n"
+            . "  /workflow alias [nom] [alias] — raccourci\n"
+            . "  /workflow random — lancer un workflow au hasard\n"
+            . "  /workflow changelog [N] — journal d'activite\n\n"
             . "_Aide par categorie: /workflow help [gestion|execution|etapes|analyse|avance]_";
     }
 
@@ -10353,6 +10368,112 @@ class StreamlineAgent extends BaseAgent
 
         $this->log($context, 'top-rated', ['rated_count' => count($rated)]);
         return AgentResult::reply(implode("\n", $lines));
+    }
+
+    /**
+     * Pick and run a random active workflow.
+     */
+    private function commandRandom(AgentContext $context): AgentResult
+    {
+        $workflows = Workflow::forUser($context->from)->active()->get();
+
+        if ($workflows->isEmpty()) {
+            return AgentResult::reply(
+                "Aucun workflow actif a lancer.\n\n"
+                . "Cree-en un: /workflow create [nom] [etape1] then [etape2]"
+            );
+        }
+
+        // Exclude paused workflows
+        $eligible = $workflows->filter(fn($wf) => empty($wf->conditions['paused']));
+
+        if ($eligible->isEmpty()) {
+            return AgentResult::reply(
+                "Tous tes workflows actifs sont en pause.\n"
+                . "Reprends-en un: /workflow pause [nom]"
+            );
+        }
+
+        $picked = $eligible->random();
+
+        $this->log($context, 'Random workflow picked', ['name' => $picked->name, 'pool' => $eligible->count()]);
+        $this->sendText($context->from, "🎲 Workflow choisi au hasard: *{$picked->name}* (parmi {$eligible->count()} actifs)");
+
+        return $this->triggerWorkflow($context, $picked);
+    }
+
+    /**
+     * Show recent modifications to workflows (creations, deletions, step changes).
+     * Reads from the execution history stored in conditions.
+     */
+    private function commandChangelog(AgentContext $context, string $arg = ''): AgentResult
+    {
+        $limit = is_numeric($arg) && (int) $arg > 0 ? min((int) $arg, 30) : 10;
+
+        $workflows = Workflow::forUser($context->from)->get();
+
+        if ($workflows->isEmpty()) {
+            return AgentResult::reply("Aucun workflow. Cree-en un avec /workflow create.");
+        }
+
+        // Collect all history entries with workflow name
+        $allEntries = [];
+        foreach ($workflows as $wf) {
+            $history = $wf->conditions['history'] ?? [];
+            foreach ($history as $entry) {
+                $entry['workflow'] = $wf->name;
+                $allEntries[] = $entry;
+            }
+        }
+
+        // Also include creation dates from updated_at
+        foreach ($workflows as $wf) {
+            $allEntries[] = [
+                'date'     => $wf->created_at?->format('d/m H:i') ?? '—',
+                'status'   => 'created',
+                'workflow'  => $wf->name,
+                'duration' => null,
+            ];
+        }
+
+        if (empty($allEntries)) {
+            return AgentResult::reply(
+                "Aucune activite enregistree.\n\n"
+                . "Lance un workflow pour commencer: /workflow trigger [nom]"
+            );
+        }
+
+        // Sort by date descending (newest first)
+        usort($allEntries, function ($a, $b) {
+            return strcmp($b['date'] ?? '', $a['date'] ?? '');
+        });
+
+        $entries = array_slice($allEntries, 0, $limit);
+
+        $lines = ["📝 *Changelog* (derniers {$limit} evenements)\n" . str_repeat('─', 28)];
+
+        $statusIcons = [
+            'success' => '✅',
+            'failed'  => '❌',
+            'created' => '🆕',
+            'partial' => '⚠️',
+        ];
+
+        foreach ($entries as $entry) {
+            $icon = $statusIcons[$entry['status'] ?? ''] ?? '•';
+            $date = $entry['date'] ?? '—';
+            $name = $entry['workflow'] ?? '?';
+            $duration = isset($entry['duration']) ? " ({$entry['duration']}s)" : '';
+            $input = !empty($entry['input']) ? " _{$entry['input']}_" : '';
+            $lines[] = "{$icon} *{$date}* — {$name}{$duration}{$input}";
+        }
+
+        $lines[] = '';
+        $lines[] = "_Total: " . count($allEntries) . " evenements sur " . $workflows->count() . " workflow(s)_";
+
+        $reply = implode("\n", $lines);
+        $this->sendText($context->from, $reply);
+        return AgentResult::reply($reply);
     }
 
     /**

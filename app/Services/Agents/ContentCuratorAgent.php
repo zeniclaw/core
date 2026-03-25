@@ -176,12 +176,20 @@ class ContentCuratorAgent extends BaseAgent
             // v1.14.0
             'partager', 'share bookmark', 'envoyer bookmark',
             'similaire', 'similar', 'articles similaires', 'comme bookmark',
+            // v1.15.0
+            'quiz', 'quiz bookmark', 'tester mes connaissances',
+            'inspire moi', 'détends moi', 'detends moi', 'positif', 'bonne nouvelle',
+            'feel good', 'motivant', 'mood',
+            // v1.16.0
+            'highlights', 'points clés', 'points cles', 'takeaways', 'essentiel',
+            'news liées', 'news liees', 'actualités liées', 'actualites liees', 'related news',
+            'en rapport', 'lié à mes bookmarks', 'lie a mes bookmarks',
         ];
     }
 
     public function version(): string
     {
-        return '1.14.0';
+        return '1.16.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -189,12 +197,47 @@ class ContentCuratorAgent extends BaseAgent
         if (!$context->body) return false;
 
         return (bool) preg_match(
-            '/\b(digest|trending|tendances?|follow|suivre|unfollow|ne\s+plus\s+suivre|veille|curation|bookmark|sauvegarder|save|daily\s+digest|resume\s+quotidien|newsletter|flux\s+rss|mes\s+inter[eé]ts?|hackernews|reddit|news|actualit[eé]s?|mes\s+bookmarks?|mes\s+articles?|supprimer\s+(bookmark|article)|cherche|recherche|search|stats\s+digest|historique\s+digest|mon\s+historique|pr[eé]f[eé]rences?|mes\s+sources?|r[eé]sum[eé]|resumer|summarize|recommande|recommandation|suggestions?|pour\s+moi|vider\s+bookmarks?|quoi\s+lire|effacer\s+tout|flash|news\s+rapides|quoi\s+de\s+neuf|trouver\s+dans\s+mes\s+articles|exporter?\s+bookmarks?|exporter?\s+mes\s+articles?|confirmer\s+vider|vider\s+confirmer|lire\s+#?\d+|ouvrir\s+#?\d+|read\s+#?\d+|best\s+of|top\s+du\s+jour|meilleurs?\s+articles?|briefing|matin|renommer\s+#?\d+|rename\s+#?\d+|bilan\s+semaine|mes\s+lectures|bilan\s+lecture|r[eé]sum[eé]\s+semaine|tldr|en\s+bref|r[eé]sum[eé]\s+rapide|compare|comparer|comparaison|cite|citation|extrait|top\s+sources?|sources?\s+populaires?|meilleures?\s+sources?|surprends?\s+moi|hasard|al[eé]atoire|article\s+surprise|article\s+al[eé]atoire|digest\s+express|digest\s+rapide|quick\s+digest|aujourd.?hui|cette\s+semaine|ce\s+mois|analyser?\s+mes\s+bookmarks?|profil\s+lecture|analyse\s+biblio|r[eé]sum[eé]\s+biblio|intelligence\s+lecture|article\s+du\s+jour|lecture\s+du\s+jour|deep\s+read|s[eé]lection\s+du\s+jour|que\s+lire\s+aujourd.?hui|partager\s+#?\d+|share\s+#?\d+|envoyer\s+#?\d+|similaire\s+#?\d+|similar\s+#?\d+|comme\s+#?\d+)\b/iu',
+            '/\b(digest|trending|tendances?|follow|suivre|unfollow|ne\s+plus\s+suivre|veille|curation|bookmark|sauvegarder|save|daily\s+digest|resume\s+quotidien|newsletter|flux\s+rss|mes\s+inter[eé]ts?|hackernews|reddit|news|actualit[eé]s?|mes\s+bookmarks?|mes\s+articles?|supprimer\s+(bookmark|article)|cherche|recherche|search|stats\s+digest|historique\s+digest|mon\s+historique|pr[eé]f[eé]rences?|mes\s+sources?|r[eé]sum[eé]|resumer|summarize|recommande|recommandation|suggestions?|pour\s+moi|vider\s+bookmarks?|quoi\s+lire|effacer\s+tout|flash|news\s+rapides|quoi\s+de\s+neuf|trouver\s+dans\s+mes\s+articles|exporter?\s+bookmarks?|exporter?\s+mes\s+articles?|confirmer\s+vider|vider\s+confirmer|lire\s+#?\d+|ouvrir\s+#?\d+|read\s+#?\d+|best\s+of|top\s+du\s+jour|meilleurs?\s+articles?|briefing|matin|renommer\s+#?\d+|rename\s+#?\d+|bilan\s+semaine|mes\s+lectures|bilan\s+lecture|r[eé]sum[eé]\s+semaine|tldr|en\s+bref|r[eé]sum[eé]\s+rapide|compare|comparer|comparaison|cite|citation|extrait|top\s+sources?|sources?\s+populaires?|meilleures?\s+sources?|surprends?\s+moi|hasard|al[eé]atoire|article\s+surprise|article\s+al[eé]atoire|digest\s+express|digest\s+rapide|quick\s+digest|aujourd.?hui|cette\s+semaine|ce\s+mois|analyser?\s+mes\s+bookmarks?|profil\s+lecture|analyse\s+biblio|r[eé]sum[eé]\s+biblio|intelligence\s+lecture|article\s+du\s+jour|lecture\s+du\s+jour|deep\s+read|s[eé]lection\s+du\s+jour|que\s+lire\s+aujourd.?hui|partager\s+#?\d+|share\s+#?\d+|envoyer\s+#?\d+|similaire\s+#?\d+|similar\s+#?\d+|comme\s+#?\d+|quiz\s+#?\d+|inspire\s*moi|d[ée]tends?\s*moi|positif|bonne\s+nouvelle|feel\s*good|motivant|mood\s+\S+|highlights?\s+#?\d+|points?\s+cl[eé]s?\s+#?\d+|takeaways?\s+#?\d+|essentiel\s+#?\d+|news\s+li[eé]es?|actualit[eé]s?\s+li[eé]es?|related\s+news|en\s+rapport|li[eé]\s+[àa]\s+mes\s+bookmarks?)\b/iu',
             $context->body
         );
     }
 
     public function handle(AgentContext $context): AgentResult
+    {
+        try {
+            return $this->handleInner($context);
+        } catch (\Throwable $e) {
+            Log::error('[content_curator] handle() exception', [
+                'from'  => $context->from,
+                'body'  => mb_substr($context->body ?? '', 0, 300),
+                'error' => $e->getMessage(),
+                'file'  => $e->getFile() . ':' . $e->getLine(),
+                'trace' => mb_substr($e->getTraceAsString(), 0, 1500),
+            ]);
+
+            $errMsg = mb_strtolower($e->getMessage());
+
+            $isDbError    = $e instanceof \Illuminate\Database\QueryException;
+            $isRateLimit  = str_contains($errMsg, 'rate_limit') || str_contains($errMsg, '429');
+            $isTimeout    = str_contains($errMsg, 'timed out') || str_contains($errMsg, 'timeout');
+            $isOverload   = str_contains($errMsg, 'overloaded') || str_contains($errMsg, '529');
+            $isConnection = str_contains($errMsg, 'connection refused') || str_contains($errMsg, 'could not resolve');
+
+            $reply = match (true) {
+                $isDbError    => "⚠ Erreur temporaire de base de données. Réessaie dans quelques instants.",
+                $isRateLimit  => "⚠ Trop de requêtes en cours. Attends quelques secondes et réessaie.",
+                $isTimeout    => "⚠ Le traitement a pris trop de temps. Réessaie avec une requête plus simple.",
+                $isOverload   => "⚠ Le service IA est surchargé. Réessaie dans une minute.",
+                $isConnection => "⚠ Service externe inaccessible. Réessaie dans quelques instants.",
+                default       => "⚠ Erreur interne du Content Curator. Réessaie ou dis *aide contenu* pour voir les commandes.",
+            };
+
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function handleInner(AgentContext $context): AgentResult
     {
         $body = trim($context->body ?? '');
 
@@ -413,6 +456,26 @@ class ContentCuratorAgent extends BaseAgent
             return $this->handleSimilar($context, (int) $m[2]);
         }
 
+        // Quiz sur un bookmark (NEW v1.15.0)
+        if (preg_match('/^quiz\s+#?(\d+)\s*$/iu', $body, $m)) {
+            return $this->handleQuizArticle($context, (int) $m[1]);
+        }
+
+        // Highlights / points clés d'un bookmark (NEW v1.16.0)
+        if (preg_match('/^(highlights?|points?\s+cl[eé]s?|takeaways?|essentiel)\s+#?(\d+)\s*$/iu', $body, $m)) {
+            return $this->handleHighlights($context, (int) $m[2]);
+        }
+
+        // News liées aux bookmarks récents (NEW v1.16.0)
+        if (preg_match('/^(news\s+li[eé]es?|actualit[eé]s?\s+li[eé]es?|related\s+news|en\s+rapport|li[eé]\s+[àa]\s+mes\s+bookmarks?)\s*$/iu', $body)) {
+            return $this->handleRelatedNews($context);
+        }
+
+        // Digest par mood/ambiance (NEW v1.15.0)
+        if (preg_match('/^(inspire\s*moi|d[ée]tends?\s*moi|positif|bonne\s+nouvelle|feel\s*good|motivant|mood\s+.+)\s*$/iu', $body, $m)) {
+            return $this->handleMoodDigest($context, trim($m[1]));
+        }
+
         // Generic news / veille → digest
         if (preg_match('/\b(news|actualit[eé]s?|veille|curation)\b/iu', $body)) {
             return $this->handleDigest($context, null, false);
@@ -430,6 +493,11 @@ class ContentCuratorAgent extends BaseAgent
         $normalized = $domain
             ? (self::CATEGORY_ALIASES[mb_strtolower($domain)] ?? mb_strtolower($domain))
             : null;
+
+        // Validate category if specified
+        if ($normalized && !in_array($normalized, self::VALID_CATEGORIES)) {
+            return $this->invalidCategoryReply($domain, 'flash ai');
+        }
 
         // If a specific domain is requested, use it; otherwise use user prefs
         if ($normalized) {
@@ -652,6 +720,10 @@ class ContentCuratorAgent extends BaseAgent
             return AgentResult::reply("Précise un sujet de recherche. Exemple: *cherche laravel 12*");
         }
 
+        if (mb_strlen($query) > 200) {
+            return AgentResult::reply("Requête trop longue. Utilise quelques mots-clés. Exemple: *cherche laravel 12*");
+        }
+
         $this->log($context, 'Searching articles', ['query' => $queryDisplay]);
 
         // Cache key per user + query (5 min)
@@ -825,9 +897,13 @@ class ContentCuratorAgent extends BaseAgent
     {
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
             return AgentResult::reply(
-                "❌ URL invalide. Envoie une URL complète.\n"
+                "❌ URL invalide. Envoie une URL complète commençant par https://.\n"
                 . "_Exemple : *résume https://example.com/article*_"
             );
+        }
+
+        if ($this->isPrivateUrl($url)) {
+            return AgentResult::reply("❌ URL privée non autorisée. Utilise une URL publique.");
         }
 
         // Cache summary for 1 hour (same URL = same content)
@@ -1181,6 +1257,10 @@ PROMPT;
 
         if (mb_strlen($url) > 2048) {
             return AgentResult::reply("❌ L'URL est trop longue pour être sauvegardée (max 2048 caractères).");
+        }
+
+        if ($this->isPrivateUrl($url)) {
+            return AgentResult::reply("❌ URL privée non autorisée. Utilise une URL publique.");
         }
 
         // Check for custom title after the URL (v1.10.0)
@@ -1824,6 +1904,10 @@ PROMPT;
             );
         }
 
+        if ($this->isPrivateUrl($url)) {
+            return AgentResult::reply("❌ URL privée non autorisée. Utilise une URL publique.");
+        }
+
         $cacheKey = "content_curator:tldr:" . md5($url);
         $cached   = Cache::get($cacheKey);
         if ($cached) {
@@ -2004,6 +2088,10 @@ PROMPT;
                 "❌ URL invalide.\n"
                 . "_Exemple : *cite https://example.com/article*_"
             );
+        }
+
+        if ($this->isPrivateUrl($url)) {
+            return AgentResult::reply("❌ URL privée non autorisée. Utilise une URL publique.");
         }
 
         $cacheKey = "content_curator:cite:" . md5($url);
@@ -2384,6 +2472,12 @@ PROMPT;
             );
         }
 
+        foreach ([$url1, $url2] as $checkUrl) {
+            if ($this->isPrivateUrl($checkUrl)) {
+                return AgentResult::reply("❌ URL privée non autorisée. Utilise des URLs publiques.");
+            }
+        }
+
         if ($url1 === $url2) {
             return AgentResult::reply("❌ Les deux URLs sont identiques. Envoie deux articles différents.");
         }
@@ -2560,6 +2654,34 @@ PROMPT;
             . "_Catégories disponibles : {$list}_\n\n"
             . "_Exemple : *{$example}*_"
         );
+    }
+
+    /**
+     * Check if a URL points to a private/local network (SSRF protection).
+     */
+    private function isPrivateUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!$host) return true;
+
+        $host = mb_strtolower($host);
+
+        if ($host === 'localhost' || $host === '[::1]') return true;
+
+        // IPv4 private ranges
+        if (preg_match('/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.)/', $host)) {
+            return true;
+        }
+
+        // Resolve hostname to check for DNS rebinding
+        $ip = @gethostbyname($host);
+        if ($ip && $ip !== $host) {
+            if (preg_match('/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.)/', $ip)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -3522,6 +3644,466 @@ PROMPT;
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // QUIZ SUR UN BOOKMARK (NEW v1.15.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleQuizArticle(AgentContext $context, int $position): AgentResult
+    {
+        $userPhone = $context->from;
+
+        if ($position < 1) {
+            return AgentResult::reply("Numéro invalide. Dis *mes bookmarks* pour voir ta liste.");
+        }
+
+        $articles = SavedArticle::where('user_phone', $userPhone)
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($articles->isEmpty()) {
+            return AgentResult::reply(
+                "Tu n'as aucun bookmark sauvegardé.\n"
+                . "_Utilise *save [url]* pour en ajouter._"
+            );
+        }
+
+        $article = $articles->get($position - 1);
+
+        if (!$article) {
+            $max = $articles->count();
+            return AgentResult::reply(
+                "Bookmark n°{$position} introuvable. Tu as {$max} bookmark(s).\n"
+                . "_Dis *mes bookmarks* pour voir les numéros._"
+            );
+        }
+
+        $title = $article->title ?: 'Sans titre';
+        $url   = $article->url;
+
+        $cacheKey = "content_curator:quiz:{$userPhone}:" . md5($url);
+        $cached   = Cache::get($cacheKey);
+        if ($cached) {
+            return AgentResult::reply($cached);
+        }
+
+        $this->log($context, 'Quiz requested', ['position' => $position, 'title' => mb_substr($title, 0, 60)]);
+
+        try {
+            $content = $this->extractHtmlContent($url);
+
+            if (!$content['ok'] || mb_strlen($content['text']) < 100) {
+                // Fallback: generate quiz from title + source only
+                $excerpt = "Titre : {$title}\nSource : {$article->source}";
+            } else {
+                $excerpt = mb_substr($content['text'], 0, 3000);
+            }
+
+            $systemPrompt = <<<PROMPT
+Tu es un générateur de quiz éducatif. À partir du contenu d'un article, crée un mini-quiz de 3 questions pour tester la compréhension du lecteur.
+
+FORMAT DE RÉPONSE (texte brut, formatage WhatsApp) :
+
+*Q1.* [Question]
+  a) [Option A]
+  b) [Option B]
+  c) [Option C]
+✅ Réponse : [lettre] — [explication courte]
+
+*Q2.* [Question]
+  a) [Option A]
+  b) [Option B]
+  c) [Option C]
+✅ Réponse : [lettre] — [explication courte]
+
+*Q3.* [Question]
+  a) [Option A]
+  b) [Option B]
+  c) [Option C]
+✅ Réponse : [lettre] — [explication courte]
+
+RÈGLES :
+- Questions factuelles basées uniquement sur le contenu de l'article
+- 3 choix par question (a, b, c)
+- Réponses visibles directement (pas de spoiler caché)
+- Explications courtes (1 phrase max)
+- En français même si l'article est en anglais
+- N'invente aucune information absente du texte
+PROMPT;
+
+            $userMessage = "Titre : {$title}\nSource : {$article->source}\n\nContenu :\n{$excerpt}";
+
+            $quiz = $this->claude->chat($userMessage, ModelResolver::fast(), $systemPrompt);
+
+            if (!$quiz) {
+                return AgentResult::reply("❌ Impossible de générer le quiz. Réessaie dans quelques instants.");
+            }
+
+            $output  = "*🧠 QUIZ — Teste ta compréhension*\n";
+            $output .= "_" . mb_strimwidth($title, 0, 60, '...') . "_\n\n";
+            $output .= $quiz . "\n\n";
+            $output .= "_💡 *résume {$url}* pour relire le résumé · *similaire #{$position}* pour des articles proches_";
+
+            Cache::put($cacheKey, $output, 3600); // 1 heure
+
+            return AgentResult::reply($output);
+
+        } catch (\Throwable $e) {
+            Log::error("[content_curator] Quiz failed for position {$position}: " . $e->getMessage());
+            return AgentResult::reply("❌ Erreur lors de la génération du quiz. Réessaie dans quelques instants.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MOOD DIGEST (NEW v1.15.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleMoodDigest(AgentContext $context, string $mood): AgentResult
+    {
+        $userPhone = $context->from;
+
+        $prefs      = UserContentPreference::where('user_phone', $userPhone)->get();
+        $categories = $prefs->where('category', '!=', 'custom')->pluck('category')->toArray();
+        $keywords   = $prefs->pluck('keywords')->flatten()->filter()->values()->toArray();
+
+        if (empty($categories)) {
+            $categories = ['technology', 'science', 'ai', 'health'];
+        }
+
+        $this->log($context, 'Mood digest requested', ['mood' => $mood, 'categories' => $categories]);
+
+        try {
+            $articles = $this->aggregator->aggregate($categories, $keywords, 15);
+
+            if (empty($articles)) {
+                return AgentResult::reply(
+                    "😕 Aucun article trouvé pour le moment.\n"
+                    . "_Essaie *digest* ou *flash* pour du contenu classique._"
+                );
+            }
+
+            // Build article list for the LLM to filter by mood
+            $articleList = '';
+            foreach (array_slice($articles, 0, 15) as $i => $a) {
+                $articleList .= ($i + 1) . ". " . ($a['title'] ?? 'Sans titre')
+                    . " | " . ($a['source'] ?? '')
+                    . " | " . mb_strimwidth($a['description'] ?? '', 0, 120, '...')
+                    . "\n";
+            }
+
+            $moodNormalized = mb_strtolower($mood);
+            $moodLabel = match (true) {
+                str_contains($moodNormalized, 'inspire')   => 'inspirant et motivant',
+                str_contains($moodNormalized, 'détend') || str_contains($moodNormalized, 'detend') => 'léger et divertissant',
+                str_contains($moodNormalized, 'positif') || str_contains($moodNormalized, 'bonne') || str_contains($moodNormalized, 'feel') => 'positif et optimiste',
+                str_contains($moodNormalized, 'motivant')  => 'motivant et énergisant',
+                default => $mood,
+            };
+
+            $moodEmoji = match (true) {
+                str_contains($moodNormalized, 'inspire')   => '✨',
+                str_contains($moodNormalized, 'détend') || str_contains($moodNormalized, 'detend') => '😌',
+                str_contains($moodNormalized, 'positif') || str_contains($moodNormalized, 'bonne') || str_contains($moodNormalized, 'feel') => '☀️',
+                str_contains($moodNormalized, 'motivant')  => '💪',
+                default => '🎭',
+            };
+
+            $systemPrompt = <<<PROMPT
+Tu es un curateur de contenu empathique. L'utilisateur veut lire du contenu qui soit : {$moodLabel}.
+
+À partir de la liste d'articles ci-dessous, sélectionne les 5 articles (maximum) qui correspondent le mieux à cette ambiance. Si moins de 5 correspondent, n'en sélectionne que ceux qui correspondent vraiment.
+
+FORMAT DE RÉPONSE (JSON strict) :
+{"selected": [1, 5, 8], "reason": "courte phrase expliquant la sélection"}
+
+RÈGLES :
+- Les numéros correspondent aux positions dans la liste
+- Ne sélectionne QUE les articles qui correspondent au mood demandé
+- Si aucun article ne correspond, retourne {"selected": [], "reason": "explication"}
+- Retourne UNIQUEMENT le JSON
+PROMPT;
+
+            $response = $this->claude->chat($articleList, ModelResolver::fast(), $systemPrompt);
+            $decoded  = $this->parseJsonResponse($response);
+
+            $selected = $decoded['selected'] ?? [];
+            $reason   = $decoded['reason'] ?? '';
+
+            if (empty($selected)) {
+                return AgentResult::reply(
+                    "{$moodEmoji} Pas d'articles correspondant à ton mood *{$moodLabel}* en ce moment.\n\n"
+                    . "_Essaie *digest* pour du contenu classique ou *recommande* pour des suggestions IA._"
+                );
+            }
+
+            $output  = "*{$moodEmoji} MOOD DIGEST — {$moodLabel}*\n";
+            $output .= "_Sélection personnalisée selon ton humeur_\n\n";
+
+            $count = 0;
+            foreach ($selected as $idx) {
+                $idx = (int) $idx;
+                if ($idx < 1 || $idx > count($articles)) continue;
+                $a = $articles[$idx - 1];
+                $count++;
+
+                $aTitle  = $a['title'] ?? 'Sans titre';
+                $source  = $a['source'] ?? '';
+                $url     = $a['url'] ?? '';
+                $desc    = mb_strimwidth($a['description'] ?? '', 0, 100, '...');
+
+                $output .= "*{$count}.* {$aTitle}";
+                if ($source) $output .= " _{$source}_";
+                $output .= "\n";
+                if ($desc) $output .= "  ↳ {$desc}\n";
+                if ($url) $output .= "🔗 {$url}\n";
+                $output .= "\n";
+            }
+
+            if ($reason) {
+                $output .= "_{$moodEmoji} {$reason}_\n\n";
+            }
+
+            $output .= "_💡 *résume [url]* pour lire · *save [url]* pour bookmarker · *inspire moi* / *positif* / *détends moi* pour changer de mood_";
+
+            return AgentResult::reply($output);
+
+        } catch (\Throwable $e) {
+            Log::error("[content_curator] MoodDigest failed: " . $e->getMessage());
+            return AgentResult::reply("❌ Erreur lors du mood digest. Réessaie dans quelques instants.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGHLIGHTS / POINTS CLÉS (NEW v1.16.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleHighlights(AgentContext $context, int $position): AgentResult
+    {
+        $userPhone = $context->from;
+
+        if ($position < 1) {
+            return AgentResult::reply("Numéro invalide. Dis *mes bookmarks* pour voir ta liste.");
+        }
+
+        $articles = SavedArticle::where('user_phone', $userPhone)
+            ->orderByDesc('created_at')
+            ->get();
+
+        if ($articles->isEmpty()) {
+            return AgentResult::reply(
+                "Tu n'as aucun bookmark sauvegardé.\n"
+                . "_Utilise *save [url]* pour en ajouter._"
+            );
+        }
+
+        $article = $articles->get($position - 1);
+
+        if (!$article) {
+            $max = $articles->count();
+            return AgentResult::reply(
+                "Bookmark n°{$position} introuvable. Tu as {$max} bookmark(s).\n"
+                . "_Dis *mes bookmarks* pour voir les numéros._"
+            );
+        }
+
+        $title = $article->title ?: 'Sans titre';
+        $url   = $article->url;
+
+        $cacheKey = "content_curator:highlights:{$userPhone}:" . md5($url);
+        $cached   = Cache::get($cacheKey);
+        if ($cached) {
+            return AgentResult::reply($cached);
+        }
+
+        $this->log($context, 'Highlights requested', ['position' => $position, 'title' => mb_substr($title, 0, 60)]);
+
+        try {
+            $content = $this->extractHtmlContent($url);
+
+            if (!$content['ok'] || mb_strlen($content['text']) < 100) {
+                $excerpt = "Titre : {$title}\nSource : {$article->source}";
+                if ($content['desc'] ?? '') {
+                    $excerpt .= "\nDescription : {$content['desc']}";
+                }
+            } else {
+                $excerpt = mb_substr($content['text'], 0, 4000);
+                if ($content['desc'] && mb_strlen($content['desc']) > 50) {
+                    $excerpt = $content['desc'] . "\n\n" . $excerpt;
+                }
+            }
+
+            $systemPrompt = <<<PROMPT
+Tu es un analyste de contenu expert. Extrais les points clés (highlights) d'un article sous forme de takeaways actionnables.
+
+FORMAT DE RÉPONSE (texte brut, formatage WhatsApp) :
+
+🔑 *Takeaway 1* : [phrase concise — fait ou insight principal]
+
+🔑 *Takeaway 2* : [phrase concise]
+
+🔑 *Takeaway 3* : [phrase concise]
+
+🔑 *Takeaway 4* : [phrase concise, si pertinent]
+
+🔑 *Takeaway 5* : [phrase concise, si pertinent]
+
+💬 *En une phrase* : [résumé actionnable en 1 phrase — ce que le lecteur devrait retenir et appliquer]
+
+RÈGLES :
+- 3 à 5 takeaways selon la richesse du contenu
+- Chaque takeaway = 1 fait concret, chiffre, ou insight actionnable
+- Pas de généralités ni de paraphrases vagues
+- La phrase finale doit être pratique et orientée action
+- Factuel à 100% : n'invente rien d'absent du texte source
+- Réponds en français même si l'article est en anglais
+PROMPT;
+
+            $userMessage = "Titre : {$title}\nSource : {$article->source}\n\nContenu :\n{$excerpt}";
+
+            $highlights = $this->claude->chat($userMessage, ModelResolver::fast(), $systemPrompt);
+
+            if (!$highlights) {
+                return AgentResult::reply("❌ Impossible d'extraire les points clés. Réessaie dans quelques instants.");
+            }
+
+            $output  = "*📋 POINTS CLÉS — #{$position}*\n";
+            $output .= "_" . mb_strimwidth($title, 0, 60, '...') . "_\n\n";
+            $output .= $highlights . "\n\n";
+            $output .= "_💡 *résume {$url}* pour le résumé complet · *quiz #{$position}* pour tester ta compréhension_";
+
+            Cache::put($cacheKey, $output, 3600);
+
+            return AgentResult::reply($output);
+
+        } catch (\Throwable $e) {
+            Log::error("[content_curator] Highlights failed for position {$position}: " . $e->getMessage());
+            return AgentResult::reply("❌ Erreur lors de l'extraction des points clés. Réessaie dans quelques instants.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RELATED NEWS (NEW v1.16.0)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function handleRelatedNews(AgentContext $context): AgentResult
+    {
+        $userPhone = $context->from;
+
+        $recentBookmarks = SavedArticle::where('user_phone', $userPhone)
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get();
+
+        if ($recentBookmarks->isEmpty()) {
+            return AgentResult::reply(
+                "Tu n'as aucun bookmark sauvegardé.\n"
+                . "_Sauvegarde quelques articles avec *save [url]* puis reviens ici pour des news liées._"
+            );
+        }
+
+        $this->log($context, 'Related news requested', ['bookmark_count' => $recentBookmarks->count()]);
+
+        try {
+            // Extract keywords from recent bookmark titles using LLM
+            $titleList = $recentBookmarks->map(fn($b, $i) => ($i + 1) . ". " . ($b->title ?: 'Sans titre'))->implode("\n");
+
+            $systemPrompt = <<<PROMPT
+À partir de cette liste de titres d'articles bookmarkés par l'utilisateur, extrais les 5 mots-clés ou sujets principaux qui représentent ses centres d'intérêt actuels.
+
+FORMAT DE RÉPONSE (JSON strict) :
+{"keywords": ["mot1", "mot2", "mot3", "mot4", "mot5"], "theme": "description en 1 phrase du profil de lecture"}
+
+RÈGLES :
+- Mots-clés en anglais pour maximiser les résultats de recherche
+- Spécifiques (pas de termes génériques comme "technology" ou "news")
+- Retourne UNIQUEMENT le JSON
+PROMPT;
+
+            $kwResponse = $this->claude->chat($titleList, ModelResolver::fast(), $systemPrompt);
+            $decoded    = $this->parseJsonResponse($kwResponse);
+            $keywords   = $decoded['keywords'] ?? [];
+            $theme      = $decoded['theme'] ?? '';
+
+            if (empty($keywords)) {
+                // Fallback: extract words from titles directly
+                $allTitles = $recentBookmarks->pluck('title')->implode(' ');
+                $words = array_filter(
+                    preg_split('/\s+/', mb_strtolower($allTitles)),
+                    fn($w) => mb_strlen($w) >= 4
+                );
+                $freq = array_count_values($words);
+                arsort($freq);
+                $keywords = array_slice(array_keys($freq), 0, 5);
+            }
+
+            if (empty($keywords)) {
+                return AgentResult::reply(
+                    "Impossible d'extraire des sujets de tes bookmarks.\n"
+                    . "_Essaie *digest* ou *cherche [sujet]* à la place._"
+                );
+            }
+
+            // Get user's followed categories, fallback to broad set
+            $prefs      = UserContentPreference::where('user_phone', $userPhone)->get();
+            $categories = $prefs->where('category', '!=', 'custom')->pluck('category')->toArray();
+            if (empty($categories)) {
+                $categories = ['technology', 'science', 'business', 'ai'];
+            }
+
+            $articles = $this->aggregator->aggregate($categories, $keywords, 12);
+
+            if (empty($articles)) {
+                return AgentResult::reply(
+                    "🔗 Aucun article récent lié à tes bookmarks.\n"
+                    . "_Essaie *digest* ou *trending* pour du contenu frais._"
+                );
+            }
+
+            // Deduplicate against existing bookmarks
+            $existingUrls = $recentBookmarks->pluck('url')->map(fn($u) => mb_strtolower($u))->toArray();
+            $articles = array_values(array_filter($articles, function ($a) use ($existingUrls) {
+                return !in_array(mb_strtolower($a['url'] ?? ''), $existingUrls);
+            }));
+
+            if (empty($articles)) {
+                return AgentResult::reply(
+                    "🔗 Tu as déjà bookmarké tous les articles liés !\n"
+                    . "_Essaie *trending* ou *digest* pour découvrir du nouveau contenu._"
+                );
+            }
+
+            $articles = array_slice($articles, 0, 6);
+
+            $output  = "*🔗 NEWS LIÉES À TES BOOKMARKS*\n";
+            if ($theme) {
+                $output .= "_Thème détecté : {$theme}_\n";
+            }
+            $output .= "_Basé sur tes " . $recentBookmarks->count() . " bookmarks récents · Mots-clés : " . implode(', ', array_slice($keywords, 0, 4)) . "_\n\n";
+
+            foreach ($articles as $i => $article) {
+                $num    = $i + 1;
+                $aTitle = $article['title'] ?? 'Sans titre';
+                $source = $article['source'] ?? '';
+                $url    = $article['url'] ?? '';
+                $desc   = mb_strimwidth($article['description'] ?? '', 0, 100, '...');
+
+                $output .= "*{$num}. {$aTitle}*";
+                if ($source) $output .= " _{$source}_";
+                $output .= "\n";
+                if ($desc) $output .= "  ↳ {$desc}\n";
+                if ($url) $output .= "🔗 {$url}\n";
+                $output .= "\n";
+            }
+
+            $output .= "_💡 *save [url]* pour bookmarker · *résume [url]* pour résumer · *digest* pour ton digest habituel_";
+
+            return AgentResult::reply($output);
+
+        } catch (\Throwable $e) {
+            Log::error("[content_curator] RelatedNews failed: " . $e->getMessage());
+            return AgentResult::reply("❌ Erreur lors de la recherche de news liées. Réessaie dans quelques instants.");
+        }
+    }
+
     private function showHelp(): AgentResult
     {
         $v = $this->version();
@@ -3547,9 +4129,17 @@ PROMPT;
             . "  • *compare [url1] [url2]* — Comparer deux articles IA\n"
             . "  • *lire #3* — Résumer le bookmark n°3\n\n"
             . "*🤖 IA :*\n"
-            . "  • *article du jour* — L'article IA du jour (sélection personnalisée + TLDR) _(nouveau v1.13)_\n"
-            . "  • *profil lecture* — Analyse IA de ta bibliothèque de bookmarks _(nouveau v1.13)_\n"
-            . "  • *recommande* — Recommandations personnalisées de sujets\n\n"
+            . "  • *article du jour* — L'article IA du jour (sélection personnalisée + TLDR)\n"
+            . "  • *profil lecture* — Analyse IA de ta bibliothèque de bookmarks\n"
+            . "  • *recommande* — Recommandations personnalisées de sujets\n"
+            . "  • *quiz #3* — Mini-quiz pour tester ta compréhension d'un bookmark\n"
+            . "  • *highlights #3* — Takeaways et points clés d'un bookmark _(nouveau v1.16)_\n"
+            . "  • *news liées* — Articles frais basés sur tes bookmarks récents _(nouveau v1.16)_\n\n"
+            . "*🎭 Mood :*\n"
+            . "  • *inspire moi* — Articles inspirants et motivants _(nouveau v1.15)_\n"
+            . "  • *positif* — Bonnes nouvelles et contenu optimiste\n"
+            . "  • *détends moi* — Contenu léger et divertissant\n"
+            . "  • *motivant* — Contenu énergisant\n\n"
             . "*🔖 Bookmarks :*\n"
             . "  • *surprends moi* — Redécouvrir un bookmark aléatoire\n"
             . "  • *save [url]* — Sauvegarder (+ titre optionnel : *save [url] Mon titre*)\n"
@@ -3572,13 +4162,14 @@ PROMPT;
             . "  • *preferences* — Voir tes intérêts + catégories disponibles\n\n"
             . "*Catégories :* 💻 technology · 🔬 science · 💼 business · ❤️ health · ⚽ sports\n"
             . "🎬 entertainment · 🎮 gaming · 🤖 ai · 🪙 crypto · 🚀 startup · 🎨 design · 🔒 security\n\n"
-            . "*🆕 Nouveau v1.14 :*\n"
-            . "  • *partager #3* — Message prêt à transférer pour un bookmark\n"
-            . "  • *similaire #3* — Trouver des articles similaires à un bookmark\n"
-            . "  • Code refactorisé : helpers réutilisables, meilleure gestion d'erreurs\n\n"
-            . "*Nouveau v1.13 :*\n"
-            . "  • *article du jour* — Sélection IA personnalisée + TLDR\n"
-            . "  • *profil lecture* — Analyse IA de ta bibliothèque"
+            . "*🆕 Nouveau v1.16 :*\n"
+            . "  • *highlights #3* / *points clés #3* — Takeaways clés d'un bookmark _(nouveau)_\n"
+            . "  • *news liées* — Articles frais liés à tes bookmarks récents _(nouveau)_\n"
+            . "  • Protection SSRF sur toutes les commandes URL\n"
+            . "  • Validation améliorée (catégories flash, longueur de recherche)\n\n"
+            . "*Nouveau v1.15 :*\n"
+            . "  • *quiz #3* — Mini-quiz de 3 questions sur un bookmark\n"
+            . "  • *inspire moi* / *positif* / *détends moi* — Digest filtré par mood IA"
         );
     }
 }

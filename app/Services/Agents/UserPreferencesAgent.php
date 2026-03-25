@@ -240,7 +240,7 @@ class UserPreferencesAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Agent de gestion des préférences utilisateur. Permet de configurer la langue, le fuseau horaire, le format de date, le système d\'unités (métrique/impérial), le style de communication, les notifications, le téléphone et l\'email. Affiche le profil complet, l\'heure locale (avec numéro de semaine), les personnalisations actives, modifie un ou plusieurs paramètres à la fois, compare des fuseaux horaires, affiche une horloge mondiale multi-villes, vérifie les heures ouvrables d\'une ville, planifie des réunions entre fuseaux (meeting planner), recherche des fuseaux par région/pays, exporte/importe les préférences, réinitialise aux valeurs par défaut, affiche un compte à rebours jusqu\'à une date cible, donne les informations sur l\'heure d\'été/hiver (DST), convertit une heure spécifique d\'un fuseau à un autre (convert_time), affiche le calendrier de la semaine courante (calendar_week), affiche le calendrier mensuel (calendar_month), affiche les heures de lever/coucher du soleil (sun_times), calcule le temps restant avant une heure cible (time_until), et affiche la progression de l\'année en cours avec jour de l\'année et semaine ISO (year_progress).';
+        return 'Agent de gestion des préférences utilisateur. Permet de configurer la langue, le fuseau horaire, le format de date, le système d\'unités (métrique/impérial), le style de communication, les notifications, le téléphone et l\'email. Affiche le profil complet, l\'heure locale (avec numéro de semaine), les personnalisations actives, modifie un ou plusieurs paramètres à la fois, compare des fuseaux horaires, affiche une horloge mondiale multi-villes, vérifie les heures ouvrables d\'une ville, planifie des réunions entre fuseaux (meeting planner), recherche des fuseaux par région/pays, exporte/importe les préférences, réinitialise aux valeurs par défaut, affiche un compte à rebours jusqu\'à une date cible, donne les informations sur l\'heure d\'été/hiver (DST), convertit une heure spécifique d\'un fuseau à un autre (convert_time), affiche le calendrier de la semaine courante (calendar_week), affiche le calendrier mensuel (calendar_month), affiche les heures de lever/coucher du soleil (sun_times), calcule le temps restant avant une heure cible (time_until), affiche la progression de l\'année en cours avec jour de l\'année et semaine ISO (year_progress), affiche un aperçu rapide d\'une ville combinant heure, heures ouvrables et DST en un message (quick_brief), audite les préférences personnalisées vs valeurs par défaut (preferences_audit), convertit des timestamps Unix en dates et inversement (unix_timestamp), convertit une heure vers plusieurs fuseaux horaires simultanément (multi_convert), affiche une carte jour/nuit mondiale indiquant quelles villes dorment ou sont éveillées (day_night_map), calcule les prochaines occurrences d\'un événement récurrent (repeat_event), affiche les prochains jours fériés par pays ou internationaux (holiday_info), et convertit un numéro de semaine ISO en dates lundi-dimanche (week_to_dates).';
     }
 
     public function keywords(): array
@@ -348,12 +348,57 @@ class UserPreferencesAgent extends BaseAgent
             'infos sur le', 'infos date', 'quel jour est le', 'date info',
             'quel jour tombe', 'c est quoi comme jour', 'semaine et trimestre',
             'details date', 'details sur la date', 'info date', 'informations date',
+            // quick_brief
+            'apercu', 'aperçu', 'brief', 'quick brief', 'resume ville', 'résumé ville',
+            'apercu rapide', 'aperçu rapide', 'overview', 'infos ville',
+            'brief tokyo', 'brief new york', 'brief dubai', 'brief london',
+            // preferences_audit
+            'audit preferences', 'audit préférences', 'bilan preferences', 'bilan préférences',
+            'etat preferences', 'état préférences', 'stats preferences', 'stats préférences',
+            'taux personnalisation', 'combien de preferences', 'combien de préférences',
+            // unix_timestamp
+            'timestamp', 'unix timestamp', 'unix', 'epoch', 'timestamp unix',
+            'convertir timestamp', 'timestamp actuel', 'quel timestamp', 'mon timestamp',
+            'timestamp maintenant', 'epoch now', 'from timestamp', 'to timestamp',
+            // multi_convert
+            'multi convert', 'convertir plusieurs', 'heure dans plusieurs villes',
+            'si c est a', 'quelle heure dans', 'conversion multiple',
+            'multi fuseaux', 'multi-fuseaux', 'convertir vers plusieurs',
+            // batch_brief — v1.17.0
+            'batch brief', 'brief plusieurs villes', 'apercu plusieurs',
+            'overview multiple', 'resume plusieurs villes', 'briefs',
+            'apercu villes', 'brief villes', 'multi brief',
+            // schedule_check — v1.17.0
+            'schedule check', 'verifier horaire', 'est-ce que ca marche',
+            'horaire compatible', 'compatible timezone', 'check meeting time',
+            'est-ce un bon horaire', 'bonne heure pour', 'check horaire',
+            'verifier heure reunion', 'ca passe pour', 'horaire ok',
+            // day_night_map — v1.18.0
+            'day night', 'jour nuit', 'carte jour nuit', 'map jour nuit',
+            'qui dort', 'qui est reveille', 'qui est réveillé', 'nuit ou jour',
+            'jour ou nuit', 'planete', 'planète', 'monde entier',
+            'day night map', 'carte mondiale', 'statut mondial',
+            // repeat_event — v1.18.0
+            'repeat event', 'evenement recurrent', 'événement récurrent',
+            'toutes les semaines', 'tous les mois', 'tous les jours',
+            'prochaines occurrences', 'recurrence', 'récurrence',
+            'repeter', 'répéter', 'chaque semaine', 'chaque mois',
+            'every week', 'every month', 'every day', 'recurring',
+            // holiday_info — v1.19.0
+            'jour ferie', 'jour férié', 'jours feries', 'jours fériés',
+            'fete nationale', 'fête nationale', 'holiday', 'holidays',
+            'prochain ferie', 'prochain férié', 'public holiday',
+            'bank holiday', 'vacances', 'jour off', 'conge', 'congé',
+            // week_to_dates — v1.19.0
+            'semaine numero', 'semaine numéro', 'week number',
+            'dates de la semaine', 'dates semaine', 'quelle semaine',
+            'semaine iso', 'week to dates', 'week dates',
         ];
     }
 
     public function version(): string
     {
-        return '1.14.0';
+        return '1.19.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -363,10 +408,50 @@ class UserPreferencesAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        try {
+            return $this->handleInner($context);
+        } catch (\Throwable $e) {
+            $errMsg = $e->getMessage();
+            Log::error('UserPreferencesAgent handle() exception', [
+                'error'   => $errMsg,
+                'trace'   => mb_substr($e->getTraceAsString(), 0, 500),
+                'from'    => $context->from,
+                'body'    => mb_substr($context->body ?? '', 0, 100),
+            ]);
+            $this->log($context, 'EXCEPTION: ' . $errMsg, ['class' => get_class($e)], 'error');
+
+            $isDbError      = $e instanceof \Illuminate\Database\QueryException;
+            $isRateLimit    = str_contains($errMsg, 'rate_limit') || str_contains($errMsg, '429');
+            $isTimeout      = str_contains($errMsg, 'timed out') || str_contains($errMsg, 'timeout');
+            $isOverloaded   = str_contains($errMsg, 'overloaded') || str_contains($errMsg, '529') || str_contains($errMsg, '503');
+            $isConnection   = str_contains($errMsg, 'cURL') || str_contains($errMsg, 'Connection refused') || str_contains($errMsg, 'Could not resolve');
+
+            $reply = match (true) {
+                $isDbError    => "⚠️ Erreur temporaire de base de données. Réessaie dans quelques instants.",
+                $isRateLimit  => "⚠️ Trop de requêtes en ce moment. Réessaie dans 30 secondes.",
+                $isTimeout    => "⚠️ Le service a mis trop de temps à répondre. Réessaie dans quelques instants.",
+                $isOverloaded => "⚠️ Le service est temporairement surchargé. Réessaie dans 1-2 minutes.",
+                $isConnection => "⚠️ Problème de connexion au service. Vérifie ta connexion et réessaie.",
+                default       => "⚠️ Une erreur inattendue s'est produite. Réessaie ou tape *aide preferences* pour voir les commandes disponibles.",
+            };
+
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'error', 'error_type' => get_class($e)]);
+        }
+    }
+
+    private function handleInner(AgentContext $context): AgentResult
+    {
         $body   = trim($context->body ?? '');
         $userId = $context->from;
 
         $this->log($context, "Processing preferences command", ['body' => mb_substr($body, 0, 100)]);
+
+        // Handle empty or very short messages
+        if (mb_strlen($body) < 2) {
+            $prefs = PreferencesManager::getPreferences($userId);
+            return AgentResult::reply($this->formatShowPreferences($prefs), ['action' => 'show_preferences', 'reason' => 'empty_body']);
+        }
 
         $prefs = PreferencesManager::getPreferences($userId);
 
@@ -382,12 +467,22 @@ class UserPreferencesAgent extends BaseAgent
             $systemPrompt
         );
 
+        if ($response === null) {
+            Log::warning('UserPreferencesAgent: LLM returned null response', [
+                'body' => mb_substr($body, 0, 200),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Je n'ai pas pu analyser ta demande. Réessaie ou tape *aide preferences* pour voir les commandes.\n\n"
+                . "_Exemples : mon profil, quelle heure, timezone Europe/Paris_"
+            );
+        }
+
         $parsed = $this->parseJson($response);
 
         if (!$parsed || empty($parsed['action'])) {
             Log::warning('UserPreferencesAgent: failed to parse LLM response', [
                 'body'     => mb_substr($body, 0, 200),
-                'response' => mb_substr($response ?? '', 0, 300),
+                'response' => mb_substr($response, 0, 300),
             ]);
             return AgentResult::reply($this->formatShowPreferences($prefs));
         }
@@ -423,6 +518,18 @@ class UserPreferencesAgent extends BaseAgent
             'year_progress'    => $this->handleYearProgress($prefs),
             'date_add'         => $this->handleDateAdd($parsed, $prefs),
             'date_info'        => $this->handleDateInfo($parsed, $prefs),
+            'quick_brief'      => $this->handleQuickBrief($parsed, $prefs),
+            'preferences_audit'=> $this->handlePreferencesAudit($prefs),
+            'unix_timestamp'   => $this->handleUnixTimestamp($parsed, $prefs),
+            'multi_convert'    => $this->handleMultiConvert($parsed, $prefs),
+            'jet_lag'          => $this->handleJetLag($parsed, $prefs),
+            'time_bridge'      => $this->handleTimeBridge($parsed, $prefs),
+            'batch_brief'      => $this->handleBatchBrief($parsed, $prefs),
+            'schedule_check'   => $this->handleScheduleCheck($parsed, $prefs),
+            'day_night_map'    => $this->handleDayNightMap($parsed, $prefs),
+            'repeat_event'     => $this->handleRepeatEvent($parsed, $prefs),
+            'holiday_info'     => $this->handleHolidayInfo($parsed, $prefs),
+            'week_to_dates'    => $this->handleWeekToDates($parsed, $prefs),
             default            => AgentResult::reply($this->formatShowPreferences($prefs)),
         };
     }
@@ -701,9 +808,122 @@ Afficher les informations complètes sur une date spécifique (jour, semaine ISO
 - "date info 2026-06-21" / "semaine et trimestre du 2026-06-21" → {"action": "date_info", "date": "2026-06-21"}
 - IMPORTANT: date doit toujours être au format AAAA-MM-JJ ou "today".
 
+Aperçu rapide d'une ville (heure + heures ouvrables + DST en un seul message):
+{"action": "quick_brief", "target": "Tokyo"}
+{"action": "quick_brief", "target": "New York"}
+
+- "aperçu Tokyo" / "brief New York" / "résumé Dubai" / "quick brief London" → {"action": "quick_brief", "target": "Tokyo"}
+- "aperçu rapide Singapore" / "infos ville Sydney" / "overview Paris" → {"action": "quick_brief", "target": "Singapore"}
+- "brief de ma ville" / "résumé de mon fuseau" → {"action": "quick_brief", "target": ""}
+
+Audit des préférences (résumé de ce qui est personnalisé vs valeurs par défaut):
+{"action": "preferences_audit"}
+
+- "audit préférences" / "audit de mes préférences" / "bilan préférences" → {"action": "preferences_audit"}
+- "qu'est-ce qui est personnalisé" / "combien de préférences" / "état des préférences" → {"action": "preferences_audit"}
+- "mes stats préférences" / "taux de personnalisation" → {"action": "preferences_audit"}
+
+Convertir un timestamp Unix en date ou l'inverse:
+{"action": "unix_timestamp", "value": "1711234567", "mode": "from_unix"}
+{"action": "unix_timestamp", "value": "now", "mode": "to_unix"}
+{"action": "unix_timestamp", "value": "2026-07-14 15:00", "mode": "to_unix"}
+Si "value" est un nombre de 9-11 chiffres, c'est un timestamp à convertir en date (from_unix). Sinon c'est une date à convertir en timestamp (to_unix). "mode": "auto" détecte automatiquement.
+
+- "timestamp 1711234567" / "convertir timestamp 1711234567" → {"action": "unix_timestamp", "value": "1711234567", "mode": "auto"}
+- "timestamp maintenant" / "unix timestamp now" / "timestamp actuel" → {"action": "unix_timestamp", "value": "now", "mode": "to_unix"}
+- "timestamp du 2026-07-14" / "unix 2026-07-14 15:00" → {"action": "unix_timestamp", "value": "2026-07-14 15:00", "mode": "to_unix"}
+- "quel timestamp" / "mon timestamp" / "epoch now" → {"action": "unix_timestamp", "value": "now", "mode": "to_unix"}
+
+Convertir une heure vers PLUSIEURS fuseaux horaires en même temps (tableau multi-fuseaux):
+{"action": "multi_convert", "time": "15:00", "from": "Paris", "cities": ["Tokyo", "New York", "Dubai"]}
+{"action": "multi_convert", "time": "9am", "from": "London", "cities": ["Paris", "Sydney", "Singapore"]}
+Si "from" est vide ou absent, utilise le fuseau de l'utilisateur. "time" est l'heure source. "cities" contient la liste des villes cibles.
+
+- "si c'est 15h à Paris quelle heure à Tokyo, New York et Dubai" → {"action": "multi_convert", "time": "15:00", "from": "Paris", "cities": ["Tokyo", "New York", "Dubai"]}
+- "convertir 9h du matin vers Tokyo, Sydney et Singapore" → {"action": "multi_convert", "time": "9:00", "from": "", "cities": ["Tokyo", "Sydney", "Singapore"]}
+- "heure dans plusieurs villes si 14h30 à Londres" → {"action": "multi_convert", "time": "14:30", "from": "London", "cities": []}
+Note: si l'utilisateur ne spécifie qu'une seule ville cible, utiliser convert_time. multi_convert est pour 2+ villes cibles.
+
+Calculer le jet lag et l'heure d'arrivée pour un vol entre deux villes:
+{"action": "jet_lag", "from": "Paris", "to": "Tokyo", "duration": "12h"}
+{"action": "jet_lag", "from": "New York", "to": "London", "duration": "7h30"}
+- "jet lag Paris Tokyo 12h" / "vol Paris vers Tokyo durée 12h" → {"action": "jet_lag", "from": "Paris", "to": "Tokyo", "duration": "12h"}
+- "décalage horaire vol New York Londres 7h30" → {"action": "jet_lag", "from": "New York", "to": "London", "duration": "7h30"}
+- "arrivée vol Dubai Singapore 7h" → {"action": "jet_lag", "from": "Dubai", "to": "Singapore", "duration": "7h"}
+- IMPORTANT: duration accepte: 12h, 7h30, 12:30, 7.5h, 90min. "from" et "to" sont des noms de villes.
+
+Afficher un pont horaire visuel (timeline heure par heure) entre le fuseau de l'utilisateur et une ville:
+{"action": "time_bridge", "target": "Tokyo"}
+{"action": "time_bridge", "target": "New York"}
+- "pont horaire Tokyo" / "timeline Tokyo" / "bridge New York" → {"action": "time_bridge", "target": "Tokyo"}
+- "grille horaire Londres" / "tableau horaire Dubai" → {"action": "time_bridge", "target": "London"}
+- "visualiser heures Tokyo" / "overlap horaire avec New York" → {"action": "time_bridge", "target": "Tokyo"}
+
+Aperçu rapide de PLUSIEURS villes en un seul message (batch brief):
+{"action": "batch_brief", "cities": ["Tokyo", "New York", "Dubai"]}
+{"action": "batch_brief", "cities": ["London", "Singapore", "Sydney"]}
+
+- "brief Tokyo, New York et Dubai" / "aperçu plusieurs villes" → {"action": "batch_brief", "cities": ["Tokyo", "New York", "Dubai"]}
+- "overview London, Singapore, Sydney" / "résumé de plusieurs villes" → {"action": "batch_brief", "cities": ["London", "Singapore", "Sydney"]}
+- "briefs Paris et Tokyo" / "multi brief Dubai London" → {"action": "batch_brief", "cities": ["Paris", "Tokyo"]}
+Note: si UNE seule ville, utiliser quick_brief. batch_brief est pour 2+ villes.
+
+Vérifier si une heure donnée est compatible avec les heures ouvrables de plusieurs villes:
+{"action": "schedule_check", "time": "15:00", "cities": ["Tokyo", "New York"]}
+{"action": "schedule_check", "time": "10h", "cities": ["London", "Dubai", "Singapore"]}
+Si "time" est absent, utilise l'heure actuelle. Vérifie si l'heure est dans les heures ouvrables (9h-18h lun-ven) de chaque ville.
+
+- "est-ce que 15h marche pour Tokyo et New York" / "15h c'est ok pour Tokyo et NYC" → {"action": "schedule_check", "time": "15:00", "cities": ["Tokyo", "New York"]}
+- "check horaire 10h London Dubai Singapore" / "est-ce un bon horaire 10h pour Londres et Dubai" → {"action": "schedule_check", "time": "10:00", "cities": ["London", "Dubai", "Singapore"]}
+- "vérifier si 14h30 passe pour Paris, Tokyo et Sydney" → {"action": "schedule_check", "time": "14:30", "cities": ["Paris", "Tokyo", "Sydney"]}
+- "horaire compatible 9am pour New York et London" → {"action": "schedule_check", "time": "09:00", "cities": ["New York", "London"]}
+
+Afficher la carte jour/nuit mondiale (quelles grandes villes sont en jour, nuit, aube ou crépuscule):
+{"action": "day_night_map"}
+{"action": "day_night_map", "cities": ["Tokyo", "London", "Dubai", "Sydney"]}
+
+- "carte jour nuit" / "qui dort" / "qui est réveillé" / "jour ou nuit dans le monde" → {"action": "day_night_map"}
+- "day night map" / "statut mondial" / "jour nuit Tokyo London Dubai" → {"action": "day_night_map", "cities": ["Tokyo", "London", "Dubai"]}
+- "carte mondiale" / "planète" / "monde entier" → {"action": "day_night_map"}
+
+Calculer les prochaines occurrences d'un événement récurrent:
+{"action": "repeat_event", "start_date": "2026-04-01", "interval": "2 weeks", "count": 5, "label": "Réunion bi-hebdo"}
+{"action": "repeat_event", "start_date": "2026-04-15", "interval": "1 month", "count": 6, "label": "Paye"}
+{"action": "repeat_event", "start_date": "today", "interval": "3 days", "count": 5, "label": ""}
+Valeurs possibles pour interval: "N days", "N weeks", "N months". count est le nombre d'occurrences à afficher (max 12, défaut 5).
+
+- "toutes les 2 semaines à partir du 2026-04-01" → {"action": "repeat_event", "start_date": "2026-04-01", "interval": "2 weeks", "count": 5, "label": ""}
+- "prochaines payes tous les mois à partir du 15 avril" → {"action": "repeat_event", "start_date": "2026-04-15", "interval": "1 month", "count": 6, "label": "Paye"}
+- "événement tous les 3 jours" → {"action": "repeat_event", "start_date": "today", "interval": "3 days", "count": 5, "label": ""}
+- "réunion chaque semaine à partir du lundi prochain, 8 prochaines" → {"action": "repeat_event", "start_date": "2026-03-30", "interval": "1 week", "count": 8, "label": "Réunion"}
+- IMPORTANT: start_date au format AAAA-MM-JJ ou "today". interval au format "N days/weeks/months".
+
+Afficher les prochains jours fériés (par pays ou international):
+{"action": "holiday_info"}
+{"action": "holiday_info", "country": "france"}
+{"action": "holiday_info", "country": "us", "count": 5}
+
+- "prochains jours fériés" / "jours fériés" / "holidays" → {"action": "holiday_info"}
+- "jours fériés en France" / "fêtes nationales France" → {"action": "holiday_info", "country": "france"}
+- "jours fériés US" / "public holidays USA" / "bank holidays UK" → {"action": "holiday_info", "country": "us"}
+- "5 prochains jours fériés Allemagne" → {"action": "holiday_info", "country": "de", "count": 5}
+- IMPORTANT: country accepte: fr/france, us/usa, uk, de/germany, es/spain, it/italy, ou vide pour international.
+
+Convertir un numéro de semaine ISO en dates (lundi à dimanche):
+{"action": "week_to_dates", "week": 15}
+{"action": "week_to_dates", "week": 15, "year": 2026}
+
+- "semaine 15" / "dates de la semaine 15" / "week 15" → {"action": "week_to_dates", "week": 15}
+- "semaine 20 2026" / "dates semaine 20 en 2026" → {"action": "week_to_dates", "week": 20, "year": 2026}
+- "quelles dates sont en semaine 1 2027" → {"action": "week_to_dates", "week": 1, "year": 2027}
+- IMPORTANT: week est le numéro de semaine ISO (1-53). year est optionnel (défaut: année courante).
+
 - Si le message est ambigu ou demande de l'aide → {"action": "help"}
 
-Réponds UNIQUEMENT avec le JSON, rien d'autre.
+RÈGLES STRICTES:
+- Réponds UNIQUEMENT avec le JSON, rien d'autre. Pas de texte avant ou après.
+- N'encapsule PAS le JSON dans des backticks ou blocs de code.
+- Assure-toi que le JSON est syntaxiquement valide (guillemets doubles, pas de virgule traînante).
 PROMPT;
     }
 
@@ -3187,6 +3407,1389 @@ PROMPT;
         ]);
     }
 
+    // -------------------------------------------------------------------------
+    // Quick brief — combined city overview (time + business hours + DST)
+    // -------------------------------------------------------------------------
+
+    private function handleQuickBrief(array $parsed, array $prefs): AgentResult
+    {
+        $target    = trim($parsed['target'] ?? '');
+        $userTz    = $prefs['timezone'] ?? 'UTC';
+        $lang      = $prefs['language'] ?? 'fr';
+
+        if ($target === '') {
+            $target = $userTz;
+        }
+
+        $targetTz = $this->resolveTimezoneString($target) ?? $target;
+
+        try {
+            $tz        = new DateTimeZone($targetTz);
+            $userTzObj = new DateTimeZone($userTz);
+            $utcNow    = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $targetNow = $utcNow->setTimezone($tz);
+            $userNow   = $utcNow->setTimezone($userTzObj);
+
+            $targetOffset = $tz->getOffset($utcNow);
+            $userOffset   = $userTzObj->getOffset($utcNow);
+            $diffSeconds  = $targetOffset - $userOffset;
+            $diffHours    = $diffSeconds / 3600;
+            $diffSign     = $diffHours >= 0 ? '+' : '';
+            $diffLabel    = $diffHours == (int) $diffHours
+                ? $diffSign . (int) $diffHours . 'h'
+                : $diffSign . number_format($diffHours, 1, '.', '') . 'h';
+
+            $cityLabel = ucwords($target);
+            $dayName   = $this->getDayName((int) $targetNow->format('w'), $lang);
+            $hour      = (int) $targetNow->format('G');
+            $isoDay    = (int) $targetNow->format('N');
+
+            // Business hours check (9-18 Mon-Fri)
+            $isWorkDay = $isoDay <= 5;
+            $isOpen    = $isWorkDay && $hour >= 9 && $hour < 18;
+            if ($isOpen) {
+                $businessIcon   = '🟢';
+                $businessStatus = 'Bureaux ouverts (9h–18h)';
+                $closesIn       = 18 - $hour;
+                $businessExtra  = "Ferme dans ~{$closesIn}h";
+            } elseif ($isWorkDay && $hour >= 18) {
+                $businessIcon   = '🔴';
+                $businessStatus = 'Bureaux fermés';
+                $businessExtra  = 'Réouverture demain à 9h';
+            } elseif ($isWorkDay && $hour < 9) {
+                $businessIcon   = '🟡';
+                $businessStatus = 'Bureaux pas encore ouverts';
+                $opensIn        = 9 - $hour;
+                $businessExtra  = "Ouvre dans ~{$opensIn}h";
+            } else {
+                $businessIcon   = '🔴';
+                $businessStatus = 'Week-end';
+                $daysToMon      = $isoDay === 6 ? 2 : 1;
+                $businessExtra  = "Réouverture lundi à 9h (dans {$daysToMon}j)";
+            }
+
+            // DST check
+            $isDst = (bool) $targetNow->format('I');
+            $dstLabel = $isDst ? '☀️ Heure d\'été active' : '❄️ Heure d\'hiver active';
+
+            // Find next DST transition
+            $transitions = $tz->getTransitions(
+                $targetNow->getTimestamp(),
+                $targetNow->getTimestamp() + 365 * 86400
+            );
+            $nextTransition = null;
+            foreach ($transitions as $i => $tr) {
+                if ($i === 0) continue;
+                if ($tr['isdst'] !== $isDst) {
+                    $nextTransition = $tr;
+                    break;
+                }
+            }
+
+            $dstExtra = '';
+            if ($nextTransition) {
+                $trDate   = (new DateTimeImmutable('@' . $nextTransition['ts']))->setTimezone($tz);
+                $trDay    = $this->getDayName((int) $trDate->format('w'), $lang, short: true);
+                $dstExtra = "\n   Prochain changement : *{$trDate->format('d/m/Y')}* ({$trDay})";
+            } else {
+                $dstExtra = "\n   _Pas de changement d\'heure prévu_";
+            }
+
+            $lines = [
+                "🌍 *APERÇU RAPIDE — {$cityLabel}*",
+                "────────────────",
+                "🕐 *{$targetNow->format('H:i')}* ({$dayName}) — UTC{$targetNow->format('P')}",
+                "⏱ Décalage avec toi : *{$diffLabel}*",
+                "────────────────",
+                "{$businessIcon} {$businessStatus}",
+                "   {$businessExtra}",
+                "────────────────",
+                "{$dstLabel}{$dstExtra}",
+                "────────────────",
+                "_Pour plus de détails :_",
+                "• _heure à {$cityLabel}_ — comparaison détaillée",
+                "• _heures ouvrables {$cityLabel}_ — planning complet",
+                "• _DST {$cityLabel}_ — infos heure d'été",
+            ];
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'    => 'quick_brief',
+                'target'    => $target,
+                'timezone'  => $targetTz,
+                'is_open'   => $isOpen,
+                'is_dst'    => $isDst,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: quick_brief error', [
+                'target' => $target,
+                'error'  => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Impossible d'afficher l'aperçu pour *{$target}*.\n"
+                . "_Vérifie le nom de la ville ou du fuseau horaire._\n"
+                . "_Exemples : aperçu Tokyo, brief New York, résumé Dubai_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Preferences audit — customization summary
+    // -------------------------------------------------------------------------
+
+    private function handlePreferencesAudit(array $prefs): AgentResult
+    {
+        $defaults = UserPreference::$defaults;
+
+        $customized = [];
+        $atDefault  = [];
+
+        foreach ($defaults as $key => $defaultValue) {
+            $currentValue = $prefs[$key] ?? $defaultValue;
+            $isCustom     = (string) $currentValue !== (string) $defaultValue;
+
+            if ($isCustom) {
+                $customized[$key] = [
+                    'current' => $currentValue,
+                    'default' => $defaultValue,
+                ];
+            } else {
+                $atDefault[$key] = $defaultValue;
+            }
+        }
+
+        $totalKeys   = count($defaults);
+        $customCount = count($customized);
+        $pct         = $totalKeys > 0 ? round(($customCount / $totalKeys) * 100) : 0;
+
+        $lines = [
+            "📊 *AUDIT DES PRÉFÉRENCES*",
+            "────────────────",
+            "🎯 Personnalisation : *{$customCount}* / {$totalKeys} ({$pct}%)",
+            "",
+        ];
+
+        if (!empty($customized)) {
+            $lines[] = "✏️ *Préférences personnalisées :*";
+            foreach ($customized as $key => $info) {
+                $label   = $this->formatKeyLabel($key);
+                $current = $this->formatValue($key, $info['current']);
+                $default = $this->formatValue($key, $info['default']);
+                $lines[] = "• *{$label}* : {$current} _(défaut: {$default})_";
+            }
+            $lines[] = "";
+        }
+
+        if (!empty($atDefault)) {
+            $lines[] = "📋 *Préférences par défaut :*";
+            foreach ($atDefault as $key => $value) {
+                $label   = $this->formatKeyLabel($key);
+                $display = $this->formatValue($key, $value);
+                $lines[] = "• {$label} : {$display}";
+            }
+            $lines[] = "";
+        }
+
+        $lines[] = "────────────────";
+
+        if ($customCount === 0) {
+            $lines[] = "💡 _Tu n'as rien personnalisé. Commence par :_";
+            $lines[] = "• _set language en_ / _timezone Europe/Paris_";
+        } elseif ($customCount < $totalKeys) {
+            $remaining = $totalKeys - $customCount;
+            $lines[] = "💡 _Il reste {$remaining} préférence(s) à personnaliser._";
+            $lines[] = "• _mon profil_ — voir tous les paramètres";
+        } else {
+            $lines[] = "🎉 _Toutes tes préférences sont personnalisées !_";
+        }
+
+        $lines[] = "• _reset all_ — tout réinitialiser";
+
+        return AgentResult::reply(implode("\n", $lines), [
+            'action'          => 'preferences_audit',
+            'customized'      => $customCount,
+            'total'           => $totalKeys,
+            'percentage'      => $pct,
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Unix timestamp conversion
+    // -------------------------------------------------------------------------
+
+    private function handleUnixTimestamp(array $parsed, array $prefs): AgentResult
+    {
+        $userTz   = $prefs['timezone'] ?? 'UTC';
+        $lang     = $prefs['language'] ?? 'fr';
+        $dateFmt  = $prefs['date_format'] ?? 'd/m/Y';
+        $input    = trim($parsed['value'] ?? '');
+        $mode     = $parsed['mode'] ?? 'auto'; // 'to_unix', 'from_unix', 'auto'
+
+        try {
+            $tz = new DateTimeZone($userTz);
+
+            // Auto-detect mode: if input looks like a Unix timestamp (all digits, 9-11 chars)
+            if ($mode === 'auto') {
+                if (preg_match('/^-?\d{9,11}$/', $input)) {
+                    $mode = 'from_unix';
+                } elseif (strtolower($input) === 'now' || $input === '') {
+                    $mode = 'to_unix';
+                    $input = 'now';
+                } else {
+                    $mode = 'to_unix';
+                }
+            }
+
+            if ($mode === 'from_unix') {
+                $timestamp = (int) $input;
+                $dt        = (new DateTimeImmutable("@{$timestamp}"))->setTimezone($tz);
+                $utcDt     = new DateTimeImmutable("@{$timestamp}", new DateTimeZone('UTC'));
+                $dayName   = $this->getDayName((int) $dt->format('w'), $lang);
+
+                $lines = [
+                    "🔢 *CONVERSION TIMESTAMP*",
+                    "────────────────",
+                    "📥 Timestamp : *{$timestamp}*",
+                    "",
+                    "📅 Date ({$userTz}) :",
+                    "   *{$dt->format($dateFmt)}* — {$dayName} à *{$dt->format('H:i:s')}*",
+                    "",
+                    "🌍 Date (UTC) :",
+                    "   *{$utcDt->format($dateFmt)}* — {$utcDt->format('H:i:s')}",
+                    "────────────────",
+                    "📊 ISO 8601 : `{$dt->format('c')}`",
+                    "🗓 Semaine ISO : W{$dt->format('W')} — Jour {$dt->format('z')}/365",
+                ];
+
+                return AgentResult::reply(implode("\n", $lines), [
+                    'action'    => 'unix_timestamp',
+                    'mode'      => 'from_unix',
+                    'timestamp' => $timestamp,
+                ]);
+            }
+
+            // to_unix: convert a date/time to Unix timestamp
+            if (strtolower($input) === 'now' || $input === '') {
+                $dt = new DateTimeImmutable('now', $tz);
+            } else {
+                $dt = new DateTimeImmutable($input, $tz);
+            }
+
+            $timestamp = $dt->getTimestamp();
+            $dayName   = $this->getDayName((int) $dt->format('w'), $lang);
+
+            $lines = [
+                "🔢 *CONVERSION TIMESTAMP*",
+                "────────────────",
+                "📅 Date : *{$dt->format($dateFmt)}* — {$dayName} à *{$dt->format('H:i:s')}*",
+                "   _{$userTz}_",
+                "",
+                "📤 Timestamp Unix : *{$timestamp}*",
+                "",
+                "────────────────",
+                "📊 ISO 8601 : `{$dt->format('c')}`",
+                "💡 _Colle un timestamp pour le convertir en date._",
+            ];
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'    => 'unix_timestamp',
+                'mode'      => 'to_unix',
+                'timestamp' => $timestamp,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: unix_timestamp error', [
+                'input' => $input,
+                'error' => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Impossible de convertir *{$input}*.\n\n"
+                . "Exemples valides :\n"
+                . "• _timestamp 1711234567_ — timestamp → date\n"
+                . "• _timestamp now_ — date actuelle → timestamp\n"
+                . "• _timestamp 2026-07-14 15:00_ — date → timestamp"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Multi-convert: show a time across multiple timezones
+    // -------------------------------------------------------------------------
+
+    private function handleMultiConvert(array $parsed, array $prefs): AgentResult
+    {
+        $userTz  = $prefs['timezone'] ?? 'UTC';
+        $lang    = $prefs['language'] ?? 'fr';
+        $dateFmt = $prefs['date_format'] ?? 'd/m/Y';
+        $time    = trim($parsed['time'] ?? '');
+        $from    = trim($parsed['from'] ?? '');
+        $cities  = $parsed['cities'] ?? [];
+
+        if (empty($cities) || !is_array($cities)) {
+            return AgentResult::reply(
+                "⚠️ Indique au moins 2 villes pour la conversion multiple.\n\n"
+                . "Exemples :\n"
+                . "• _si c'est 15h à Paris, quelle heure à Tokyo, New York, Dubai_\n"
+                . "• _multi convert 9am London → Tokyo, Sydney, New York_"
+            );
+        }
+
+        // Resolve source timezone
+        $fromTz = $userTz;
+        if ($from !== '') {
+            $resolved = $this->resolveTimezoneString($from);
+            if ($resolved) {
+                $fromTz = $resolved;
+            }
+        }
+
+        try {
+            $sourceTz = new DateTimeZone($fromTz);
+
+            // Parse the time
+            $parsedTime = $this->parseTimeString($time);
+            if ($parsedTime && preg_match('/^(\d{2}):(\d{2})$/', $parsedTime, $m)) {
+                $now = new DateTimeImmutable('now', $sourceTz);
+                $dt  = $now->setTime((int) $m[1], (int) $m[2], 0);
+            } else {
+                $dt = new DateTimeImmutable('now', $sourceTz);
+            }
+
+            $fromLabel = $from !== '' ? ucwords($from) : $userTz;
+            $dayName   = $this->getDayName((int) $dt->format('w'), $lang, short: true);
+
+            $lines = [
+                "🔄 *CONVERSION MULTI-FUSEAUX*",
+                "────────────────",
+                "📍 Référence : *{$dt->format('H:i')}* ({$dayName}) — {$fromLabel}",
+                "",
+            ];
+
+            $maxCityLen = 0;
+            $results    = [];
+
+            foreach ($cities as $city) {
+                $cityName = trim($city);
+                if ($cityName === '') continue;
+
+                $cityTz = $this->resolveTimezoneString($cityName);
+                if (!$cityTz) {
+                    $results[] = ['city' => $cityName, 'error' => true];
+                    continue;
+                }
+
+                $targetTz  = new DateTimeZone($cityTz);
+                $targetDt  = $dt->setTimezone($targetTz);
+
+                $targetOffset = $targetTz->getOffset($dt);
+                $sourceOffset = $sourceTz->getOffset($dt);
+                $diffHours    = ($targetOffset - $sourceOffset) / 3600;
+                $diffSign     = $diffHours >= 0 ? '+' : '';
+                $diffLabel    = $diffHours == (int) $diffHours
+                    ? $diffSign . (int) $diffHours . 'h'
+                    : $diffSign . number_format($diffHours, 1, '.', '') . 'h';
+
+                $targetDay = $this->getDayName((int) $targetDt->format('w'), $lang, short: true);
+
+                // Same day or different?
+                $dayIndicator = '';
+                $dayDiff = (int) $targetDt->format('j') - (int) $dt->format('j');
+                if ($dayDiff === 1 || ($dayDiff < -25)) {
+                    $dayIndicator = ' _(+1j)_';
+                } elseif ($dayDiff === -1 || ($dayDiff > 25)) {
+                    $dayIndicator = ' _(-1j)_';
+                }
+
+                // Business hours indicator
+                $hour   = (int) $targetDt->format('G');
+                $isoDay = (int) $targetDt->format('N');
+                $isOpen = $isoDay <= 5 && $hour >= 9 && $hour < 18;
+                $icon   = $isOpen ? '🟢' : '🔴';
+
+                $results[] = [
+                    'city'    => ucwords($cityName),
+                    'time'    => $targetDt->format('H:i'),
+                    'day'     => $targetDay,
+                    'diff'    => $diffLabel,
+                    'dayInd'  => $dayIndicator,
+                    'icon'    => $icon,
+                    'error'   => false,
+                ];
+
+                $len = mb_strlen(ucwords($cityName));
+                if ($len > $maxCityLen) $maxCityLen = $len;
+            }
+
+            foreach ($results as $r) {
+                if ($r['error']) {
+                    $lines[] = "❓ {$r['city']} — _fuseau non trouvé_";
+                    continue;
+                }
+                $lines[] = "{$r['icon']} *{$r['city']}* — *{$r['time']}* ({$r['day']}) {$r['diff']}{$r['dayInd']}";
+            }
+
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = "🟢 = heures ouvrables (9h–18h)";
+            $lines[] = "_Exemples : horloge mondiale, heure à Tokyo_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'   => 'multi_convert',
+                'from'     => $fromLabel,
+                'time'     => $dt->format('H:i'),
+                'cities'   => count($results),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: multi_convert error', [
+                'time'   => $time,
+                'from'   => $from,
+                'cities' => $cities,
+                'error'  => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de la conversion multi-fuseaux.\n\n"
+                . "_Vérifie les noms de villes et réessaie._\n"
+                . "Exemple : _si c'est 15h à Paris, quelle heure à Tokyo, New York, Dubai_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Jet lag calculator — flight arrival time & jet lag estimation
+    // -------------------------------------------------------------------------
+
+    private function handleJetLag(array $parsed, array $prefs): AgentResult
+    {
+        $from     = trim($parsed['from'] ?? '');
+        $to       = trim($parsed['to'] ?? '');
+        $duration = trim($parsed['duration'] ?? '');
+        $lang     = $prefs['language'] ?? 'fr';
+
+        if ($from === '' || $to === '') {
+            return AgentResult::reply(
+                "⚠️ Précise la ville de départ et d'arrivée.\n"
+                . "_Ex : jet lag Paris → Tokyo durée 12h_\n"
+                . "_Ex : vol de New York à Londres 7h_"
+            );
+        }
+
+        $fromTz = $this->resolveTimezoneString($from);
+        $toTz   = $this->resolveTimezoneString($to);
+
+        if (!$fromTz) {
+            $suggestion = $this->suggestTimezone($from);
+            $extra      = $suggestion ? "\n💡 Suggestion : _{$suggestion}_" : '';
+            return AgentResult::reply("⚠️ Ville de départ inconnue : *{$from}*.{$extra}");
+        }
+        if (!$toTz) {
+            $suggestion = $this->suggestTimezone($to);
+            $extra      = $suggestion ? "\n💡 Suggestion : _{$suggestion}_" : '';
+            return AgentResult::reply("⚠️ Ville d'arrivée inconnue : *{$to}*.{$extra}");
+        }
+
+        $flightMinutes = $this->parseFlightDuration($duration);
+        if ($flightMinutes === null || $flightMinutes <= 0 || $flightMinutes > 1440) {
+            return AgentResult::reply(
+                "⚠️ Durée de vol invalide : *{$duration}*.\n"
+                . "_Formats acceptés : 12h, 7h30, 12:30, 7.5h_\n"
+                . "_Ex : jet lag Paris → Tokyo durée 12h_"
+            );
+        }
+
+        try {
+            $fromTzObj = new DateTimeZone($fromTz);
+            $toTzObj   = new DateTimeZone($toTz);
+            $utcNow    = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+            $departureNow = $utcNow->setTimezone($fromTzObj);
+            $arrivalUtc   = $utcNow->modify("+{$flightMinutes} minutes");
+            $arrivalTime  = $arrivalUtc->setTimezone($toTzObj);
+
+            $fromOffset    = $fromTzObj->getOffset($utcNow);
+            $toOffset      = $toTzObj->getOffset($utcNow);
+            $jetLagSeconds = abs($toOffset - $fromOffset);
+            $jetLagHours   = $jetLagSeconds / 3600;
+
+            $flightH     = intdiv($flightMinutes, 60);
+            $flightM     = $flightMinutes % 60;
+            $durationStr = $flightM > 0 ? "{$flightH}h{$flightM}min" : "{$flightH}h";
+
+            $severity = match (true) {
+                $jetLagHours <= 2  => '🟢 Léger (adaptation rapide)',
+                $jetLagHours <= 5  => '🟡 Modéré (1-2 jours d\'adaptation)',
+                $jetLagHours <= 8  => '🟠 Important (2-4 jours d\'adaptation)',
+                default            => '🔴 Sévère (4-7 jours d\'adaptation)',
+            };
+
+            $direction = ($toOffset - $fromOffset) > 0 ? 'Est ➡️ (avance)' : 'Ouest ⬅️ (recul)';
+            if ($toOffset === $fromOffset) {
+                $direction = 'Même fuseau (pas de jet lag)';
+            }
+
+            $fromDay    = $this->getDayName((int) $departureNow->format('w'), $lang, short: true);
+            $arrivalDay = $this->getDayName((int) $arrivalTime->format('w'), $lang, short: true);
+
+            $jetLagStr = $jetLagHours == (int) $jetLagHours
+                ? (int) $jetLagHours . 'h'
+                : number_format($jetLagHours, 1, '.', '') . 'h';
+
+            $lines = [
+                "✈️ *CALCULATEUR DE JET LAG*",
+                "────────────────",
+                "🛫 Départ : *{$from}* ({$fromTz})",
+                "   🕐 Heure locale : *{$departureNow->format('H:i')}* {$fromDay}",
+                "🛬 Arrivée : *{$to}* ({$toTz})",
+                "   🕐 Heure locale à l'arrivée : *{$arrivalTime->format('H:i')}* {$arrivalDay}",
+                "⏱ Durée du vol : *{$durationStr}*",
+                "────────────────",
+                "🌍 Décalage horaire : *{$jetLagStr}* — {$direction}",
+                "{$severity}",
+                "────────────────",
+            ];
+
+            if ($jetLagHours > 2) {
+                $lines[] = "💡 *Conseils :*";
+                if ($jetLagHours > 5) {
+                    $lines[] = "• Commence à ajuster ton rythme 2-3 jours avant";
+                }
+                $lines[] = "• Expose-toi à la lumière naturelle à destination";
+                $lines[] = "• Hydrate-toi bien pendant le vol";
+                $lines[] = "• Évite la caféine 6h avant le coucher local";
+            }
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'         => 'jet_lag',
+                'from'           => $fromTz,
+                'to'             => $toTz,
+                'flight_minutes' => $flightMinutes,
+                'jet_lag_hours'  => $jetLagHours,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: jet_lag error', [
+                'from' => $from, 'to' => $to, 'error' => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Impossible de calculer le jet lag.\n"
+                . "_Vérifie les villes et la durée du vol._\n"
+                . "_Ex : jet lag Paris → Tokyo durée 12h_"
+            );
+        }
+    }
+
+    private function parseFlightDuration(string $duration): ?int
+    {
+        $duration = trim(mb_strtolower($duration));
+
+        if (preg_match('/^(\d{1,2})h(\d{1,2})(?:m(?:in)?)?$/', $duration, $m)) {
+            return (int) $m[1] * 60 + (int) $m[2];
+        }
+        if (preg_match('/^(\d{1,2})h$/', $duration, $m)) {
+            return (int) $m[1] * 60;
+        }
+        if (preg_match('/^(\d{1,2}):(\d{2})$/', $duration, $m)) {
+            return (int) $m[1] * 60 + (int) $m[2];
+        }
+        if (preg_match('/^(\d{1,2}(?:\.\d+)?)h?$/', $duration, $m)) {
+            return (int) round((float) $m[1] * 60);
+        }
+        if (preg_match('/^(\d{1,4})m(?:in)?$/', $duration, $m)) {
+            return (int) $m[1];
+        }
+
+        return null;
+    }
+
+
+
+    // -------------------------------------------------------------------------
+    // Time bridge — visual hour-by-hour timeline between two timezones
+    // -------------------------------------------------------------------------
+
+    private function handleTimeBridge(array $parsed, array $prefs): AgentResult
+    {
+        $target = trim($parsed['target'] ?? '');
+        $lang   = $prefs['language'] ?? 'fr';
+        $userTz = $prefs['timezone'] ?? 'UTC';
+
+        if ($target === '') {
+            return AgentResult::reply(
+                "⚠️ Précise une ville pour le pont horaire.\n"
+                . "_Ex : pont horaire Tokyo, timeline New York, bridge Londres_"
+            );
+        }
+
+        $targetTz = $this->resolveTimezoneString($target);
+        if (!$targetTz) {
+            $suggestion = $this->suggestTimezone($target);
+            $extra      = $suggestion ? "\n💡 Suggestion : _{$suggestion}_" : '';
+            return AgentResult::reply("⚠️ Fuseau inconnu : *{$target}*.{$extra}");
+        }
+
+        try {
+            $userTzObj   = new DateTimeZone($userTz);
+            $targetTzObj = new DateTimeZone($targetTz);
+            $utcNow      = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+            // Start from midnight today in user's timezone
+            $userToday = $utcNow->setTimezone($userTzObj)->setTime(0, 0, 0);
+
+            $lines = [
+                "🌉 *PONT HORAIRE*",
+                "────────────────",
+                "📍 Ici : *{$userTz}*",
+                "📍 Là-bas : *{$target}* ({$targetTz})",
+                "",
+                "⏰ *Timeline (heures ouvrables en gras) :*",
+                "",
+            ];
+
+            // Show hours from 6:00 to 23:00 user time
+            for ($h = 6; $h <= 23; $h += 1) {
+                $userDt   = $userToday->setTime($h, 0, 0);
+                $targetDt = $userDt->setTimezone($targetTzObj);
+                $targetH  = (int) $targetDt->format('G');
+                $targetM  = $targetDt->format('i');
+
+                // Business hours highlight (9-18)
+                $userBiz   = ($h >= 9 && $h < 18);
+                $targetBiz = ($targetH >= 9 && $targetH < 18);
+
+                $userStr   = sprintf('%02d:00', $h);
+                $targetStr = sprintf('%02d:%s', $targetH, $targetM);
+
+                // Visual indicators
+                $overlap = ($userBiz && $targetBiz) ? '🟢' : (($userBiz || $targetBiz) ? '🟡' : '⚪');
+
+                $userLabel   = $userBiz ? "*{$userStr}*" : $userStr;
+                $targetLabel = $targetBiz ? "*{$targetStr}*" : $targetStr;
+
+                $lines[] = "{$overlap} {$userLabel} → {$targetLabel}";
+            }
+
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = "🟢 = les deux en heures ouvrables";
+            $lines[] = "🟡 = un seul en heures ouvrables";
+            $lines[] = "⚪ = aucun en heures ouvrables";
+            $lines[] = "────────────────";
+            $lines[] = "_Voir aussi : planifier réunion {$target}_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action' => 'time_bridge',
+                'target' => $targetTz,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: time_bridge error', [
+                'target' => $target,
+                'error'  => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Impossible d'afficher le pont horaire.\n"
+                . "_Vérifie le fuseau horaire._\n"
+                . "_Ex : pont horaire Tokyo, bridge New York_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Batch brief — multi-city quick overview (v1.17.0)
+    // -------------------------------------------------------------------------
+
+    private function handleBatchBrief(array $parsed, array $prefs): AgentResult
+    {
+        $cities = $parsed['cities'] ?? [];
+        $lang   = $prefs['language'] ?? 'fr';
+        $userTz = $prefs['timezone'] ?? 'UTC';
+
+        if (!is_array($cities) || count($cities) < 2) {
+            return AgentResult::reply(
+                "⚠️ Précise au moins 2 villes pour un aperçu groupé.\n"
+                . "_Ex : brief Tokyo, New York et Dubai_\n"
+                . "_Pour une seule ville, utilise : aperçu Tokyo_"
+            );
+        }
+
+        if (count($cities) > 8) {
+            $cities = array_slice($cities, 0, 8);
+        }
+
+        try {
+            $utcNow    = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $userTzObj = new DateTimeZone($userTz);
+            $userNow   = $utcNow->setTimezone($userTzObj);
+            $userDay   = $this->getDayName((int) $userNow->format('w'), $lang, short: true);
+
+            $lines = [
+                "🌍 *APERÇU MULTI-VILLES*",
+                "────────────────",
+                "📍 Toi : *{$userTz}* — *{$userNow->format('H:i')}* {$userDay}",
+                "────────────────",
+            ];
+
+            $resolvedCount = 0;
+            foreach ($cities as $city) {
+                $cityName = trim((string) $city);
+                if ($cityName === '') {
+                    continue;
+                }
+
+                $tz = $this->resolveTimezoneString($cityName);
+                if (!$tz) {
+                    $lines[] = "❌ *{$cityName}* — _fuseau inconnu_";
+                    continue;
+                }
+
+                $tzObj   = new DateTimeZone($tz);
+                $cityNow = $utcNow->setTimezone($tzObj);
+                $cityH   = (int) $cityNow->format('G');
+                $cityW   = (int) $cityNow->format('w');
+                $dayName = $this->getDayName($cityW, $lang, short: true);
+
+                $isWeekday    = ($cityW >= 1 && $cityW <= 5);
+                $isBusinessH  = $isWeekday && $cityH >= 9 && $cityH < 18;
+                $statusIcon   = $isBusinessH ? '🟢' : ($isWeekday && ($cityH >= 7 && $cityH < 21) ? '🟡' : '🔴');
+                $statusLabel  = $isBusinessH ? 'Ouvert' : (!$isWeekday ? 'Week-end' : ($cityH < 9 ? 'Pas encore ouvert' : 'Fermé'));
+
+                // DST info
+                $isDst   = (bool) $cityNow->format('I');
+                $dstTag  = $isDst ? '☀️' : '❄️';
+
+                $offsetH   = $tzObj->getOffset($utcNow) / 3600;
+                $offsetStr = $offsetH >= 0 ? "UTC+{$offsetH}" : "UTC{$offsetH}";
+                if (floor($offsetH) !== (float) $offsetH) {
+                    $offsetStr = sprintf('UTC%+.1f', $offsetH);
+                }
+
+                $lines[] = "";
+                $lines[] = "📍 *{$cityName}* ({$tz})";
+                $lines[] = "   🕐 *{$cityNow->format('H:i')}* {$dayName} — {$offsetStr} {$dstTag}";
+                $lines[] = "   {$statusIcon} {$statusLabel}";
+                $resolvedCount++;
+            }
+
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = "_💡 Pour plus de détails : aperçu <ville>_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action' => 'batch_brief',
+                'cities_count' => $resolvedCount,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: batch_brief error', [
+                'cities' => $cities,
+                'error'  => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de l'aperçu multi-villes.\n"
+                . "_Vérifie les noms de villes et réessaie._\n"
+                . "_Ex : brief Tokyo, New York et Dubai_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Schedule check — verify if a time works across cities (v1.17.0)
+    // -------------------------------------------------------------------------
+
+    private function handleScheduleCheck(array $parsed, array $prefs): AgentResult
+    {
+        $timeStr = trim($parsed['time'] ?? '');
+        $cities  = $parsed['cities'] ?? [];
+        $lang    = $prefs['language'] ?? 'fr';
+        $userTz  = $prefs['timezone'] ?? 'UTC';
+
+        if (!is_array($cities) || count($cities) < 1) {
+            return AgentResult::reply(
+                "⚠️ Précise au moins une ville à vérifier.\n"
+                . "_Ex : est-ce que 15h marche pour Tokyo et New York_\n"
+                . "_Ex : check horaire 10h London Dubai_"
+            );
+        }
+
+        if (count($cities) > 10) {
+            $cities = array_slice($cities, 0, 10);
+        }
+
+        try {
+            $userTzObj = new DateTimeZone($userTz);
+            $utcNow    = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $userNow   = $utcNow->setTimezone($userTzObj);
+
+            // Parse the target time or use current time
+            if ($timeStr === '') {
+                $checkTime = $userNow;
+                $timeLabel = $userNow->format('H:i') . ' (maintenant)';
+            } else {
+                $parsedTime = $this->parseTimeString($timeStr);
+                if (!$parsedTime) {
+                    return AgentResult::reply(
+                        "⚠️ Format d'heure invalide : *{$timeStr}*.\n"
+                        . "_Formats acceptés : 14h30, 15:00, 2pm, 9h_"
+                    );
+                }
+                [$h, $m] = explode(':', $parsedTime);
+                $checkTime = $userNow->setTime((int) $h, (int) $m, 0);
+                $timeLabel = $parsedTime;
+            }
+
+            $lines = [
+                "📋 *VÉRIFICATION D'HORAIRE*",
+                "────────────────",
+                "🕐 Heure vérifiée : *{$timeLabel}* ({$userTz})",
+                "────────────────",
+            ];
+
+            $allOk     = true;
+            $okCount   = 0;
+            $totalCity = 0;
+
+            foreach ($cities as $city) {
+                $cityName = trim((string) $city);
+                if ($cityName === '') {
+                    continue;
+                }
+
+                $tz = $this->resolveTimezoneString($cityName);
+                if (!$tz) {
+                    $lines[] = "❌ *{$cityName}* — _fuseau inconnu_";
+                    $allOk = false;
+                    continue;
+                }
+
+                $tzObj    = new DateTimeZone($tz);
+                $cityTime = $checkTime->setTimezone(new DateTimeZone('UTC'))
+                    ->setTimezone($userTzObj)
+                    ->setTime((int) explode(':', $timeLabel === $userNow->format('H:i') . ' (maintenant)' ? $userNow->format('H:i') : $timeLabel)[0], (int) explode(':', $timeLabel === $userNow->format('H:i') . ' (maintenant)' ? $userNow->format('H:i') : $timeLabel)[1], 0);
+
+                // Recalculate: build a UTC datetime for the user's chosen time, then convert
+                $userCheckUtc = $userNow->setTime((int) explode(':', str_replace(' (maintenant)', '', $timeLabel))[0], (int) explode(':', str_replace(' (maintenant)', '', $timeLabel))[1], 0);
+                $utcEquiv     = (new DateTimeImmutable($userCheckUtc->format('Y-m-d H:i:s'), $userTzObj))->setTimezone(new DateTimeZone('UTC'));
+                $cityDt       = $utcEquiv->setTimezone($tzObj);
+
+                $cityH = (int) $cityDt->format('G');
+                $cityW = (int) $cityDt->format('w');
+                $dayName = $this->getDayName($cityW, $lang, short: true);
+
+                $isWeekday   = ($cityW >= 1 && $cityW <= 5);
+                $isBusiness  = $isWeekday && $cityH >= 9 && $cityH < 18;
+
+                if ($isBusiness) {
+                    $icon = '✅';
+                    $label = 'Heures ouvrables';
+                    $okCount++;
+                } elseif (!$isWeekday) {
+                    $icon = '⛔';
+                    $label = 'Week-end';
+                    $allOk = false;
+                } elseif ($cityH >= 7 && $cityH < 9) {
+                    $icon = '🟡';
+                    $label = 'Tôt (avant 9h)';
+                    $allOk = false;
+                } elseif ($cityH >= 18 && $cityH < 21) {
+                    $icon = '🟡';
+                    $label = 'Tardif (après 18h)';
+                    $allOk = false;
+                } else {
+                    $icon = '⛔';
+                    $label = 'Hors horaires';
+                    $allOk = false;
+                }
+
+                $lines[] = "{$icon} *{$cityName}* → *{$cityDt->format('H:i')}* {$dayName} — {$label}";
+                $totalCity++;
+            }
+
+            $lines[] = "────────────────";
+
+            if ($totalCity > 0) {
+                if ($allOk && $okCount === $totalCity) {
+                    $lines[] = "✅ *Parfait !* Cet horaire convient à toutes les villes.";
+                } elseif ($okCount > 0) {
+                    $lines[] = "🟡 *Partiel :* {$okCount}/{$totalCity} villes en heures ouvrables.";
+                    $lines[] = "_💡 Essaie : planifier réunion multi pour trouver le créneau idéal._";
+                } else {
+                    $lines[] = "⛔ *Aucune* ville n'est en heures ouvrables à cette heure.";
+                    $lines[] = "_💡 Essaie : planifier réunion multi pour trouver le créneau idéal._";
+                }
+            }
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'   => 'schedule_check',
+                'time'     => $timeLabel,
+                'ok_count' => $okCount,
+                'total'    => $totalCity,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: schedule_check error', [
+                'time'   => $timeStr,
+                'cities' => $cities,
+                'error'  => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de la vérification d'horaire.\n"
+                . "_Vérifie les villes et l'heure._\n"
+                . "_Ex : est-ce que 15h marche pour Tokyo et New York_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Day/Night Map — v1.18.0
+    // -------------------------------------------------------------------------
+
+    private function handleDayNightMap(array $parsed, array $prefs): AgentResult
+    {
+        $userTz = $prefs['timezone'] ?? 'UTC';
+        $lang   = $prefs['language'] ?? 'fr';
+
+        $defaultCities = [
+            'Los Angeles' => 'America/Los_Angeles',
+            'New York'    => 'America/New_York',
+            'São Paulo'   => 'America/Sao_Paulo',
+            'London'      => 'Europe/London',
+            'Paris'       => 'Europe/Paris',
+            'Dubai'       => 'Asia/Dubai',
+            'Mumbai'      => 'Asia/Kolkata',
+            'Bangkok'     => 'Asia/Bangkok',
+            'Tokyo'       => 'Asia/Tokyo',
+            'Sydney'      => 'Australia/Sydney',
+        ];
+
+        $requestedCities = $parsed['cities'] ?? [];
+        $cityMap = [];
+
+        if (!empty($requestedCities) && is_array($requestedCities)) {
+            foreach ($requestedCities as $city) {
+                $tz = $this->resolveTimezoneString(trim($city));
+                if ($tz) {
+                    $cityMap[ucwords(trim($city))] = $tz;
+                }
+            }
+        }
+
+        if (empty($cityMap)) {
+            $cityMap = $defaultCities;
+        }
+
+        try {
+            $utcNow = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $userNow = $utcNow->setTimezone(new DateTimeZone($userTz));
+
+            $lines = [
+                "🌍 *CARTE JOUR / NUIT*",
+                "────────────────",
+                "📍 Ton heure : *{$userNow->format('H:i')}* ({$userTz})",
+                "",
+            ];
+
+            $dayCount = 0;
+            $nightCount = 0;
+            $twilightCount = 0;
+
+            foreach ($cityMap as $cityName => $tzName) {
+                $tz   = new DateTimeZone($tzName);
+                $now  = $utcNow->setTimezone($tz);
+                $hour = (int) $now->format('G');
+                $time = $now->format('H:i');
+
+                // Determine day phase
+                if ($hour >= 7 && $hour < 18) {
+                    $icon = '☀️';
+                    $phase = 'Jour';
+                    $dayCount++;
+                } elseif ($hour >= 18 && $hour < 21) {
+                    $icon = '🌅';
+                    $phase = 'Crépuscule';
+                    $twilightCount++;
+                } elseif ($hour >= 5 && $hour < 7) {
+                    $icon = '🌅';
+                    $phase = 'Aube';
+                    $twilightCount++;
+                } else {
+                    $icon = '🌙';
+                    $phase = 'Nuit';
+                    $nightCount++;
+                }
+
+                $dayName = $this->getDayName((int) $now->format('w'), $lang, short: true);
+                $lines[] = "{$icon} *{$cityName}* — {$time} ({$dayName}) _{$phase}_";
+            }
+
+            $total = count($cityMap);
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = "☀️ {$dayCount} en jour · 🌅 {$twilightCount} aube/crépuscule · 🌙 {$nightCount} en nuit";
+            $lines[] = "_Total : {$total} villes_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'    => 'day_night_map',
+                'day_count' => $dayCount,
+                'night_count' => $nightCount,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: day_night_map error', [
+                'error' => $e->getMessage(),
+            ]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de la génération de la carte jour/nuit.\n"
+                . "_Réessaie ou précise les villes : carte jour nuit Tokyo, Paris, Dubai_"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Repeat Event — v1.18.0
+    // -------------------------------------------------------------------------
+
+    private function handleRepeatEvent(array $parsed, array $prefs): AgentResult
+    {
+        $startDateStr = trim($parsed['start_date'] ?? 'today');
+        $intervalStr  = trim($parsed['interval'] ?? '1 week');
+        $count        = (int) ($parsed['count'] ?? 5);
+        $label        = trim($parsed['label'] ?? '');
+        $lang         = $prefs['language'] ?? 'fr';
+        $dateFormat   = $prefs['date_format'] ?? 'd/m/Y';
+        $userTz       = $prefs['timezone'] ?? 'UTC';
+
+        $count = max(1, min($count, 12));
+
+        // Parse start date
+        try {
+            $tz = new DateTimeZone($userTz);
+            if (strtolower($startDateStr) === 'today') {
+                $startDate = new DateTimeImmutable('now', $tz);
+            } else {
+                $startDate = new DateTimeImmutable($startDateStr, $tz);
+            }
+        } catch (\Exception) {
+            return AgentResult::reply(
+                "⚠️ Date de début invalide : *{$startDateStr}*\n"
+                . "_Utilise le format AAAA-MM-JJ ou \"today\"._\n"
+                . "_Ex : toutes les 2 semaines à partir du 2026-04-01_"
+            );
+        }
+
+        // Parse interval
+        if (!preg_match('/^(\d+)\s*(day|days|week|weeks|month|months|jour|jours|semaine|semaines|mois)$/i', $intervalStr, $m)) {
+            return AgentResult::reply(
+                "⚠️ Intervalle non reconnu : *{$intervalStr}*\n"
+                . "_Formats acceptés : 2 weeks, 1 month, 3 days, 1 semaine, 2 mois_\n"
+                . "_Ex : toutes les 2 semaines à partir du 2026-04-01_"
+            );
+        }
+
+        $n    = (int) $m[1];
+        $unit = strtolower($m[2]);
+
+        // Normalize French units
+        $unitMap = [
+            'jour' => 'day', 'jours' => 'day',
+            'semaine' => 'week', 'semaines' => 'week',
+            'mois' => 'month',
+            'day' => 'day', 'days' => 'day',
+            'week' => 'week', 'weeks' => 'week',
+            'month' => 'month', 'months' => 'month',
+        ];
+        $normalizedUnit = $unitMap[$unit] ?? 'week';
+
+        $intervalSpec = match ($normalizedUnit) {
+            'day'   => "P{$n}D",
+            'week'  => 'P' . ($n * 7) . 'D',
+            'month' => "P{$n}M",
+        };
+
+        $unitLabel = match ($normalizedUnit) {
+            'day'   => $n === 1 ? 'jour' : "{$n} jours",
+            'week'  => $n === 1 ? 'semaine' : "{$n} semaines",
+            'month' => $n === 1 ? 'mois' : "{$n} mois",
+        };
+
+        $titleLabel = $label !== '' ? " — {$label}" : '';
+        $lines = [
+            "🔁 *ÉVÉNEMENT RÉCURRENT*{$titleLabel}",
+            "────────────────",
+            "📅 Début : *{$startDate->format($dateFormat)}*",
+            "🔄 Fréquence : toutes les *{$unitLabel}*",
+            "📊 Prochaines *{$count}* occurrences :",
+            "",
+        ];
+
+        $current = $startDate;
+        $interval = new \DateInterval($intervalSpec);
+        $today = new DateTimeImmutable('now', $tz);
+
+        for ($i = 1; $i <= $count; $i++) {
+            $dayName = $this->getDayName((int) $current->format('w'), $lang);
+            $dateStr = $current->format($dateFormat);
+            $weekNum = $current->format('W');
+
+            // Indicator: past, today, or future
+            $diff = (int) $today->diff($current)->format('%r%a');
+            if ($diff < 0) {
+                $marker = '⬜';
+                $extra = '_(passé)_';
+            } elseif ($diff === 0) {
+                $marker = '🟢';
+                $extra = '_(aujourd\'hui)_';
+            } else {
+                $marker = '🔲';
+                $extra = "_(dans {$diff}j)_";
+            }
+
+            $lines[] = "{$marker} *{$i}.* {$dayName} {$dateStr} _(S{$weekNum})_ {$extra}";
+            $current = $current->add($interval);
+        }
+
+        $lines[] = "";
+        $lines[] = "────────────────";
+        $lines[] = "💡 _Modifie : count, interval, ou start_date pour ajuster._";
+
+        return AgentResult::reply(implode("\n", $lines), [
+            'action'     => 'repeat_event',
+            'interval'   => $intervalStr,
+            'count'      => $count,
+            'start_date' => $startDate->format('Y-m-d'),
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Holiday Info — v1.19.0
+    // -------------------------------------------------------------------------
+
+    private function handleHolidayInfo(array $parsed, array $prefs): AgentResult
+    {
+        $lang       = $prefs['language'] ?? 'fr';
+        $dateFormat  = $prefs['date_format'] ?? 'd/m/Y';
+        $userTz     = $prefs['timezone'] ?? 'UTC';
+        $count      = max(1, min((int) ($parsed['count'] ?? 10), 20));
+        $country    = strtolower(trim($parsed['country'] ?? 'international'));
+
+        try {
+            $tz    = new DateTimeZone($userTz);
+            $today = new DateTimeImmutable('now', $tz);
+            $year  = (int) $today->format('Y');
+
+            $holidays = array_merge(
+                $this->getHolidayList($year, $country),
+                $this->getHolidayList($year + 1, $country)
+            );
+
+            $upcoming = [];
+            foreach ($holidays as $h) {
+                $date = new DateTimeImmutable($h['date'], $tz);
+                if ($date >= $today->setTime(0, 0)) {
+                    $diff       = (int) $today->diff($date)->format('%a');
+                    $upcoming[] = array_merge($h, ['date_obj' => $date, 'days_until' => $diff]);
+                }
+            }
+
+            usort($upcoming, fn($a, $b) => $a['date_obj'] <=> $b['date_obj']);
+            $upcoming = array_slice($upcoming, 0, $count);
+
+            if (empty($upcoming)) {
+                return AgentResult::reply("⚠️ Aucun jour férié trouvé pour ce pays.\n_Essaie : jours fériés France / US / UK_");
+            }
+
+            $countryLabel = match ($country) {
+                'fr', 'france'          => '🇫🇷 France',
+                'us', 'usa'             => '🇺🇸 États-Unis',
+                'uk', 'united kingdom'  => '🇬🇧 Royaume-Uni',
+                'de', 'germany'         => '🇩🇪 Allemagne',
+                'es', 'spain'           => '🇪🇸 Espagne',
+                'it', 'italy'           => '🇮🇹 Italie',
+                default                 => '🌍 International',
+            };
+
+            $lines = [
+                "🎉 *PROCHAINS JOURS FÉRIÉS* — {$countryLabel}",
+                "────────────────",
+                "",
+            ];
+
+            foreach ($upcoming as $h) {
+                $dayName = $this->getDayName((int) $h['date_obj']->format('w'), $lang);
+                $dateStr = $h['date_obj']->format($dateFormat);
+                $daysStr = $h['days_until'] === 0
+                    ? '_(aujourd\'hui !)_'
+                    : ($h['days_until'] === 1 ? '_(demain)_' : "_(dans {$h['days_until']}j)_");
+                $lines[] = "{$h['icon']} *{$h['name']}*";
+                $lines[] = "   {$dayName} {$dateStr} {$daysStr}";
+                $lines[] = "";
+            }
+
+            $lines[] = "────────────────";
+            $lines[] = "_Total : {$count} prochains jours fériés_";
+            $lines[] = "💡 _Précise un pays : jours fériés France / US / UK / DE / ES / IT_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action'  => 'holiday_info',
+                'country' => $country,
+                'count'   => count($upcoming),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: holiday_info error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors de la recherche des jours fériés.\n"
+                . "_Réessaie ou précise : jours fériés France_"
+            );
+        }
+    }
+
+    private function getHolidayList(int $year, string $country): array
+    {
+        $holidays = [
+            ['date' => "{$year}-01-01", 'name' => 'Nouvel An',             'icon' => '🎆'],
+            ['date' => "{$year}-02-14", 'name' => 'Saint-Valentin',        'icon' => '💕'],
+            ['date' => "{$year}-05-01", 'name' => 'Fête du Travail',       'icon' => '✊'],
+            ['date' => "{$year}-12-25", 'name' => 'Noël',                  'icon' => '🎄'],
+            ['date' => "{$year}-12-31", 'name' => 'Réveillon du Nouvel An','icon' => '🎉'],
+        ];
+
+        if (in_array($country, ['fr', 'france', 'international'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-01-06", 'name' => 'Épiphanie',          'icon' => '👑'],
+                ['date' => "{$year}-02-02", 'name' => 'Chandeleur',         'icon' => '🕯️'],
+                ['date' => "{$year}-05-08", 'name' => 'Victoire 1945',      'icon' => '🎖️'],
+                ['date' => "{$year}-06-21", 'name' => 'Fête de la Musique', 'icon' => '🎵'],
+                ['date' => "{$year}-07-14", 'name' => 'Fête Nationale',     'icon' => '🇫🇷'],
+                ['date' => "{$year}-08-15", 'name' => 'Assomption',         'icon' => '⛪'],
+                ['date' => "{$year}-11-01", 'name' => 'Toussaint',          'icon' => '🕯️'],
+                ['date' => "{$year}-11-11", 'name' => 'Armistice',          'icon' => '🎖️'],
+            ]);
+        }
+
+        if (in_array($country, ['us', 'usa'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-01-20", 'name' => 'Martin Luther King Day', 'icon' => '✊'],
+                ['date' => "{$year}-07-04", 'name' => 'Independence Day',       'icon' => '🇺🇸'],
+                ['date' => "{$year}-10-31", 'name' => 'Halloween',              'icon' => '🎃'],
+                ['date' => "{$year}-11-11", 'name' => 'Veterans Day',           'icon' => '🎖️'],
+            ]);
+        }
+
+        if (in_array($country, ['uk', 'united kingdom'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-11-05", 'name' => 'Guy Fawkes Night', 'icon' => '🎆'],
+                ['date' => "{$year}-12-26", 'name' => 'Boxing Day',       'icon' => '🎁'],
+            ]);
+        }
+
+        if (in_array($country, ['de', 'germany'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-10-03", 'name' => 'Tag der Deutschen Einheit', 'icon' => '🇩🇪'],
+                ['date' => "{$year}-10-31", 'name' => 'Reformationstag',           'icon' => '⛪'],
+            ]);
+        }
+
+        if (in_array($country, ['es', 'spain'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-01-06", 'name' => 'Día de Reyes',       'icon' => '👑'],
+                ['date' => "{$year}-10-12", 'name' => 'Fiesta Nacional',    'icon' => '🇪🇸'],
+            ]);
+        }
+
+        if (in_array($country, ['it', 'italy'])) {
+            $holidays = array_merge($holidays, [
+                ['date' => "{$year}-04-25", 'name' => 'Festa della Liberazione', 'icon' => '🇮🇹'],
+                ['date' => "{$year}-06-02", 'name' => 'Festa della Repubblica',  'icon' => '🇮🇹'],
+            ]);
+        }
+
+        // Deduplicate by date
+        $seen   = [];
+        $unique = [];
+        foreach ($holidays as $h) {
+            if (!isset($seen[$h['date']])) {
+                $seen[$h['date']] = true;
+                $unique[]         = $h;
+            }
+        }
+
+        return $unique;
+    }
+
+    // -------------------------------------------------------------------------
+    // Week to Dates — v1.19.0
+    // -------------------------------------------------------------------------
+
+    private function handleWeekToDates(array $parsed, array $prefs): AgentResult
+    {
+        $lang       = $prefs['language'] ?? 'fr';
+        $dateFormat  = $prefs['date_format'] ?? 'd/m/Y';
+        $userTz     = $prefs['timezone'] ?? 'UTC';
+        $weekNum    = (int) ($parsed['week'] ?? 0);
+        $year       = (int) ($parsed['year'] ?? date('Y'));
+
+        if ($weekNum < 1 || $weekNum > 53) {
+            return AgentResult::reply(
+                "⚠️ Numéro de semaine invalide : *{$weekNum}*\n"
+                . "_Les semaines ISO vont de 1 à 53. Ex : semaine 15 2026_"
+            );
+        }
+
+        try {
+            $tz     = new DateTimeZone($userTz);
+            $monday = (new DateTimeImmutable())->setISODate($year, $weekNum, 1)->setTimezone($tz);
+            $sunday = $monday->modify('+6 days');
+            $today  = new DateTimeImmutable('now', $tz);
+
+            $lines = [
+                "📆 *SEMAINE {$weekNum} — {$year}*",
+                "────────────────",
+                "📅 {$monday->format($dateFormat)} → {$sunday->format($dateFormat)}",
+                "",
+            ];
+
+            for ($d = 0; $d < 7; $d++) {
+                $day       = $monday->modify("+{$d} days");
+                $dayName   = $this->getDayName((int) $day->format('w'), $lang);
+                $dateStr   = $day->format($dateFormat);
+                $isToday   = $day->format('Y-m-d') === $today->format('Y-m-d');
+                $isWeekend = in_array((int) $day->format('w'), [0, 6]);
+
+                $marker   = $isToday ? '👉' : ($isWeekend ? '🔵' : '⚪');
+                $todayTag = $isToday ? ' *(aujourd\'hui)*' : '';
+                $lines[]  = "{$marker} {$dayName} {$dateStr}{$todayTag}";
+            }
+
+            // Position relative to today
+            if ($today < $monday) {
+                $diff     = (int) $today->diff($monday)->format('%a');
+                $position = "📍 Cette semaine commence dans *{$diff}* jours";
+            } elseif ($today > $sunday) {
+                $diff     = (int) $sunday->diff($today)->format('%a');
+                $position = "📍 Cette semaine est passée il y a *{$diff}* jours";
+            } else {
+                $dayInWeek = (int) $today->format('N');
+                $position  = "📍 Nous sommes au *jour {$dayInWeek}/7* de cette semaine";
+            }
+
+            $lines[] = "";
+            $lines[] = "────────────────";
+            $lines[] = $position;
+            $lines[] = "💡 _Ex : semaine 20 2026, semaine 1 2027_";
+
+            return AgentResult::reply(implode("\n", $lines), [
+                'action' => 'week_to_dates',
+                'week'   => $weekNum,
+                'year'   => $year,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('UserPreferencesAgent: week_to_dates error', ['error' => $e->getMessage()]);
+            return AgentResult::reply(
+                "⚠️ Erreur lors du calcul de la semaine {$weekNum}.\n"
+                . "_Vérifie le format : semaine 15 ou semaine 15 2026_"
+            );
+        }
+    }
+
     /**
      * Parse a human-written time string into HH:MM (24h).
      * Accepts: 14:30, 14h30, 9h, 9h00, 2pm, 2:30pm, 14h, etc.
@@ -3571,7 +5174,7 @@ PROMPT;
             "────────────────",
             "🌐 Langue : *{$langLabel}* ({$prefs['language']})",
             "🕐 Fuseau : *{$prefs['timezone']}*{$localTimeStr}",
-            "📅 Format date : *{$prefs['date_format']}*",
+            "📅 Format date : *{$prefs['date_format']}* _(ex: " . date($prefs['date_format'] ?? 'd/m/Y') . ")_",
             "📏 Unités : {$unitIcon} *{$prefs['unit_system']}*",
             "💬 Style : *{$styleLabel}*",
             "🔔 Notifications : *{$notif}*",
@@ -3606,6 +5209,16 @@ PROMPT;
             "• _progression de l'année_",
             "• _quelle date dans 30 jours_",
             "• _infos sur le 14 juillet 2026_",
+            "• _aperçu Tokyo_ — brief rapide (heure+bureau+DST)",
+            "• _audit préférences_ — bilan personnalisation",
+            "• _timestamp 1711234567_ — convertir timestamp",
+            "• _si c'est 15h à Paris, quelle heure à Tokyo, NYC, Dubai_",
+            "• _brief Tokyo, New York et Dubai_ — aperçu multi-villes",
+            "• _est-ce que 15h marche pour Tokyo et NYC_ — check horaire",
+            "• _carte jour nuit_ — qui dort, qui est réveillé",
+            "• _toutes les 2 semaines à partir du 1er avril_ — récurrence",
+            "• _jours fériés France_ — prochains jours fériés",
+            "• _semaine 15 2026_ — dates d'une semaine ISO",
             "• _exporter mes préférences_",
             "• _reset all_",
             "• _aide preferences_",
@@ -3617,7 +5230,7 @@ PROMPT;
     private function formatHelp(): string
     {
         $lines = [
-            "⚙️ *AIDE PRÉFÉRENCES*",
+            "⚙️ *AIDE PRÉFÉRENCES* _(v{$this->version()})_",
             "────────────────",
             "",
             "*📋 Voir mon profil :*",
@@ -3777,6 +5390,58 @@ PROMPT;
             "• _c'est quoi comme jour le 25 décembre 2026_",
             "• _semaine et trimestre du 2026-06-21_",
             "• _date info today_ / _infos sur aujourd'hui_",
+            "",
+            "*🌍 Aperçu rapide d'une ville :*",
+            "• _aperçu Tokyo_ / _brief New York_ / _résumé Dubai_",
+            "• _quick brief London_ / _overview Singapore_",
+            "• Combine : heure locale, heures ouvrables et heure d'été",
+            "",
+            "*📊 Audit des préférences :*",
+            "• _audit préférences_ / _bilan préférences_",
+            "• _état des préférences_ / _combien de préférences_",
+            "• Résumé : personnalisées vs valeurs par défaut",
+            "",
+            "*🔢 Timestamp Unix :*",
+            "• _timestamp 1711234567_ → convertir en date",
+            "• _timestamp now_ / _quel timestamp_ → timestamp actuel",
+            "• _timestamp 2026-07-14 15:00_ → date vers timestamp",
+            "",
+            "*🔄 Conversion multi-fuseaux :*",
+            "• _si c'est 15h à Paris, quelle heure à Tokyo, New York, Dubai_",
+            "• _convertir 9h vers Tokyo, Sydney et Singapore_",
+            "• Affiche une heure dans plusieurs villes simultanément",
+            "",
+            "*🌍 Aperçu multi-villes (batch brief) :*",
+            "• _brief Tokyo, New York et Dubai_ — aperçu groupé",
+            "• _aperçu plusieurs villes London Singapore Sydney_",
+            "• Combine heure, bureau et DST pour chaque ville",
+            "",
+            "*📋 Vérification d'horaire (schedule check) :*",
+            "• _est-ce que 15h marche pour Tokyo et New York_",
+            "• _check horaire 10h London Dubai Singapore_",
+            "• Vérifie si un horaire est en heures ouvrables partout",
+            "",
+            "*🌍 Carte jour/nuit mondiale :*",
+            "• _carte jour nuit_ / _qui dort_ / _qui est réveillé_",
+            "• _day night map_ / _jour ou nuit dans le monde_",
+            "• Affiche le statut jour/nuit de grandes villes mondiales",
+            "",
+            "*🔁 Événement récurrent :*",
+            "• _toutes les 2 semaines à partir du 2026-04-01_",
+            "• _prochaines payes tous les mois à partir du 15 avril_",
+            "• _réunion chaque semaine, 8 prochaines occurrences_",
+            "• Calcule les prochaines dates d'un événement répétitif",
+            "",
+            "*🎉 Jours fériés :*",
+            "• _jours fériés_ / _prochains fériés_ / _holidays_",
+            "• _jours fériés France_ / _public holidays US_ / _bank holidays UK_",
+            "• _5 prochains jours fériés Allemagne_",
+            "• Pays : FR, US, UK, DE, ES, IT ou international",
+            "",
+            "*📆 Semaine → Dates (ISO) :*",
+            "• _semaine 15_ / _dates de la semaine 20_ / _week 15 2026_",
+            "• _quelles dates sont en semaine 1 2027_",
+            "• Convertit un numéro de semaine en dates lundi–dimanche",
         ];
 
         return implode("\n", $lines);
@@ -3824,13 +5489,27 @@ PROMPT;
 
         $clean = trim($response);
 
+        // Strip markdown code blocks
         if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $clean, $m)) {
             $clean = $m[1];
         }
 
+        // Handle array response — take first object
+        $trimmed = ltrim($clean);
+        if (str_starts_with($trimmed, '[')) {
+            $arr = json_decode($trimmed, true);
+            if (is_array($arr) && !empty($arr) && is_array($arr[0])) {
+                return $arr[0];
+            }
+        }
+
+        // Extract JSON object from surrounding text
         if (!str_starts_with($clean, '{') && preg_match('/(\{.*\})/s', $clean, $m)) {
             $clean = $m[1];
         }
+
+        // Strip trailing commas before closing braces (common LLM error)
+        $clean = preg_replace('/,\s*([}\]])/', '$1', $clean);
 
         $decoded = json_decode($clean, true);
 
