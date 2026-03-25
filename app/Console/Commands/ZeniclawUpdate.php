@@ -25,7 +25,7 @@ class ZeniclawUpdate extends Command
 
         // Detect if running inside container (has sudo helper) or on host
         $insideContainer = file_exists('/usr/local/bin/zeniclaw-update');
-        $repoPath = $insideContainer ? '/opt/zeniclaw-repo' : base_path();
+        $repoPath = $insideContainer ? $this->detectRepoPath() : base_path();
 
         if ($insideContainer) {
             return $this->updateViaHelper($token, $repoPath);
@@ -74,9 +74,11 @@ class ZeniclawUpdate extends Command
         }
         $this->info('✓ Code updated');
 
-        // Read version
+        // Read version (supports both old and new Dockerfile format)
         $dockerfile = file_get_contents($repoPath . '/Dockerfile');
-        preg_match('/echo "([^"]+)" > storage\/app\/version\.txt/', $dockerfile, $m);
+        if (!preg_match('/echo "([^"]+)" > \/tmp\/\.zeniclaw-version/', $dockerfile, $m)) {
+            preg_match('/echo "([^"]+)" > storage\/app\/version\.txt/', $dockerfile, $m);
+        }
         $newVersion = $m[1] ?? 'unknown';
         $this->info("▶ New version: v{$newVersion}");
 
@@ -235,5 +237,15 @@ class ZeniclawUpdate extends Command
 
         $this->info("✅ Update v{$newVersion} — rebuild started, container will restart.");
         return self::SUCCESS;
+    }
+
+    private function detectRepoPath(): string
+    {
+        foreach (['/opt/zeniclaw-repo', '/opt/zeniclaw', '/home/zeniclaw'] as $candidate) {
+            if (is_dir("$candidate/.git")) {
+                return $candidate;
+            }
+        }
+        return '/opt/zeniclaw-repo';
     }
 }
