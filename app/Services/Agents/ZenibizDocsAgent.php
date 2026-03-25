@@ -1011,7 +1011,17 @@ PROMPT;
             return $context->mediaUrl;
         }
         $media = $context->media ?? [];
-        return $media['url'] ?? $media['directPath'] ?? null;
+        $url = $media['url'] ?? $media['directPath'] ?? null;
+
+        if (!$url) {
+            $this->log($context, 'resolveMediaUrl: no URL found', [
+                'hasMedia' => $context->hasMedia,
+                'mediaUrl' => $context->mediaUrl,
+                'media_keys' => is_array($media) ? array_keys($media) : 'not_array',
+            ], 'warn');
+        }
+
+        return $url;
     }
 
     private function downloadMedia(string $mediaUrl): ?string

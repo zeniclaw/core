@@ -156,22 +156,46 @@ class ChannelController extends Controller
 
             // If hasMedia but no mediaUrl, fetch it from WAHA by message ID
             if ($hasMedia && !$mediaUrl && !empty($payload['id'])) {
+                $wahaBase = 'http://waha:3000';
+                $wahaHeaders = ['X-Api-Key' => 'zeniclaw-waha-2026'];
+                $msgId = $payload['id'];
+                $chatId = $payload['from'] ?? '';
+
+                // Method 1: /api/media endpoint
                 try {
-                    $wahaBase = 'http://waha:3000';
-                    $msgId = $payload['id'];
-                    $chatId = $payload['from'] ?? '';
                     $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
-                        ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                        ->withHeaders($wahaHeaders)
                         ->get("$wahaBase/api/media", ['messageId' => $msgId, 'chatId' => $chatId, 'session' => 'default']);
                     if ($dlResponse->successful()) {
                         $mediaData = $dlResponse->json();
                         $mediaUrl = $mediaData['url'] ?? $mediaData['mediaUrl'] ?? null;
-                        if ($mediaUrl) {
-                            $mediaUrl = str_replace('http://localhost:3000', $wahaBase, $mediaUrl);
-                        }
                     }
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('WAHA media fetch failed: ' . $e->getMessage());
+                    \Illuminate\Support\Facades\Log::warning('WAHA /api/media failed: ' . $e->getMessage());
+                }
+
+                // Method 2: /api/{session}/messages/{id}/download (WAHA Plus / newer versions)
+                if (!$mediaUrl) {
+                    try {
+                        $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
+                            ->withHeaders($wahaHeaders)
+                            ->get("$wahaBase/api/default/messages/{$msgId}/download");
+                        if ($dlResponse->successful()) {
+                            $mediaData = $dlResponse->json();
+                            $mediaUrl = $mediaData['url'] ?? $mediaData['mediaUrl'] ?? $mediaData['mimetype'] ? "$wahaBase/api/default/messages/{$msgId}/download" : null;
+                        }
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('WAHA download endpoint failed: ' . $e->getMessage());
+                    }
+                }
+
+                if ($mediaUrl) {
+                    $mediaUrl = str_replace('http://localhost:3000', $wahaBase, $mediaUrl);
+                } else {
+                    \Illuminate\Support\Facades\Log::warning('WAHA: could not resolve mediaUrl', [
+                        'msgId' => $msgId, 'chatId' => $chatId, 'hasMedia' => true,
+                        'payload_media_keys' => is_array($media) ? array_keys($media) : null,
+                    ]);
                 }
             }
 
