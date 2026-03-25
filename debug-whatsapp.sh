@@ -207,15 +207,50 @@ else
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
 fi
 
-# WAHA can reach app on port 80?
-WAHA_TO_APP=$(docker exec zeniclaw_waha wget -qO- --timeout=5 http://app:80/health 2>&1 || echo "TIMEOUT_OR_ERROR")
-if echo "$WAHA_TO_APP" | grep -qi "ok\|healthy\|{"; then
-    ok "WAHA → App: reachable (http://app:80/health)"
-else
-    fail "WAHA → App: unreachable or timeout"
-    info "Response: $(echo "$WAHA_TO_APP" | head -1 | cut -c1-150)"
-    ISSUES+=("WAHA cannot reach app on port 80 — webhook delivery will fail")
+# WAHA can reach app on port 80? (try multiple methods since WAHA container may not have curl/wget)
+WAHA_TO_APP="unknown"
+# Method 1: curl (if available in WAHA)
+WAHA_TO_APP=$(docker exec zeniclaw_waha curl -sf -o /dev/null -w "%{http_code}" --max-time 5 http://app:80/health 2>/dev/null || echo "no_curl")
+if [ "$WAHA_TO_APP" = "no_curl" ]; then
+    # Method 2: node one-liner (WAHA is Node.js based)
+    WAHA_TO_APP=$(docker exec zeniclaw_waha node -e "
+        const http = require('http');
+        const req = http.get('http://app:80/health', {timeout: 5000}, (res) => {
+            process.stdout.write(String(res.statusCode));
+        });
+        req.on('error', (e) => process.stdout.write('err:' + e.code));
+        req.on('timeout', () => { req.destroy(); process.stdout.write('timeout'); });
+    " 2>/dev/null || echo "node_fail")
+fi
+
+if [ "$WAHA_TO_APP" = "200" ]; then
+    ok "WAHA → App: reachable (HTTP 200)"
+elif [ "$WAHA_TO_APP" = "timeout" ]; then
+    fail "WAHA → App: timeout"
+    ISSUES+=("WAHA cannot reach app on port 80 (timeout) — webhook delivery will fail")
     ACTIONS+=("Check nginx/php-fpm in app container: docker exec zeniclaw_app supervisorctl status")
+elif echo "$WAHA_TO_APP" | grep -q "err:"; then
+    fail "WAHA → App: connection error ($WAHA_TO_APP)"
+    ISSUES+=("WAHA cannot reach app on port 80 ($WAHA_TO_APP) — webhook delivery will fail")
+    ACTIONS+=("Check Docker network: docker compose down && docker compose up -d")
+else
+    warn "WAHA → App: HTTP $WAHA_TO_APP"
+fi
+
+# DNS resolution check from WAHA
+WAHA_DNS=$(docker exec zeniclaw_waha node -e "
+    const dns = require('dns');
+    dns.lookup('app', (err, addr) => {
+        if (err) process.stdout.write('fail:' + err.code);
+        else process.stdout.write(addr);
+    });
+" 2>/dev/null || echo "unknown")
+if echo "$WAHA_DNS" | grep -qP '^\d+\.\d+\.\d+\.\d+$'; then
+    ok "DNS resolution: app → $WAHA_DNS"
+else
+    fail "DNS resolution failed: $WAHA_DNS"
+    ISSUES+=("WAHA cannot resolve 'app' hostname — Docker DNS broken")
+    ACTIONS+=("docker compose down && docker compose up -d")
 fi
 
 # Webhook response time (is it slow?)
