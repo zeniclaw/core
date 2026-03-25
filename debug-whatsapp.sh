@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# ZeniClaw — WhatsApp/WAHA Diagnostic Script
-# Usage: bash debug-whatsapp.sh
+# ZeniClaw — WhatsApp/WAHA Diagnostic Script (v3)
+# Usage: bash debug-whatsapp.sh [--live-test]
+#   --live-test  Send a real test message via WAHA and verify round-trip
 
 set -euo pipefail
 
@@ -16,14 +17,24 @@ ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; }
 info() { echo -e "  ${CYAN}→${NC} $1"; }
+header() { echo -e "\n${BOLD}[$1] $2${NC}"; }
 
 ISSUES=()
 ACTIONS=()
+LIVE_TEST=false
+[ "${1:-}" = "--live-test" ] && LIVE_TEST=true
 
-echo -e "\n${BOLD}${CYAN}═══ ZeniClaw WhatsApp Diagnostic ═══${NC}\n"
+WAHA_BASE="http://waha:3000"
+WAHA_KEY="zeniclaw-waha-2026"
+WAHA_CURL="docker exec zeniclaw_app curl -sf"
+WAHA_HEADERS="-H X-Api-Key:${WAHA_KEY}"
+
+echo -e "\n${BOLD}${CYAN}════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${CYAN}  ZeniClaw WhatsApp Diagnostic v3${NC}"
+echo -e "${BOLD}${CYAN}════════════════════════════════════════════${NC}\n"
 
 # ── 1. Container status ──────────────────────────────────────────
-echo -e "${BOLD}[1/9] Container Status${NC}"
+header "1/12" "Container Status"
 
 APP_STATUS=$(docker inspect zeniclaw_app --format '{{.State.Status}}' 2>/dev/null || echo "not_found")
 WAHA_STATUS=$(docker inspect zeniclaw_waha --format '{{.State.Status}}' 2>/dev/null || echo "not_found")
@@ -46,10 +57,10 @@ else
     ACTIONS+=("docker compose up -d waha")
 fi
 
-# ── 2. WAHA API reachability ─────────────────────────────────────
-echo -e "\n${BOLD}[2/9] WAHA API${NC}"
+# ── 2. WAHA API & Version ────────────────────────────────────────
+header "2/12" "WAHA API & Version"
 
-WAHA_HEALTH=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" -H "X-Api-Key: zeniclaw-waha-2026" http://waha:3000/api/sessions/default 2>/dev/null || echo "000")
+WAHA_HEALTH=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" -H "X-Api-Key: ${WAHA_KEY}" ${WAHA_BASE}/api/sessions/default 2>/dev/null || echo "000")
 
 if [ "$WAHA_HEALTH" = "200" ]; then
     ok "WAHA API reachable (HTTP 200)"
@@ -65,10 +76,23 @@ else
     warn "WAHA API: HTTP $WAHA_HEALTH"
 fi
 
-# ── 3. WhatsApp session status ───────────────────────────────────
-echo -e "\n${BOLD}[3/9] WhatsApp Session${NC}"
+# WAHA version & engine
+WAHA_VERSION=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: ${WAHA_KEY}" ${WAHA_BASE}/api/version 2>/dev/null || echo "{}")
+WAHA_VER=$(echo "$WAHA_VERSION" | grep -oP '"version"\s*:\s*"\K[^"]+' | head -1 || echo "unknown")
+WAHA_ENGINE=$(echo "$WAHA_VERSION" | grep -oP '"engine"\s*:\s*"\K[^"]+' | head -1 || echo "unknown")
+info "WAHA version: $WAHA_VER (engine: $WAHA_ENGINE)"
 
-SESSION_JSON=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: zeniclaw-waha-2026" http://waha:3000/api/sessions/default 2>/dev/null || echo "{}")
+# WAHA environment / server info
+WAHA_ENV=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: ${WAHA_KEY}" ${WAHA_BASE}/api/server/environment 2>/dev/null || echo "{}")
+if [ "$WAHA_ENV" != "{}" ] && [ -n "$WAHA_ENV" ]; then
+    WAHA_TIER=$(echo "$WAHA_ENV" | grep -oP '"tier"\s*:\s*"\K[^"]+' | head -1 || echo "unknown")
+    info "WAHA tier: $WAHA_TIER"
+fi
+
+# ── 3. WhatsApp session status ───────────────────────────────────
+header "3/12" "WhatsApp Session"
+
+SESSION_JSON=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: ${WAHA_KEY}" ${WAHA_BASE}/api/sessions/default 2>/dev/null || echo "{}")
 SESSION_STATUS=$(echo "$SESSION_JSON" | grep -oP '"status"\s*:\s*"\K[^"]+' | head -1 || echo "unknown")
 SESSION_PHONE=$(echo "$SESSION_JSON" | grep -oP '"id"\s*:\s*"\K[^":]+' | head -1 || echo "")
 SESSION_NAME=$(echo "$SESSION_JSON" | grep -oP '"pushName"\s*:\s*"\K[^"]+' | head -1 || echo "")
@@ -87,13 +111,14 @@ case "$SESSION_STATUS" in
     STOPPED|FAILED)
         fail "Session: $SESSION_STATUS"
         ISSUES+=("WhatsApp session is $SESSION_STATUS")
-        ACTIONS+=("Restart session: docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: zeniclaw-waha-2026' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\"]}]}}' http://waha:3000/api/sessions/start")
+        ACTIONS+=("Restart session: docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\",\"message.any\"]}]}}' ${WAHA_BASE}/api/sessions/start")
         ;;
     *)
         warn "Session: $SESSION_STATUS"
         ;;
 esac
 
+# Webhook URL check
 if [ -n "$WEBHOOK_URL" ]; then
     if [ "$WEBHOOK_URL" = "http://app:80/webhook/whatsapp/1" ]; then
         ok "Webhook URL: $WEBHOOK_URL"
@@ -105,18 +130,27 @@ if [ -n "$WEBHOOK_URL" ]; then
 else
     fail "No webhook URL configured"
     ISSUES+=("No webhook URL — WAHA won't forward messages to the app")
-    ACTIONS+=("Recreate session with webhook: docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: zeniclaw-waha-2026' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\"]}]}}' http://waha:3000/api/sessions/start")
+    ACTIONS+=("Recreate session with webhook: docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\",\"message.any\"]}]}}' ${WAHA_BASE}/api/sessions/start")
 fi
 
 # Webhook events check
 WEBHOOK_EVENTS=$(echo "$SESSION_JSON" | grep -oP '"events"\s*:\s*\[\K[^\]]*' | head -1 || echo "")
 if [ -n "$WEBHOOK_EVENTS" ]; then
+    info "Webhook events: [$WEBHOOK_EVENTS]"
     if echo "$WEBHOOK_EVENTS" | grep -q "message"; then
-        ok "Webhook events: includes 'message'"
+        ok "Subscribed to 'message' event"
     else
-        fail "Webhook events: [$WEBHOOK_EVENTS] — missing 'message' event!"
-        ISSUES+=("Webhook is configured but 'message' event is not subscribed")
-        ACTIONS+=("Recreate session with message event subscription")
+        fail "Missing 'message' event subscription!"
+        ISSUES+=("Webhook events don't include 'message'")
+        ACTIONS+=("Recreate session with message event")
+    fi
+    # Check if "message.any" is included (needed for group messages in some WAHA versions)
+    if echo "$WEBHOOK_EVENTS" | grep -q "message.any"; then
+        ok "Subscribed to 'message.any' (includes group messages)"
+    else
+        warn "Not subscribed to 'message.any' — group messages may not trigger webhooks"
+        ISSUES+=("Webhook not subscribed to 'message.any' — group messages may be missed")
+        ACTIONS+=("Recreate session with 'message.any' event:\n  docker exec zeniclaw_app curl -sf -X PUT -H 'X-Api-Key: ${WAHA_KEY}' -H 'Content-Type: application/json' -d '{\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\",\"message.any\",\"message.reaction\"]}]}}' ${WAHA_BASE}/api/sessions/default")
     fi
 else
     if [ -n "$WEBHOOK_URL" ]; then
@@ -124,8 +158,8 @@ else
     fi
 fi
 
-# ── 4. WAHA reconnect loop detection ────────────────────────────
-echo -e "\n${BOLD}[4/9] Connection Stability${NC}"
+# ── 4. Connection Stability ──────────────────────────────────────
+header "4/12" "Connection Stability"
 
 RECENT_LOGS=$(docker logs zeniclaw_waha --since=60s 2>&1 || echo "")
 DISCONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Connection closed" 2>/dev/null || true)
@@ -136,15 +170,15 @@ RECONNECT_COUNT=${RECONNECT_COUNT:-0}
 if [ "$DISCONNECT_COUNT" -gt 5 ]; then
     fail "Reconnect loop detected: $DISCONNECT_COUNT disconnects in last 60s"
     ISSUES+=("WAHA is in a reconnect loop (status 440) — session is corrupted")
-    ACTIONS+=("Reset session:\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: zeniclaw-waha-2026' http://waha:3000/api/sessions/default/stop\n  docker exec zeniclaw_app curl -sf -X DELETE -H 'X-Api-Key: zeniclaw-waha-2026' http://waha:3000/api/sessions/default\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: zeniclaw-waha-2026' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\"]}]}}' http://waha:3000/api/sessions/start\n  Then scan QR code on Settings page")
+    ACTIONS+=("Reset session:\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' ${WAHA_BASE}/api/sessions/default/stop\n  docker exec zeniclaw_app curl -sf -X DELETE -H 'X-Api-Key: ${WAHA_KEY}' ${WAHA_BASE}/api/sessions/default\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\",\"message.any\"]}]}}' ${WAHA_BASE}/api/sessions/start\n  Then scan QR code on Settings page")
 elif [ "$DISCONNECT_COUNT" -gt 0 ]; then
     warn "Some disconnects: $DISCONNECT_COUNT in last 60s (may be transient)"
 else
     ok "No disconnects in last 60s"
 fi
 
-# ── 5. Webhook delivery ─────────────────────────────────────────
-echo -e "\n${BOLD}[5/9] Webhook Delivery${NC}"
+# ── 5. Webhook delivery history ──────────────────────────────────
+header "5/12" "Webhook Delivery"
 
 APP_LOGS=$(docker logs zeniclaw_app --since=300s 2>&1 || echo "")
 WEBHOOK_HITS=$(echo "$APP_LOGS" | grep -c "webhook/whatsapp" 2>/dev/null || true)
@@ -160,7 +194,7 @@ else
         info "Likely caused by WAHA reconnect loop (see above)"
     else
         ISSUES+=("No webhook traffic — messages may not be forwarded")
-        ACTIONS+=("Send a test message on WhatsApp and check again")
+        ACTIONS+=("Send a test message on WhatsApp and check again, or run: bash debug-whatsapp.sh --live-test")
     fi
 fi
 
@@ -174,10 +208,10 @@ if [ "$MEDIA_WARNINGS" -gt 0 ]; then
     done
 fi
 
-# ── 5b. Internal connectivity (WAHA → App) ────────────────────────
-echo -e "\n${BOLD}[5b/9] Internal Connectivity${NC}"
+# ── 6. Internal connectivity ─────────────────────────────────────
+header "6/12" "Internal Connectivity"
 
-# Check nginx is running inside app container
+# Nginx
 NGINX_STATUS=$(docker exec zeniclaw_app supervisorctl status nginx 2>/dev/null | head -1 || echo "unknown")
 if echo "$NGINX_STATUS" | grep -q "RUNNING"; then
     ok "Nginx: running"
@@ -187,7 +221,7 @@ else
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx")
 fi
 
-# Check php-fpm is running
+# PHP-FPM
 FPM_STATUS=$(docker exec zeniclaw_app supervisorctl status php-fpm 2>/dev/null | head -1 || echo "unknown")
 if echo "$FPM_STATUS" | grep -q "RUNNING"; then
     ok "PHP-FPM: running"
@@ -197,7 +231,7 @@ else
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart php-fpm")
 fi
 
-# App responds internally on port 80?
+# App self-check
 APP_SELF_HTTP=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:80/health 2>/dev/null || echo "000")
 if [ "$APP_SELF_HTTP" = "200" ]; then
     ok "App self-check: HTTP 200 (localhost:80/health)"
@@ -207,7 +241,7 @@ else
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
 fi
 
-# DNS resolution check from WAHA (node is always available — WAHA is Node.js)
+# DNS resolution from WAHA → app
 WAHA_DNS=$(docker exec zeniclaw_waha node -e "
     const dns = require('dns');
     dns.lookup('app', (err, addr) => {
@@ -223,10 +257,9 @@ else
     ACTIONS+=("docker compose down && docker compose up -d")
 fi
 
-# Webhook response time (is it slow?)
+# App response time
 APP_RESPONSE_TIME=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{time_total}" --max-time 10 http://localhost:80/health 2>/dev/null || echo "timeout")
 if [ "$APP_RESPONSE_TIME" != "timeout" ]; then
-    # Compare as float — bash doesn't do floats, use awk
     SLOW=$(echo "$APP_RESPONSE_TIME" | awk '{print ($1 > 3.0) ? "yes" : "no"}')
     if [ "$SLOW" = "yes" ]; then
         warn "App response time: ${APP_RESPONSE_TIME}s (slow — WAHA may timeout)"
@@ -237,7 +270,7 @@ if [ "$APP_RESPONSE_TIME" != "timeout" ]; then
     fi
 fi
 
-# WAHA → App HTTP check (via node since WAHA has no curl/wget)
+# WAHA → App HTTP check (node — WAHA has no curl/wget)
 WAHA_TO_APP=$(docker exec zeniclaw_waha node -e "
     const http = require('http');
     const start = Date.now();
@@ -260,12 +293,12 @@ elif echo "$WAHA_TO_APP" | grep -q "err:"; then
     ISSUES+=("WAHA cannot connect to app ($WAHA_TO_APP)")
     ACTIONS+=("docker compose down && docker compose up -d")
 elif [ "$WAHA_TO_APP" = "node_fail" ]; then
-    warn "WAHA → App: could not test (node failed)"
+    warn "WAHA → App: could not test (node not available)"
 else
     warn "WAHA → App: $WAHA_TO_APP"
 fi
 
-# Webhook route test — does /webhook/whatsapp/1 respond?
+# Webhook route test (fromMe:true = ignored by app, safe for testing)
 WEBHOOK_AGENT_ID=$(echo "$WEBHOOK_URL" | grep -oP '/webhook/whatsapp/\K\d+' || echo "1")
 WEBHOOK_TEST=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" --max-time 10 \
     -X POST -H "Content-Type: application/json" \
@@ -288,8 +321,8 @@ else
     warn "Webhook route: HTTP $WEBHOOK_TEST"
 fi
 
-# ── 6. App health ───────────────────────────────────────────────
-echo -e "\n${BOLD}[6/9] App Health${NC}"
+# ── 7. App Health ─────────────────────────────────────────────────
+header "7/12" "App Health"
 
 APP_ERRORS=$(echo "$APP_LOGS" | grep -c "production.ERROR" 2>/dev/null || true)
 APP_ERRORS=${APP_ERRORS:-0}
@@ -361,16 +394,18 @@ else
     ok "No app errors in last 5 min"
 fi
 
-# ── 7. Network ──────────────────────────────────────────────────
-echo -e "\n${BOLD}[7/9] Docker Network${NC}"
+# ── 8. Docker Network ────────────────────────────────────────────
+header "8/12" "Docker Network"
 
 APP_NETWORKS=$(docker inspect zeniclaw_app --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || echo "none")
 WAHA_NETWORKS=$(docker inspect zeniclaw_waha --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || echo "none")
 
-info "App networks:  $APP_NETWORKS"
-info "WAHA networks: $WAHA_NETWORKS"
+APP_IP=$(docker inspect zeniclaw_app --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "unknown")
+WAHA_IP=$(docker inspect zeniclaw_waha --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "unknown")
 
-# Check if they share at least one network
+info "App:  $APP_NETWORKS (IP: $APP_IP)"
+info "WAHA: $WAHA_NETWORKS (IP: $WAHA_IP)"
+
 SHARED=false
 for net in $APP_NETWORKS; do
     if echo "$WAHA_NETWORKS" | grep -q "$net"; then
@@ -387,14 +422,47 @@ else
     ACTIONS+=("docker compose down && docker compose up -d")
 fi
 
-# ── 8. WAHA recent logs ──────────────────────────────────────────
-echo -e "\n${BOLD}[8/9] WAHA Logs (last 10 min)${NC}"
+# ── 9. WAHA Chats & Groups ───────────────────────────────────────
+header "9/12" "WAHA Chats & Groups"
+
+# List recent chats to verify WAHA sees conversations
+CHATS_JSON=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: ${WAHA_KEY}" "${WAHA_BASE}/api/default/chats?limit=10&sortBy=lastMessageAt&sortOrder=desc" 2>/dev/null || echo "[]")
+CHAT_COUNT=$(echo "$CHATS_JSON" | grep -oP '"id"\s*:' | wc -l || echo "0")
+
+if [ "$CHAT_COUNT" -gt 0 ]; then
+    ok "WAHA sees $CHAT_COUNT recent chats"
+    echo ""
+    # Show chat list with type (group vs DM)
+    echo "$CHATS_JSON" | python3 -c "
+import sys, json
+try:
+    chats = json.load(sys.stdin)
+    if isinstance(chats, list):
+        for c in chats[:10]:
+            cid = c.get('id','?')
+            name = c.get('name') or c.get('pushName') or '(no name)'
+            is_group = '@g.us' in cid
+            ctype = 'GROUP' if is_group else 'DM'
+            last = c.get('lastMessage',{}).get('timestamp','')
+            print(f'    {ctype:6s} | {name[:30]:30s} | {cid}')
+except: pass
+" 2>/dev/null || info "Could not parse chats JSON"
+else
+    warn "WAHA reports no recent chats"
+    ISSUES+=("WAHA has no chats — session may be stale or newly created")
+fi
+
+# ── 10. WAHA Logs ────────────────────────────────────────────────
+header "10/12" "WAHA Logs (last 10 min)"
 
 WAHA_RECENT=$(docker logs zeniclaw_waha --since=600s 2>&1 || echo "")
 WAHA_MSG_COUNT=$(echo "$WAHA_RECENT" | grep -ci "message\|webhook\|event\|received" 2>/dev/null || true)
 WAHA_MSG_COUNT=${WAHA_MSG_COUNT:-0}
 WAHA_ERR_COUNT=$(echo "$WAHA_RECENT" | grep -ci "error\|fail\|exception" 2>/dev/null || true)
 WAHA_ERR_COUNT=${WAHA_ERR_COUNT:-0}
+WAHA_TOTAL_LINES=$(echo "$WAHA_RECENT" | wc -l || echo "0")
+
+info "Total WAHA log lines (10 min): $WAHA_TOTAL_LINES"
 
 if [ "$WAHA_MSG_COUNT" -gt 0 ]; then
     ok "WAHA activity: $WAHA_MSG_COUNT message/event lines"
@@ -429,10 +497,19 @@ if [ "$WAHA_ERR_COUNT" -gt 0 ]; then
         ISSUES+=("WAHA → App timeout ($TIMEOUT_ERRS time(s)) — app too slow or unreachable on port 80")
         ACTIONS+=("Restart app services: docker exec zeniclaw_app supervisorctl restart all")
     fi
+else
+    ok "No WAHA errors"
 fi
 
-# ── 9. App logs deep dive ────────────────────────────────────────
-echo -e "\n${BOLD}[9/9] App Logs (last 10 min)${NC}"
+# Show last 20 raw WAHA log lines for context
+echo ""
+info "Last 20 WAHA log lines:"
+echo "$WAHA_RECENT" | tail -20 | while read -r line; do
+    echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+done
+
+# ── 11. App Logs ─────────────────────────────────────────────────
+header "11/12" "App Logs (last 10 min)"
 
 APP_LOGS_FULL=$(docker logs zeniclaw_app --since=600s 2>&1 || echo "")
 APP_WH_LINES=$(echo "$APP_LOGS_FULL" | grep -i "webhook\|whatsapp\|message.received\|channel" 2>/dev/null | tail -10 || true)
@@ -468,23 +545,98 @@ if [ -n "$APP_QUEUE_LINES" ]; then
     done
 fi
 
+# ── 12. Live Test (optional) ─────────────────────────────────────
+header "12/12" "Live Message Test"
+
+if [ "$LIVE_TEST" = true ] && [ "$SESSION_STATUS" = "WORKING" ] && [ -n "$SESSION_PHONE" ]; then
+    SELF_JID="${SESSION_PHONE}@s.whatsapp.net"
+    TEST_TS=$(date +%s)
+    TEST_BODY="[ZeniClaw Diag] ping-${TEST_TS}"
+
+    echo -e "  ${CYAN}Sending test message to self (+${SESSION_PHONE})...${NC}"
+
+    SEND_RESULT=$(docker exec zeniclaw_app curl -sf -w "\n%{http_code}" \
+        -X POST -H "X-Api-Key: ${WAHA_KEY}" -H "Content-Type: application/json" \
+        -d "{\"chatId\":\"${SELF_JID}\",\"text\":\"${TEST_BODY}\",\"session\":\"default\"}" \
+        "${WAHA_BASE}/api/sendText" 2>/dev/null || echo "000")
+    SEND_HTTP=$(echo "$SEND_RESULT" | tail -1)
+    SEND_BODY=$(echo "$SEND_RESULT" | head -n -1)
+
+    if [ "$SEND_HTTP" = "201" ] || [ "$SEND_HTTP" = "200" ]; then
+        ok "Message sent (HTTP $SEND_HTTP)"
+        info "Body: $TEST_BODY"
+    else
+        fail "Send failed: HTTP $SEND_HTTP"
+        info "Response: $(echo "$SEND_BODY" | cut -c1-200)"
+        ISSUES+=("Could not send test message via WAHA")
+    fi
+
+    # Wait for webhook to arrive
+    echo -e "  ${CYAN}Waiting for webhook (max 15s)...${NC}"
+    FOUND=false
+    for i in $(seq 1 15); do
+        sleep 1
+        CHECK_LOGS=$(docker logs zeniclaw_app --since=20s 2>&1 || echo "")
+        if echo "$CHECK_LOGS" | grep -q "ping-${TEST_TS}\|diag-ping\|webhook/whatsapp"; then
+            FOUND=true
+            ok "Webhook received after ${i}s!"
+            break
+        fi
+        echo -ne "  ${DIM}  ...${i}s${NC}\r"
+    done
+    echo ""
+
+    if [ "$FOUND" = false ]; then
+        fail "Webhook NOT received after 15s"
+        ISSUES+=("Live test: message sent but webhook never arrived at app")
+
+        # Check WAHA logs for the delivery attempt
+        echo ""
+        info "Checking WAHA delivery logs..."
+        WAHA_TEST_LOGS=$(docker logs zeniclaw_waha --since=30s 2>&1 || echo "")
+        WAHA_DELIVERY=$(echo "$WAHA_TEST_LOGS" | grep -i "webhook\|delivery\|ping-${TEST_TS}" || true)
+        if [ -n "$WAHA_DELIVERY" ]; then
+            info "WAHA webhook delivery attempt:"
+            echo "$WAHA_DELIVERY" | while read -r line; do
+                echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+            done
+            if echo "$WAHA_DELIVERY" | grep -q "failed\|timeout\|error"; then
+                ISSUES+=("WAHA tried to deliver webhook but failed (check logs above)")
+                ACTIONS+=("Increase WAHA webhook timeout or check app responsiveness")
+            fi
+        else
+            warn "WAHA has no delivery logs — message may not have triggered a webhook event"
+            ISSUES+=("WAHA did not attempt webhook delivery — event subscription issue or WAHA bug")
+            ACTIONS+=("Recreate session with events [\"message\",\"message.any\"]:\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' ${WAHA_BASE}/api/sessions/default/stop\n  sleep 2\n  docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: ${WAHA_KEY}' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\",\"message.any\",\"message.reaction\"]}]}}' ${WAHA_BASE}/api/sessions/start")
+        fi
+    fi
+
+elif [ "$LIVE_TEST" = true ]; then
+    warn "Cannot run live test — session not WORKING or no phone"
+else
+    info "Skipped (run with --live-test to send a real test message)"
+    info "Usage: bash debug-whatsapp.sh --live-test"
+fi
+
 # ── Session JSON dump ────────────────────────────────────────────
 echo -e "\n${BOLD}Full WAHA Session Config:${NC}"
 echo "$SESSION_JSON" | python3 -m json.tool 2>/dev/null || echo "$SESSION_JSON"
 
-# ── Summary ─────────────────────────────────────────────────────
-echo -e "\n${BOLD}${CYAN}═══ Diagnostic Summary ═══${NC}\n"
+# ══ Summary ══════════════════════════════════════════════════════
+echo -e "\n${BOLD}${CYAN}════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${CYAN}  Diagnostic Summary${NC}"
+echo -e "${BOLD}${CYAN}════════════════════════════════════════════${NC}\n"
 
 if [ ${#ISSUES[@]} -eq 0 ]; then
-    echo -e "${GREEN}${BOLD}All checks passed! WhatsApp should be working.${NC}"
-    echo -e "${DIM}If messages still don't arrive, send a test and run this script again.${NC}"
+    echo -e "${GREEN}${BOLD}  All checks passed! WhatsApp should be working.${NC}"
+    echo -e "${DIM}  If messages still don't arrive, run: bash debug-whatsapp.sh --live-test${NC}"
 else
-    echo -e "${RED}${BOLD}Found ${#ISSUES[@]} issue(s):${NC}\n"
+    echo -e "${RED}${BOLD}  Found ${#ISSUES[@]} issue(s):${NC}\n"
     for i in "${!ISSUES[@]}"; do
         echo -e "  ${RED}$((i+1)).${NC} ${ISSUES[$i]}"
     done
 
-    echo -e "\n${YELLOW}${BOLD}Suggested actions:${NC}\n"
+    echo -e "\n${YELLOW}${BOLD}  Suggested actions:${NC}\n"
     for i in "${!ACTIONS[@]}"; do
         echo -e "  ${CYAN}$((i+1)).${NC} ${ACTIONS[$i]}"
     done
