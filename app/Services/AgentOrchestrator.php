@@ -205,12 +205,14 @@ class AgentOrchestrator
             // 0. Check for debug mode toggle commands
             $debugToggle = $this->handleDebugToggle($context);
             if ($debugToggle) {
+                $this->sendReply($context, $debugToggle->reply);
                 return $debugToggle;
             }
 
             // 0b. Check for private agent commands
             $privateCmd = $this->handlePrivateCommand($context);
             if ($privateCmd) {
+                $this->sendReply($context, $privateCmd->reply);
                 return $privateCmd;
             }
 
@@ -685,7 +687,10 @@ class AgentOrchestrator
                     // Handle private agent selection (system-level pending)
                     if (($pendingCtx['agent'] ?? '') === '_system' && ($pendingCtx['type'] ?? '') === 'private_select') {
                         $result = $this->handlePrivateSelect($context, $pendingCtx);
-                        if ($result) return $result;
+                        if ($result) {
+                            $this->sendReply($context, $result->reply);
+                            return $result;
+                        }
                         $context->session->update(['pending_agent_context' => null]);
                         return null;
                     }
@@ -840,9 +845,12 @@ class AgentOrchestrator
         return $result;
     }
 
-    private function sendDebug(AgentContext $context, string $text): void
+    /**
+     * Send a WhatsApp reply from the orchestrator (for system commands like /debug, /private).
+     * Web chat doesn't need this — the reply is returned in the HTTP response.
+     */
+    private function sendReply(AgentContext $context, string $text): void
     {
-        // For web chat, debug traces are appended to the reply — no separate message needed
         if ($context->session->channel === 'web') {
             return;
         }
@@ -856,8 +864,13 @@ class AgentOrchestrator
                     'session' => 'default',
                 ]);
         } catch (\Exception $e) {
-            Log::warning('Debug message failed: ' . $e->getMessage());
+            Log::warning('Orchestrator sendReply failed: ' . $e->getMessage());
         }
+    }
+
+    private function sendDebug(AgentContext $context, string $text): void
+    {
+        $this->sendReply($context, $text);
     }
 
     /**
