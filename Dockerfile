@@ -64,8 +64,9 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
     && echo "www-data ALL=(root) NOPASSWD: /usr/local/bin/zeniclaw-update" > /etc/sudoers.d/zeniclaw-update \
     && chmod 0440 /etc/sudoers.d/zeniclaw-update
 
-# Version file for health check
-RUN echo "2.38.0" > storage/app/version.txt
+# Version — stored outside storage/ so the volume mount doesn't override it.
+# entrypoint.sh copies it to storage/app/version.txt at runtime.
+RUN echo "2.38.0" > /tmp/.zeniclaw-version
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \

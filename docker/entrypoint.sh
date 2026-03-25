@@ -51,11 +51,18 @@ if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
 fi
 
 # Mark mounted repo as safe for git (root + www-data)
-git config --global --add safe.directory /opt/zeniclaw-repo
-mkdir -p /var/www/.config/git
-echo '[safe]' > /var/www/.config/git/config
-echo '    directory = /opt/zeniclaw-repo' >> /var/www/.config/git/config
-chown -R www-data:www-data /var/www/.config
+# Detect repo mount dynamically
+REPO_DIR=""
+for CANDIDATE in /opt/zeniclaw-repo /opt/zeniclaw /home/zeniclaw; do
+    [ -d "$CANDIDATE/.git" ] && REPO_DIR="$CANDIDATE" && break
+done
+if [ -n "$REPO_DIR" ]; then
+    git config --global --add safe.directory "$REPO_DIR"
+    mkdir -p /var/www/.config/git
+    echo '[safe]' > /var/www/.config/git/config
+    echo "    directory = $REPO_DIR" >> /var/www/.config/git/config
+    chown -R www-data:www-data /var/www/.config
+fi
 
 # Give www-data access to container runtime socket for self-update
 # Supports both Docker (/var/run/docker.sock) and Podman (/run/podman/podman.sock)
@@ -92,6 +99,12 @@ if [ "$USER_COUNT" = "0" ]; then
     echo "🌱 First install detected — seeding database..."
     php artisan db:seed --force --no-interaction
 fi
+
+# Write version file (must be done at runtime because the storage volume
+# is mounted AFTER build, overriding the Dockerfile's version.txt)
+VERSION_FROM_BUILD=$(cat /tmp/.zeniclaw-version 2>/dev/null || echo "unknown")
+echo "$VERSION_FROM_BUILD" > storage/app/version.txt
+echo "📌 Version: $VERSION_FROM_BUILD"
 
 # Optimize (clear first — volume persists old caches across rebuilds)
 echo "⚡ Optimizing..."
