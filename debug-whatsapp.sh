@@ -207,37 +207,7 @@ else
     ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
 fi
 
-# WAHA can reach app on port 80? (try multiple methods since WAHA container may not have curl/wget)
-WAHA_TO_APP="unknown"
-# Method 1: curl (if available in WAHA)
-WAHA_TO_APP=$(docker exec zeniclaw_waha curl -sf -o /dev/null -w "%{http_code}" --max-time 5 http://app:80/health 2>/dev/null || echo "no_curl")
-if [ "$WAHA_TO_APP" = "no_curl" ]; then
-    # Method 2: node one-liner (WAHA is Node.js based)
-    WAHA_TO_APP=$(docker exec zeniclaw_waha node -e "
-        const http = require('http');
-        const req = http.get('http://app:80/health', {timeout: 5000}, (res) => {
-            process.stdout.write(String(res.statusCode));
-        });
-        req.on('error', (e) => process.stdout.write('err:' + e.code));
-        req.on('timeout', () => { req.destroy(); process.stdout.write('timeout'); });
-    " 2>/dev/null || echo "node_fail")
-fi
-
-if [ "$WAHA_TO_APP" = "200" ]; then
-    ok "WAHA → App: reachable (HTTP 200)"
-elif [ "$WAHA_TO_APP" = "timeout" ]; then
-    fail "WAHA → App: timeout"
-    ISSUES+=("WAHA cannot reach app on port 80 (timeout) — webhook delivery will fail")
-    ACTIONS+=("Check nginx/php-fpm in app container: docker exec zeniclaw_app supervisorctl status")
-elif echo "$WAHA_TO_APP" | grep -q "err:"; then
-    fail "WAHA → App: connection error ($WAHA_TO_APP)"
-    ISSUES+=("WAHA cannot reach app on port 80 ($WAHA_TO_APP) — webhook delivery will fail")
-    ACTIONS+=("Check Docker network: docker compose down && docker compose up -d")
-else
-    warn "WAHA → App: HTTP $WAHA_TO_APP"
-fi
-
-# DNS resolution check from WAHA
+# DNS resolution check from WAHA (node is always available — WAHA is Node.js)
 WAHA_DNS=$(docker exec zeniclaw_waha node -e "
     const dns = require('dns');
     dns.lookup('app', (err, addr) => {
@@ -246,7 +216,7 @@ WAHA_DNS=$(docker exec zeniclaw_waha node -e "
     });
 " 2>/dev/null || echo "unknown")
 if echo "$WAHA_DNS" | grep -qP '^\d+\.\d+\.\d+\.\d+$'; then
-    ok "DNS resolution: app → $WAHA_DNS"
+    ok "DNS: app → $WAHA_DNS"
 else
     fail "DNS resolution failed: $WAHA_DNS"
     ISSUES+=("WAHA cannot resolve 'app' hostname — Docker DNS broken")
@@ -265,6 +235,57 @@ if [ "$APP_RESPONSE_TIME" != "timeout" ]; then
     else
         ok "App response time: ${APP_RESPONSE_TIME}s"
     fi
+fi
+
+# WAHA → App HTTP check (via node since WAHA has no curl/wget)
+WAHA_TO_APP=$(docker exec zeniclaw_waha node -e "
+    const http = require('http');
+    const start = Date.now();
+    const req = http.get('http://app:80/health', {timeout: 5000}, (res) => {
+        const ms = Date.now() - start;
+        process.stdout.write(res.statusCode + ':' + ms + 'ms');
+    });
+    req.on('error', (e) => process.stdout.write('err:' + e.code));
+    req.on('timeout', () => { req.destroy(); process.stdout.write('timeout'); });
+" 2>/dev/null || echo "node_fail")
+
+if echo "$WAHA_TO_APP" | grep -q "^200:"; then
+    ok "WAHA → App: reachable ($WAHA_TO_APP)"
+elif [ "$WAHA_TO_APP" = "timeout" ]; then
+    fail "WAHA → App: timeout (5s)"
+    ISSUES+=("WAHA cannot reach app on port 80 (timeout) — webhook delivery will fail")
+    ACTIONS+=("docker exec zeniclaw_app supervisorctl restart nginx php-fpm")
+elif echo "$WAHA_TO_APP" | grep -q "err:"; then
+    fail "WAHA → App: $WAHA_TO_APP"
+    ISSUES+=("WAHA cannot connect to app ($WAHA_TO_APP)")
+    ACTIONS+=("docker compose down && docker compose up -d")
+elif [ "$WAHA_TO_APP" = "node_fail" ]; then
+    warn "WAHA → App: could not test (node failed)"
+else
+    warn "WAHA → App: $WAHA_TO_APP"
+fi
+
+# Webhook route test — does /webhook/whatsapp/1 respond?
+WEBHOOK_AGENT_ID=$(echo "$WEBHOOK_URL" | grep -oP '/webhook/whatsapp/\K\d+' || echo "1")
+WEBHOOK_TEST=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" --max-time 10 \
+    -X POST -H "Content-Type: application/json" \
+    -d '{"event":"message","payload":{"body":"diag-ping","from":"diag@test","fromMe":true}}' \
+    "http://localhost:80/webhook/whatsapp/${WEBHOOK_AGENT_ID}" 2>/dev/null || echo "000")
+if [ "$WEBHOOK_TEST" = "200" ]; then
+    ok "Webhook route: /webhook/whatsapp/${WEBHOOK_AGENT_ID} responds (HTTP 200)"
+elif [ "$WEBHOOK_TEST" = "404" ]; then
+    fail "Webhook route: HTTP 404 — Agent ID ${WEBHOOK_AGENT_ID} not found!"
+    ISSUES+=("Agent ID ${WEBHOOK_AGENT_ID} does not exist — webhook will 404")
+    ACTIONS+=("Check agent ID: docker exec zeniclaw_app php artisan tinker --execute=\"echo App\\\\Models\\\\Agent::pluck('id','name');\"")
+elif [ "$WEBHOOK_TEST" = "500" ]; then
+    fail "Webhook route: HTTP 500 — server error"
+    ISSUES+=("Webhook route returns 500 — check app error logs")
+    ACTIONS+=("docker logs zeniclaw_app --since=60s 2>&1 | grep -i error | tail -10")
+elif [ "$WEBHOOK_TEST" = "000" ]; then
+    fail "Webhook route: timeout or unreachable"
+    ISSUES+=("Webhook route did not respond in 10s")
+else
+    warn "Webhook route: HTTP $WEBHOOK_TEST"
 fi
 
 # ── 6. App health ───────────────────────────────────────────────
