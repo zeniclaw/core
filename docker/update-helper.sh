@@ -4,7 +4,22 @@
 # Supports both Podman and Docker runtimes.
 set -e
 
-REPO="/opt/zeniclaw-repo"
+# Auto-detect repo path dynamically
+# This script is installed at /usr/local/bin/zeniclaw-update but the repo
+# is bind-mounted somewhere. Use find to locate the .git directory.
+REPO=""
+for CANDIDATE in /opt/zeniclaw-repo /opt/zeniclaw /home/zeniclaw /var/www/html; do
+    [ -d "$CANDIDATE/.git" ] && REPO="$CANDIDATE" && break
+done
+# Last resort: search common mount points
+if [ -z "$REPO" ]; then
+    REPO=$(find /opt /home /srv -maxdepth 2 -name ".git" -type d 2>/dev/null | head -1 | sed 's|/.git$||' || true)
+fi
+if [ -z "$REPO" ]; then
+    echo "ERROR: Cannot find ZeniClaw repo (.git directory not found)"
+    exit 1
+fi
+
 TOKEN="${1:-}"
 
 cd "$REPO"
@@ -37,10 +52,18 @@ if [ -z "$CONTAINER_CMD" ]; then
     exit 1
 fi
 
-# Resolve the host path of the repo
-HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination "/opt/zeniclaw-repo" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || echo "")
+# Resolve the host path of the repo from container bind mounts
+# Try the detected $REPO first, then scan all bind mounts for one containing docker-compose.yml
+HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format "{{ range .Mounts }}{{ if eq .Destination \"${REPO}\" }}{{ .Source }}{{ end }}{{ end }}" 2>/dev/null || echo "")
 if [ -z "$HOST_REPO" ]; then
-    echo "ERROR: Cannot resolve host repo path"
+    # Fallback: find any bind mount whose Source contains a docker-compose.yml
+    HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Type "bind" }}{{ .Source }}{{"\n"}}{{ end }}{{ end }}' 2>/dev/null \
+        | while read -r src; do
+            [ -n "$src" ] && [ -f "$src/docker-compose.yml" ] && echo "$src" && break
+        done || true)
+fi
+if [ -z "$HOST_REPO" ]; then
+    echo "ERROR: Cannot resolve host repo path from container mounts"
     exit 1
 fi
 

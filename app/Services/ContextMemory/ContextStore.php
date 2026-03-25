@@ -113,7 +113,11 @@ class ContextStore
                 ]
             );
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning("ContextStore: DB persist failed: " . $e->getMessage());
+            \Illuminate\Support\Facades\Log::warning('ContextStore: DB persist failed', [
+                'user_id'     => $userId,
+                'facts_count' => count($facts),
+                'error'       => $e->getMessage(),
+            ]);
         }
     }
 

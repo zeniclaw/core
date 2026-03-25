@@ -617,8 +617,17 @@ PROMPT;
         $factType = $input['fact_type'] ?? 'other';
         $tags = $input['tags'] ?? [];
 
+        if (empty($context->from)) {
+            return json_encode(['error' => 'user_id manquant, impossible de sauvegarder']);
+        }
+
         if (!$content) {
             return json_encode(['error' => 'Missing content parameter']);
+        }
+
+        $validFactTypes = ['project', 'preference', 'decision', 'skill', 'constraint'];
+        if (!in_array($factType, $validFactTypes)) {
+            return json_encode(['error' => "Type de fait invalide: '{$factType}'. Types valides: " . implode(', ', $validFactTypes)]);
         }
 
         $memory = \App\Models\ConversationMemory::create([

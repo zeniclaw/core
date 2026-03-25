@@ -227,6 +227,9 @@ SYSTEM
             Log::info('[ConversationMemory] Facts extracted', ['count' => $saved, 'from' => substr($context->from, -4)]);
 
             if ($saved === 0) {
+                Log::debug('ConversationMemoryAgent: aucun fait extrait', [
+                    'body_length' => mb_strlen($body),
+                ]);
                 Log::warning('ConversationMemoryAgent: 0 facts saved for non-trivial message', [
                     'user_id'      => $context->from,
                     'message'      => substr($body, 0, 100),
@@ -611,7 +614,10 @@ SYSTEM
     private function processExtractedFacts(string $userId, ?string $response): int
     {
         if (!$response) {
-            Log::debug('ConversationMemoryAgent: empty LLM response, skipping fact extraction', ['user_id' => $userId]);
+            Log::debug('[ConversationMemoryAgent] No facts extracted', [
+                'reason'  => 'empty_response',
+                'user_id' => $userId,
+            ]);
             return 0;
         }
 
@@ -625,7 +631,8 @@ SYSTEM
 
         $facts = json_decode($clean, true);
         if (!is_array($facts) || empty($facts)) {
-            Log::warning('ConversationMemoryAgent: LLM returned 0 parseable facts', [
+            Log::warning('[ConversationMemoryAgent] No facts extracted', [
+                'reason'       => 'json_error',
                 'user_id'      => $userId,
                 'raw_response' => substr($response, 0, 200),
                 'json_error'   => json_last_error_msg(),
@@ -707,10 +714,18 @@ SYSTEM
         }
 
         if ($saved === 0 && $total > 0) {
-            Log::warning("ConversationMemoryAgent: 0/{$total} facts saved (all filtered/duplicate) for user {$userId}");
-        } else {
-            Log::debug("ConversationMemoryAgent: saved {$saved}/{$total} facts for user {$userId}");
+            Log::warning('[ConversationMemoryAgent] No facts extracted', [
+                'reason'  => 'duplicate',
+                'user_id' => $userId,
+                'total'   => $total,
+            ]);
         }
+
+        Log::info('ConversationMemoryAgent: extraction', [
+            'received' => $total,
+            'saved'    => $saved,
+            'user_id'  => $userId,
+        ]);
 
         $this->clearCache($userId);
 

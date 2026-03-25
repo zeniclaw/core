@@ -41,7 +41,7 @@ class InteractiveQuizAgent extends BaseAgent
 
     public function description(): string
     {
-        return 'Quizz ludiques avec scoring, catégories variées, difficultés, classement, maîtrise, coaching IA, question du jour, insights, échauffement, podium, assiduité, bilan hebdo, stats communauté, résumé express, quiz de la semaine, carte profil, motivation IA, objectif hebdo, quiz roulette, classement séries, système XP avec niveaux, note globale, carte résumé, défi difficulté, défi rapide blitz, historique paginé, mode survie, recherche de questions, comparaison semaines, catégorie du jour, retry-wrong pour corriger ses erreurs, objectifs de série avec barres de progression, speed run course contre la montre, drill entraînement ciblé sur faiblesses';
+        return 'Quizz ludiques avec scoring, catégories variées, difficultés, classement, maîtrise, coaching IA, question du jour, insights, échauffement, podium, assiduité, bilan hebdo, stats communauté, résumé express, quiz de la semaine, carte profil, motivation IA, objectif hebdo, quiz roulette, classement séries, système XP avec niveaux, note globale, carte résumé, défi difficulté, défi rapide blitz, historique paginé, mode survie, recherche de questions, comparaison semaines, catégorie du jour, retry-wrong pour corriger ses erreurs, objectifs de série avec barres de progression, speed run course contre la montre, drill entraînement ciblé sur faiblesses, analyse IA diagnostic complet avec plan d\'action';
     }
 
     public function keywords(): array
@@ -152,7 +152,7 @@ class InteractiveQuizAgent extends BaseAgent
 
     public function version(): string
     {
-        return '1.57.0';
+        return '1.58.0';
     }
 
     public function canHandle(AgentContext $context): bool
@@ -2723,6 +2723,7 @@ class InteractiveQuizAgent extends BaseAgent
         $reply .= "• `/quiz calendrier` — 📅 Calendrier mensuel d'activité\n";
         $reply .= "• `/quiz compare <cat1> <cat2>` — 📊 Comparer 2 catégories\n";
         $reply .= "• `/quiz momentum` — 📈 Tendance de tes performances\n";
+        $reply .= "• `/quiz analyse` — 🔬 Diagnostic IA complet avec plan d'action\n";
         $reply .= "• `/quiz compare-moi` — 📊 Mon évolution sur 30 jours\n";
         $reply .= "• `/quiz dailyprogress` — 📅 Suivi visuel objectif du jour\n";
         $reply .= "• `/quiz milestone` — 🎯 Jalons et objectifs à long terme\n";
@@ -2778,10 +2779,11 @@ class InteractiveQuizAgent extends BaseAgent
         $reply .= "• `/quiz communauté` — 🌍 Stats globales de toute la communauté\n";
         $reply .= "• `/quiz résumé-express` — ⚡ Résumé rapide de tes derniers quiz\n\n";
         $reply .= "*Nouveau (v{$this->version()}) :*\n";
+        $reply .= "• `/quiz analyse` — 🔬 Diagnostic IA complet (forces, faiblesses, plan d'action)\n";
         $reply .= "• `/quiz speedrun` — 🏎️ Course contre la montre (10 questions en 2 min)\n";
         $reply .= "• `/quiz drill` — 🎯 Drill ciblé sur tes catégories les plus faibles (difficulté adaptée)\n";
         $reply .= "• Backoff intelligent sur les appels IA (moins d'erreurs réseau)\n";
-        $reply .= "• Protection contre les messages trop longs pendant un quiz actif";
+        $reply .= "• Bilan de semaine instantané amélioré avec calendrier visuel";
 
         $this->sendText($context->from, $reply);
 
@@ -9865,4 +9867,335 @@ class InteractiveQuizAgent extends BaseAgent
             } else {
                 $emoji = '⬛'; // Future day
             }
-            $calendar .= "{$dayNames[$d]} {$emoji} 
+            $calendar .= "{$dayNames[$d]} {$emoji} ";
+            if ($data) {
+                $dayPct = $data['total'] > 0 ? round(($data['correct'] / $data['total']) * 100) : 0;
+                $calendar .= "{$dayPct}% ({$data['count']})\n";
+            } else {
+                $calendar .= "\n";
+            }
+        }
+
+        $reply  = "📊 *Bilan de la Semaine*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n\n";
+        $reply .= "🎯 Quiz joués : *{$totalQuizzes}*\n";
+        $reply .= "✅ Bonnes réponses : *{$totalCorrect}/{$totalQuestions}* ({$avgPct}%)\n";
+        $reply .= "🏆 Sans-faute : *{$perfectCount}*\n";
+        $reply .= "📅 Jours actifs : *{$activeDays}/7*\n\n";
+        $reply .= "📈 Meilleur : {$bestCatLabel} ({$bestPct}%)\n";
+        $reply .= "📉 À travailler : {$worstCatLabel} ({$worstPct}%)\n\n";
+        $reply .= "*Calendrier :*\n{$calendar}\n";
+        $reply .= "🟩 ≥80% | 🟨 ≥50% | 🟧 <50% | ⬜ Inactif | ⬛ À venir\n\n";
+        $reply .= "💡 `/quiz recap` — Récap IA détaillé de ta semaine";
+
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, [
+            'action'       => 'week_summary',
+            'quizzes'      => $totalQuizzes,
+            'avg_pct'      => $avgPct,
+            'active_days'  => $activeDays,
+        ]);
+    }
+
+    /**
+     * Speed Run — timed challenge: answer as many questions as possible in 2 minutes.
+     * Uses mixed categories at medium difficulty. Tracks elapsed time per question.
+     */
+    private function handleSpeedRun(AgentContext $context): AgentResult
+    {
+        // Abandon any active quiz
+        Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->update(['status' => 'abandoned']);
+
+        $count    = 10;
+        $quizData = QuizEngine::generateQuiz(null, $count);
+
+        if (empty($quizData['questions'])) {
+            $reply = "⚠️ *Speed Run* — Aucune question disponible.\n🔄 Réessaie dans un instant.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'speedrun_empty']);
+        }
+
+        $questions = array_map(function (array $q) {
+            $q['hints_used']    = 0;
+            $q['user_answered'] = false;
+            $q['user_correct']  = false;
+            $q['user_skipped']  = false;
+            return $q;
+        }, $quizData['questions']);
+
+        $quiz = Quiz::create([
+            'user_phone'             => $context->from,
+            'agent_id'               => $context->agent->id,
+            'category'               => 'speedrun',
+            'difficulty'             => 'medium',
+            'questions'              => $questions,
+            'current_question_index' => 0,
+            'correct_answers'        => 0,
+            'status'                 => 'playing',
+            'started_at'             => now(),
+        ]);
+
+        $this->setQuestionShownAt($quiz, 0);
+        $firstQuestion = $quiz->fresh()->getCurrentQuestion();
+        $questionText  = QuizEngine::formatQuestion($firstQuestion, 1, $count);
+
+        $timeLimit = self::SPEED_RUN_TIME_LIMIT_SECS;
+
+        $reply  = "🏎️ *SPEED RUN — Course contre la montre !*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "⏱ *{$timeLimit} secondes* pour {$count} questions !\n";
+        $reply .= "🎯 Réponds vite : chaque seconde compte\n";
+        $reply .= "💡 Pas d'indice en Speed Run — vitesse pure !\n\n";
+        $reply .= $questionText;
+
+        $this->setPendingContext($context, 'quiz_answer', ['quiz_id' => $quiz->id], 5);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Speed Run started', ['questions' => $count, 'time_limit' => $timeLimit]);
+
+        return AgentResult::reply($reply, ['action' => 'speedrun_start', 'questions' => $count]);
+    }
+
+    /**
+     * Weakness Drill — targeted adaptive drill on the user's weakest categories.
+     * Picks questions from the 2-3 weakest categories with adapted difficulty.
+     */
+    private function handleWeaknessDrill(AgentContext $context): AgentResult
+    {
+        // Find weakest categories from recent scores
+        $scores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->whereNotIn('category', ['custom', 'daily', 'correction', 'defi-jour', 'survie', 'speedrun'])
+            ->get();
+
+        if ($scores->count() < 3) {
+            $reply  = "🎯 *Drill — Entraînement ciblé*\n\n";
+            $reply .= "Tu n'as pas encore assez de données (minimum 3 quiz).\n";
+            $reply .= "Joue quelques quiz d'abord pour que je puisse identifier tes faiblesses !\n\n";
+            $reply .= "🔄 `/quiz` — Lancer un quiz";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'drill_insufficient_data']);
+        }
+
+        // Group by category and find weakest
+        $catStats = $scores->groupBy('category')->map(function ($group) {
+            $totalQ = $group->sum('total_questions');
+            $totalC = $group->sum('score');
+            return [
+                'pct'   => $totalQ > 0 ? round(($totalC / $totalQ) * 100) : 0,
+                'count' => $group->count(),
+            ];
+        })->filter(fn($s) => $s['count'] >= 1)->sortBy('pct');
+
+        if ($catStats->isEmpty()) {
+            $reply  = "🎯 *Drill* — Pas assez de catégories jouées.\n";
+            $reply .= "🔄 Explore plus de catégories avec `/quiz categories`";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'drill_no_categories']);
+        }
+
+        // Take up to 3 weakest categories
+        $weakCats = $catStats->take(3)->keys()->toArray();
+
+        // Adapt difficulty: if avg performance < 40%, use easy; < 60% medium; else hard
+        $overallPct = $catStats->take(3)->avg('pct');
+        $difficulty = match (true) {
+            $overallPct < 40 => 'easy',
+            $overallPct < 60 => 'medium',
+            default          => 'hard',
+        };
+
+        $questionsPerCat = (int) ceil(self::WEAKNESS_DRILL_QUESTIONS / count($weakCats));
+        $allQuestions    = [];
+
+        foreach ($weakCats as $cat) {
+            $catQuiz = QuizEngine::generateQuiz($cat, $questionsPerCat);
+            if (!empty($catQuiz['questions'])) {
+                foreach ($catQuiz['questions'] as $q) {
+                    $q['hints_used']    = 0;
+                    $q['user_answered'] = false;
+                    $q['user_correct']  = false;
+                    $q['user_skipped']  = false;
+                    $allQuestions[]     = $q;
+                }
+            }
+        }
+
+        if (empty($allQuestions)) {
+            $reply = "⚠️ *Drill* — Impossible de générer les questions.\n🔄 Réessaie dans un instant.";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'drill_empty']);
+        }
+
+        // Shuffle and limit to target count
+        shuffle($allQuestions);
+        $allQuestions = array_slice($allQuestions, 0, self::WEAKNESS_DRILL_QUESTIONS);
+
+        // Abandon any active quiz
+        Quiz::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->where('status', 'playing')
+            ->update(['status' => 'abandoned']);
+
+        $quiz = Quiz::create([
+            'user_phone'             => $context->from,
+            'agent_id'               => $context->agent->id,
+            'category'               => 'drill',
+            'difficulty'             => $difficulty,
+            'questions'              => $allQuestions,
+            'current_question_index' => 0,
+            'correct_answers'        => 0,
+            'status'                 => 'playing',
+            'started_at'             => now(),
+        ]);
+
+        $this->setQuestionShownAt($quiz, 0);
+        $firstQuestion = $quiz->fresh()->getCurrentQuestion();
+        $questionText  = QuizEngine::formatQuestion($firstQuestion, 1, count($allQuestions));
+
+        $diffLabel = $this->getDifficultyLabel($difficulty);
+        $weakList  = implode(', ', array_map(fn($c) => QuizEngine::getCategoryLabel($c) ?? ucfirst($c), $weakCats));
+        $weakPcts  = [];
+        foreach ($weakCats as $wc) {
+            $weakPcts[] = ($catStats[$wc]['pct'] ?? '?') . '%';
+        }
+        $weakPctStr = implode(', ', $weakPcts);
+
+        $reply  = "🎯 *DRILL — Entraînement ciblé*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "📋 Catégories ciblées : {$weakList}\n";
+        $reply .= "📊 Tes scores actuels : {$weakPctStr}\n";
+        $reply .= "{$diffLabel} — " . count($allQuestions) . " questions\n";
+        $reply .= "💪 Objectif : progresser sur tes points faibles !\n\n";
+        $reply .= $questionText;
+
+        $this->setPendingContext($context, 'quiz_answer', ['quiz_id' => $quiz->id], 30);
+        $this->sendText($context->from, $reply);
+        $this->log($context, 'Weakness Drill started', [
+            'weak_categories' => $weakCats,
+            'difficulty'      => $difficulty,
+            'questions'       => count($allQuestions),
+        ]);
+
+        return AgentResult::reply($reply, ['action' => 'drill_start', 'categories' => $weakCats, 'difficulty' => $difficulty]);
+    }
+
+    /**
+     * Analyse — AI deep analysis of learning patterns across recent quizzes.
+     * Uses LLM to detect patterns, strengths, blind spots, and provide actionable insights.
+     */
+    private function handleAnalyse(AgentContext $context): AgentResult
+    {
+        $scores = QuizScore::where('user_phone', $context->from)
+            ->where('agent_id', $context->agent->id)
+            ->orderByDesc('completed_at')
+            ->take(30)
+            ->get();
+
+        if ($scores->count() < 3) {
+            $reply  = "🔬 *Analyse IA — Diagnostic*\n\n";
+            $reply .= "Pas assez de données pour une analyse (minimum 3 quiz).\n";
+            $reply .= "🔄 Joue quelques quiz et reviens !";
+            $this->sendText($context->from, $reply);
+            return AgentResult::reply($reply, ['action' => 'analyse_insufficient']);
+        }
+
+        $totalQ      = $scores->sum('total_questions');
+        $totalC      = $scores->sum('score');
+        $avgPct      = $totalQ > 0 ? round(($totalC / $totalQ) * 100) : 0;
+        $quizCount   = $scores->count();
+        $perfectCount = $scores->filter(fn($s) => $s->total_questions > 0 && $s->score === $s->total_questions)->count();
+        $dailyStreak = $this->computeDailyStreak($context);
+
+        // Category breakdown
+        $catBreakdown = $scores->groupBy('category')->map(function ($group, $cat) {
+            $tq = $group->sum('total_questions');
+            $tc = $group->sum('score');
+            return ucfirst($cat) . ': ' . ($tq > 0 ? round(($tc / $tq) * 100) : 0) . '% (' . $group->count() . ' quiz)';
+        })->implode(', ');
+
+        // Timing data
+        $allTimes = $scores->pluck('time_taken')->filter()->values();
+        $avgTime  = $allTimes->count() > 0 ? round($allTimes->avg()) : null;
+
+        // Trend: compare first half vs second half
+        $halfIdx  = (int) floor($quizCount / 2);
+        $firstHalf  = $scores->slice($halfIdx);
+        $secondHalf = $scores->take($halfIdx);
+        $firstPct  = $firstHalf->sum('total_questions') > 0 ? round(($firstHalf->sum('score') / $firstHalf->sum('total_questions')) * 100) : 0;
+        $secondPct = $secondHalf->sum('total_questions') > 0 ? round(($secondHalf->sum('score') / $secondHalf->sum('total_questions')) * 100) : 0;
+        $trendDir  = $secondPct > $firstPct ? 'en progression' : ($secondPct < $firstPct ? 'en baisse' : 'stable');
+
+        $dataForLLM  = "Joueur: {$quizCount} quiz, score moyen {$avgPct}%, sans-faute {$perfectCount}, série {$dailyStreak}j.\n";
+        $dataForLLM .= "Catégories: {$catBreakdown}.\n";
+        $dataForLLM .= "Tendance: {$trendDir} (anciens {$firstPct}% → récents {$secondPct}%).\n";
+        if ($avgTime) {
+            $dataForLLM .= "Temps moyen: {$avgTime}s par quiz.\n";
+        }
+
+        $systemPrompt  = "Tu es un coach quiz expert. Analyse les données du joueur et fournis un diagnostic détaillé en français.\n";
+        $systemPrompt .= "Structure ta réponse en 4 sections courtes avec emojis:\n";
+        $systemPrompt .= "1. 🔍 DIAGNOSTIC — Résumé de la situation (2-3 phrases)\n";
+        $systemPrompt .= "2. 💪 FORCES — Ce que le joueur fait bien (2-3 points)\n";
+        $systemPrompt .= "3. ⚠️ POINTS FAIBLES — Ce qui doit être travaillé (2-3 points)\n";
+        $systemPrompt .= "4. 🎯 PLAN D'ACTION — 3 actions concrètes pour progresser\n";
+        $systemPrompt .= "Sois direct, encourageant et concret. Maximum 250 mots.";
+
+        $userPrompt = "Voici les données du joueur :\n{$dataForLLM}\nFais un diagnostic complet.";
+
+        $llmAnalysis = null;
+        $retries     = 0;
+        $lastError   = null;
+
+        while ($retries <= self::LLM_MAX_RETRIES && $llmAnalysis === null) {
+            try {
+                $response = app(\App\Services\AnthropicClient::class)->message(
+                    model: $this->resolveModel($context),
+                    system: $systemPrompt,
+                    messages: [['role' => 'user', 'content' => $userPrompt]],
+                    maxTokens: self::LLM_ANALYSE_MAX_TOKENS,
+                );
+                $llmAnalysis = trim($response['content'][0]['text'] ?? '');
+            } catch (\Throwable $e) {
+                $lastError = $e->getMessage();
+                $retries++;
+                if ($retries <= self::LLM_MAX_RETRIES) {
+                    usleep(500_000 * $retries); // backoff: 0.5s, 1s
+                }
+            }
+        }
+
+        $reply  = "🔬 *Analyse IA — Diagnostic complet*\n";
+        $reply .= "━━━━━━━━━━━━━━━━\n";
+        $reply .= "📋 Basé sur tes *{$quizCount}* derniers quiz\n\n";
+
+        if ($llmAnalysis) {
+            $reply .= $llmAnalysis . "\n\n";
+        } else {
+            // Fallback without LLM
+            $this->log($context, 'Analyse LLM failed, using fallback', ['error' => $lastError]);
+            $reply .= "🔍 *DIAGNOSTIC*\n";
+            $reply .= "Score moyen : {$avgPct}% — Tendance : {$trendDir}\n";
+            $reply .= "Sans-faute : {$perfectCount}/{$quizCount}\n\n";
+            $reply .= "📊 *CATÉGORIES*\n{$catBreakdown}\n\n";
+            $reply .= "🎯 *CONSEIL* : Concentre-toi sur tes catégories les plus faibles avec `/quiz drill`\n\n";
+        }
+
+        $reply .= "💡 `/quiz drill` — Entraînement ciblé\n";
+        $reply .= "📋 `/quiz plan` — Plan d'étude IA\n";
+        $reply .= "📊 `/quiz mystats` — Tes statistiques détaillées";
+
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, [
+            'action'    => 'analyse',
+            'quizzes'   => $quizCount,
+            'avg_pct'   => $avgPct,
+            'trend'     => $trendDir,
+            'llm_used'  => $llmAnalysis !== null,
+        ]);
+    }
+}

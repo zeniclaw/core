@@ -204,7 +204,10 @@ class SmartContextAgent extends BaseAgent
                     }
                 }
 
+                $extracted = count($facts);
                 $this->contextStore->store($context->from, $facts);
+                $saved = count($this->contextStore->retrieve($context->from));
+                $this->log($context, "Facts extracted: {$extracted}, saved: {$saved}", [], 'debug');
                 $this->log($context, 'Context facts extracted', [
                     'facts_count' => count($facts),
                     'facts'       => array_map(fn ($f) => $f['key'] . ': ' . $f['value'], $facts),

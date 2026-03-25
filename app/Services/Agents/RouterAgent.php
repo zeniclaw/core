@@ -135,7 +135,11 @@ class RouterAgent
         try {
             $this->conversationMemory->extractFactsInBackground($context);
         } catch (\Throwable $e) {
-            Log::warning('ConversationMemoryAgent failed silently: ' . $e->getMessage());
+            Log::warning('Memory extraction failed', [
+                'error' => $e->getMessage(),
+                'from' => $context->from ?? 'null',
+                'message_preview' => substr($context->message ?? '', 0, 100),
+            ]);
         }
 
         // Silently run ContextAgent to extract entities and update shared context bridge

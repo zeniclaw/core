@@ -94,10 +94,13 @@ class UpdateController extends Controller
     public function rebuildStatus(): JsonResponse
     {
         // The rebuild log is written by the update helper in the repo dir
-        $possiblePaths = [
-            '/opt/zeniclaw-repo/storage/app/update-rebuild.log',
-            storage_path('app/update-rebuild.log'),
-        ];
+        // Find the rebuild log — repo may be mounted at any path
+        $possiblePaths = [storage_path('app/update-rebuild.log')];
+        foreach (['/opt/zeniclaw-repo', '/opt/zeniclaw', '/home/zeniclaw', '/srv/zeniclaw'] as $dir) {
+            if (is_dir($dir)) {
+                array_unshift($possiblePaths, "$dir/storage/app/update-rebuild.log");
+            }
+        }
 
         $content = '';
         foreach ($possiblePaths as $path) {
