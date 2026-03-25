@@ -161,7 +161,7 @@ class ChannelController extends Controller
                 $msgId = $payload['id'];
                 $chatId = $payload['from'] ?? '';
 
-                // Method 1: /api/media endpoint
+                // Method 1: /api/media endpoint (legacy)
                 try {
                     $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
                         ->withHeaders($wahaHeaders)
@@ -174,15 +174,31 @@ class ChannelController extends Controller
                     \Illuminate\Support\Facades\Log::warning('WAHA /api/media failed: ' . $e->getMessage());
                 }
 
-                // Method 2: /api/{session}/messages/{id}/download (WAHA Plus / newer versions)
+                // Method 1b: /api/{session}/messages/{id}/media (newer WAHA)
                 if (!$mediaUrl) {
                     try {
                         $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
                             ->withHeaders($wahaHeaders)
-                            ->get("$wahaBase/api/default/messages/{$msgId}/download");
+                            ->get("$wahaBase/api/default/messages/{$msgId}/media");
                         if ($dlResponse->successful()) {
                             $mediaData = $dlResponse->json();
-                            $mediaUrl = $mediaData['url'] ?? $mediaData['mediaUrl'] ?? $mediaData['mimetype'] ? "$wahaBase/api/default/messages/{$msgId}/download" : null;
+                            $mediaUrl = $mediaData['url'] ?? $mediaData['mediaUrl'] ?? null;
+                        }
+                    } catch (\Throwable $e) {
+                        // silent — will try method 2
+                    }
+                }
+
+                // Method 2: /api/{session}/messages/{id}/download returns binary data directly
+                // If successful, use the URL itself as the mediaUrl (agents will GET it to download)
+                if (!$mediaUrl) {
+                    try {
+                        $downloadUrl = "$wahaBase/api/default/messages/{$msgId}/download";
+                        $dlResponse = \Illuminate\Support\Facades\Http::timeout(15)
+                            ->withHeaders($wahaHeaders)
+                            ->head($downloadUrl);
+                        if ($dlResponse->successful()) {
+                            $mediaUrl = $downloadUrl;
                         }
                     } catch (\Throwable $e) {
                         \Illuminate\Support\Facades\Log::warning('WAHA download endpoint failed: ' . $e->getMessage());
