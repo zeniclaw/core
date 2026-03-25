@@ -111,8 +111,10 @@ fi
 echo -e "\n${BOLD}[4/7] Connection Stability${NC}"
 
 RECENT_LOGS=$(docker logs zeniclaw_waha --since=60s 2>&1 || echo "")
-DISCONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Connection closed" 2>/dev/null || echo "0")
-RECONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Reconnecting" 2>/dev/null || echo "0")
+DISCONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Connection closed" 2>/dev/null || true)
+DISCONNECT_COUNT=${DISCONNECT_COUNT:-0}
+RECONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Reconnecting" 2>/dev/null || true)
+RECONNECT_COUNT=${RECONNECT_COUNT:-0}
 
 if [ "$DISCONNECT_COUNT" -gt 5 ]; then
     fail "Reconnect loop detected: $DISCONNECT_COUNT disconnects in last 60s"
@@ -128,8 +130,10 @@ fi
 echo -e "\n${BOLD}[5/7] Webhook Delivery${NC}"
 
 APP_LOGS=$(docker logs zeniclaw_app --since=300s 2>&1 || echo "")
-WEBHOOK_HITS=$(echo "$APP_LOGS" | grep -c "webhook/whatsapp" 2>/dev/null || echo "0")
-MEDIA_WARNINGS=$(echo "$APP_LOGS" | grep -ci "media.*fail\|could not resolve mediaUrl\|resolveMediaUrl" 2>/dev/null || echo "0")
+WEBHOOK_HITS=$(echo "$APP_LOGS" | grep -c "webhook/whatsapp" 2>/dev/null || true)
+WEBHOOK_HITS=${WEBHOOK_HITS:-0}
+MEDIA_WARNINGS=$(echo "$APP_LOGS" | grep -ci "media.*fail\|could not resolve mediaUrl\|resolveMediaUrl" 2>/dev/null || true)
+MEDIA_WARNINGS=${MEDIA_WARNINGS:-0}
 
 if [ "$WEBHOOK_HITS" -gt 0 ]; then
     ok "Webhooks received: $WEBHOOK_HITS in last 5 min"
@@ -156,8 +160,10 @@ fi
 # ── 6. App health ───────────────────────────────────────────────
 echo -e "\n${BOLD}[6/7] App Health${NC}"
 
-APP_ERRORS=$(echo "$APP_LOGS" | grep -c "production.ERROR" 2>/dev/null || echo "0")
-QUEUE_RUNNING=$(docker exec zeniclaw_app supervisorctl status queue-default:queue-default_00 2>/dev/null | grep -c "RUNNING" || echo "0")
+APP_ERRORS=$(echo "$APP_LOGS" | grep -c "production.ERROR" 2>/dev/null || true)
+APP_ERRORS=${APP_ERRORS:-0}
+QUEUE_RUNNING=$(docker exec zeniclaw_app supervisorctl status queue-default:queue-default_00 2>/dev/null | grep -c "RUNNING" || true)
+QUEUE_RUNNING=${QUEUE_RUNNING:-0}
 
 if [ "$QUEUE_RUNNING" -gt 0 ]; then
     ok "Queue workers: running"
