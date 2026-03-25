@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 {{-- SEO --}}
-<title>ZeniClaw — Plateforme IA Multi-Canal Self-Hosted | 23 Agents Autonomes | On-Prem &amp; Cloud</title>
-<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 23 agents specialises. Multi-canal (WhatsApp, Web Chat, bientot plus), On-Prem avec Ollama ou Cloud avec Claude/GPT-4. Routing intelligent, classification par intent, API agent autonome.">
+<title>ZeniClaw — Plateforme IA Multi-Canal Self-Hosted | 36 Agents Autonomes | On-Prem &amp; Cloud</title>
+<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 36 agents specialises. Multi-canal (WhatsApp, Web Chat, bientot plus), On-Prem avec Ollama ou Cloud avec Claude/GPT-4. Routing intelligent, classification par intent, API agent autonome.">
 <meta name="keywords" content="zeniclaw, ia multi-canal, ai agents, self-hosted, open source, claude, gpt-4, ollama, on-prem, llm local, assistant ia, automatisation, crm, intent classifier, agentic loop">
 <meta name="author" content="ZeniBiz">
 <meta name="robots" content="index, follow">
@@ -16,7 +16,7 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ url('/') }}">
 <meta property="og:title" content="ZeniClaw — Your AI Army, Any Channel">
-<meta property="og:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Multi-canal, On-Prem ou Cloud, intent classifier, API agent autonome. Open source et gratuit.">
+<meta property="og:description" content="Plateforme IA self-hosted avec 36 agents autonomes. Multi-canal, On-Prem ou Cloud, intent classifier, API agent autonome. Open source et gratuit.">
 <meta property="og:image" content="{{ url('/og-image.php') }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -27,7 +27,7 @@
 {{-- Twitter Card --}}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ZeniClaw — Your AI Army, Any Channel">
-<meta name="twitter:description" content="Plateforme IA self-hosted avec 23 agents autonomes. Multi-canal, On-Prem ou Cloud. Intent classifier, API agent autonome.">
+<meta name="twitter:description" content="Plateforme IA self-hosted avec 36 agents autonomes. Multi-canal, On-Prem ou Cloud. Intent classifier, API agent autonome.">
 <meta name="twitter:image" content="{{ url('/og-image.php') }}">
 
 {{-- Favicon --}}
@@ -39,7 +39,7 @@
   "@@context": "https://schema.org",
   "@@type": "SoftwareApplication",
   "name": "ZeniClaw",
-  "description": "Plateforme IA open source et self-hosted avec 23 agents specialises. Multi-canal (WhatsApp, Web Chat, et plus). On-prem avec Ollama ou Cloud avec Claude/GPT-4.",
+  "description": "Plateforme IA open source et self-hosted avec 36 agents specialises. Multi-canal (WhatsApp, Web Chat, et plus). On-prem avec Ollama ou Cloud avec Claude/GPT-4.",
   "url": "{{ url('/') }}",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Linux",
@@ -54,7 +54,7 @@
     "url": "https://www.zenibiz.com"
   },
   "screenshot": "{{ url('/og-image.php') }}",
-  "featureList": "23 AI Agents, Multi-Channel (WhatsApp, Web Chat), Self-Hosted, Open Source, On-Prem LLM, Ollama, Intent Classifier, Agentic Loop, Autonomous API Agent, Web Search, Configurable Model Roles, Parallel Sub-Agents, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Document Generation, Persistent Memory"
+  "featureList": "36 AI Agents, Multi-Channel (WhatsApp, Web Chat, Telegram), Self-Hosted, Open Source, On-Prem LLM, Ollama, Intent Classifier, Agentic Loop, Autonomous API Agent, Web Search, Configurable Model Roles, Parallel Sub-Agents, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Document Generation, Persistent Memory, Plugin System, Flashcards, Habit Tracking, Interactive Quizzes, Reading Challenges"
 }
 </script>
 
@@ -432,7 +432,7 @@ footer {
         <div class="terminal-dot y"></div>
         <div class="terminal-dot g"></div>
       </div>
-      <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">git clone https://gitlab.com/zenidev/zeniclaw.git</span></div>
+      <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">git clone https://github.com/zeniclaw/core.git</span></div>
       <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">cd zeniclaw && bash install.sh</span></div>
       <div class="terminal-line"><span class="comment"># 5 containers: app, db, redis, waha, ollama</span></div>
       <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">open</span> <span class="url">http://localhost:8080</span></div>
@@ -457,13 +457,13 @@ footer {
     <h2 class="section-title">Everything you need, <span class="gradient-text">built in</span></h2>
     <p class="section-desc">A full-stack AI platform that goes way beyond chatbots. Every feature runs on your own infrastructure, your data never leaves your server.</p>
     <div class="features-grid">
-      <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>23 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, document generation, meeting notes, habits, games, and more. Each agent has its own memory and tools.</p></div>
+      <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>36 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, document generation, meeting notes, habits, quizzes, reading challenges, recipes, games, and more. Each agent has its own memory, tools, and plugin hooks.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x1F500;</div><h3>Agentic Loop</h3><p>LLM-driven decision loop with tool usage. Agents autonomously decide which tools to call, chain API operations, and iterate up to 10 times to complete complex tasks without human intervention.</p></div>
       <div class="feature-card" style="border-color: rgba(6,182,212,0.4); background: linear-gradient(135deg, rgba(6,182,212,0.08), var(--bg-card));"><span class="feature-new" style="background: var(--accent-cyan);">Highlight</span><div class="feature-icon cyan">&#x1F5A5;</div><h3>On-Prem LLMs (Ollama)</h3><p>Run models 100% locally with the built-in Ollama container. Download Qwen 2.5, CodeLlama, DeepSeek, or any model from the UI. <strong>Zero API costs, full privacy, no data leaves your server.</strong> Configure model roles (fast/balanced/powerful) per use-case.</p></div>
       <div class="feature-card"><div class="feature-icon green">&#x1F4AC;</div><h3>Multi-Channel</h3><p>WhatsApp (Baileys, no paid API), Web Chat dashboard, and more channels coming soon. Full multimodal support: text, images, voice, PDFs. Same agents, any channel.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon pink">&#x1F9E0;</div><h3>Intent Classifier</h3><p>LLM-based intent classification in every agent. Conversation history injected for context-aware routing. Anti-hallucination rules prevent agents from claiming actions they didn't perform.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon amber">&#x1F3AF;</div><h3>Configurable Model Roles</h3><p>3 roles (Fast, Balanced, Powerful) configurable from the UI. Assign Claude Opus for complex tasks, Haiku for routing, Ollama for privacy. All agents use roles automatically.</p></div>
-      <div class="feature-card"><div class="feature-icon red">&#x1F6E0;</div><h3>GitLab DevOps</h3><p>SubAgents clone repos, create branches, write code with Claude Code CLI, auto-commit, push, and open merge requests. Full CI/CD pipeline from a WhatsApp message.</p></div>
+      <div class="feature-card"><div class="feature-icon red">&#x1F6E0;</div><h3>GitHub DevOps</h3><p>SubAgents clone repos, create branches, write code with Claude Code CLI, auto-commit, push, and open merge requests. Full CI/CD pipeline from a WhatsApp message.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon blue">&#x1F310;</div><h3>Autonomous API Agent</h3><p>Claude chains multi-step API calls, fetches web pages for analysis, stores credentials, and self-heals broken JSON. Up to 10 iterations with auto-continuation for large responses.</p></div>
       <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x26A1;</div><h3>Parallel Sub-Agents</h3><p>Run multiple sub-agents concurrently (configurable 1-10, default 3). Throttle middleware, smart queue workers, and settings UI for full control over parallelism.</p></div>
       <div class="feature-card"><div class="feature-icon purple">&#x1F512;</div><h3>Self-Hosted & Secure</h3><p>100% on-premise. AES-256 encrypted secrets, role-based access (superadmin/admin/operator/viewer), agent sandboxing, auto-updates, and health monitoring with watchdog.</p></div>
@@ -477,11 +477,11 @@ footer {
 <section id="agents" style="background: var(--bg-secondary);">
   <div class="section-inner">
     <span class="section-label">// agents</span>
-    <h2 class="section-title">23 Specialized <span class="gradient-text">AI Agents</span></h2>
-    <p class="section-desc">Each agent is purpose-built with its own system prompt, tool access, and isolated memory. The Router Agent uses confidence scoring and conversation history for intelligent contextual dispatch.</p>
+    <h2 class="section-title">36 Specialized <span class="gradient-text">AI Agents</span></h2>
+    <p class="section-desc">Each agent is purpose-built with its own system prompt, tool access, and isolated memory. The Router Agent uses confidence scoring and conversation history for intelligent contextual dispatch. Plugin system with 14 lifecycle events for extensibility.</p>
     <div class="agents-grid">
       <div class="agent-chip"><div class="agent-emoji">&#x1F4AC;</div><div class="agent-info"><h4>ChatAgent</h4><p>General conversation & multimodal</p></div></div>
-      <div class="agent-chip"><div class="agent-emoji">&#x1F4BB;</div><div class="agent-info"><h4>DevAgent</h4><p>Code, GitLab & API automation</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4BB;</div><div class="agent-info"><h4>DevAgent</h4><p>Code, GitHub & API automation</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x23F0;</div><div class="agent-info"><h4>ReminderAgent</h4><p>Time-based reminders & snooze</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F4C1;</div><div class="agent-info"><h4>ProjectAgent</h4><p>Project management & stats</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F4C8;</div><div class="agent-info"><h4>AnalysisAgent</h4><p>Data analysis & report generation</p></div></div>
@@ -502,6 +502,19 @@ footer {
       <div class="agent-chip"><div class="agent-emoji">&#x1F4C4;</div><div class="agent-info"><h4>DocumentAgent</h4><p>PDF, Excel & document generation</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F3AE;</div><div class="agent-info"><h4>HangmanGameAgent</h4><p>Word games & entertainment</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F50D;</div><div class="agent-info"><h4>WebSearchAgent</h4><p>Real-time web search & API stats</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4B3;</div><div class="agent-info"><h4>BudgetTrackerAgent</h4><p>Personal finance & budgets</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4D6;</div><div class="agent-info"><h4>ContentCuratorAgent</h4><p>Reading lists & challenges</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F9E9;</div><div class="agent-info"><h4>InteractiveQuizAgent</h4><p>Dynamic quizzes & scoring</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4E7;</div><div class="agent-info"><h4>DailyBriefAgent</h4><p>Daily briefing compilation</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4CC;</div><div class="agent-info"><h4>ContextAgent</h4><p>Context memory management</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4AD;</div><div class="agent-info"><h4>ConversationMemoryAgent</h4><p>Conversation history tracking</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F373;</div><div class="agent-info"><h4>RecipeAgent</h4><p>Recipe recommendations</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F3B2;</div><div class="agent-info"><h4>GameMasterAgent</h4><p>RPG game master</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F91D;</div><div class="agent-info"><h4>CollaborativeTaskAgent</h4><p>Team task coordination</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x23F3;</div><div class="agent-info"><h4>TimeBlockerAgent</h4><p>Time blocking & scheduling</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x2699;</div><div class="agent-info"><h4>UserPreferencesAgent</h4><p>Preference management</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F4CB;</div><div class="agent-info"><h4>ZenibizDocsAgent</h4><p>Photo to PDF conversion</p></div></div>
+      <div class="agent-chip"><div class="agent-emoji">&#x1F916;</div><div class="agent-info"><h4>AIAssistantAgent</h4><p>Self-improving AI assistant</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F500;</div><div class="agent-info"><h4>RouterAgent</h4><p>Confidence-scored auto-dispatch</p></div></div>
     </div>
   </div>
@@ -528,14 +541,14 @@ footer {
                       |                                  |       +-------------+
   +-----------+       |  <span class="hl-amber">RouterAgent</span> (fast-path + LLM)   |
   |  <span class="hl-green">More...</span>  |       |  <span class="hl-amber">Intent Classifier</span> (per agent)  |       +-------------+
-  |  (coming) |------&gt;|  <span class="hl-amber">23 Agents</span> (parallel execution) |       | <span class="hl-cyan">Ollama</span> &#x2B50; |
+  |  (coming) |------&gt;|  <span class="hl-amber">36 Agents</span> (parallel execution) |       | <span class="hl-cyan">Ollama</span> &#x2B50; |
   +-----------+       |  <span class="hl-amber">Agentic Loop</span> + API Agent       |&lt;-----&gt;| Qwen 2.5   |
                       |  <span class="hl-amber">SubAgents</span> (x3 parallel)        |       | DeepSeek   |
                       |  <span class="hl-amber">Model Roles</span> (fast/balanced/pow)|       | CodeLlama  |
                       +-----------|----------------------+       +-------------+
                                   |                                <span class="hl-cyan">100% Private</span>
                       +-----------|-----------+          +-------------+
-                      |           v           |          |  <span class="hl-pink">GitLab</span>    |
+                      |           v           |          |  <span class="hl-pink">GitHub</span>    |
                 +----------+  +---------+                |  Repos, MRs |
                 | <span class="hl-blue">Postgres</span> |  |  <span class="hl-green">Redis</span>  |                +-------------+
                 |  16      |  |  7      |
@@ -566,11 +579,25 @@ footer {
     <p class="section-desc">Recent updates and improvements to the platform.</p>
     <div class="changelog">
       <div class="changelog-item">
+        <div class="changelog-version">v2.39</div>
+        <div class="changelog-content">
+          <h4>GitHub Migration, Plugin System, 36 Agents & Multi-Channel</h4>
+          <p>
+            <span class="changelog-tag tag-feat">feat</span><strong>GitHub migration</strong> &mdash; moved from GitLab to GitHub organization (<code>zeniclaw/core</code>, <code>zeniclaw/agents</code>, <code>zeniclaw/gateway</code>).<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Plugin system</strong> &mdash; 14 lifecycle events, <code>PluginInterface</code> with tools, hooks, and isolated execution.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>36 agents</strong> &mdash; added ContentCuratorAgent (reading challenges), InteractiveQuizAgent, BudgetTrackerAgent, AIAssistantAgent, and more.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Multi-channel</strong> &mdash; Telegram channel driver, Web Chat with WebSocket, channel abstraction layer.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Custom WhatsApp Gateway</strong> &mdash; replaced WAHA with lightweight Baileys-based gateway, media download with fallback, sticker support.<br>
+            <span class="changelog-tag tag-fix">fix</span>Media download in WhatsApp groups (proper <code>reuploadRequest</code> + <code>downloadContentFromMessage</code> fallback).
+          </p>
+        </div>
+      </div>
+      <div class="changelog-item">
         <div class="changelog-version">v2.27</div>
         <div class="changelog-content">
           <h4>Intent Classifier, Parallel Sub-Agents, Model Roles & API Agent v2</h4>
           <p>
-            <span class="changelog-tag tag-feat">feat</span><strong>Intent Classifier</strong> in BaseAgent &mdash; LLM-based intent classification with conversation history, available to all 23 agents.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>Intent Classifier</strong> in BaseAgent &mdash; LLM-based intent classification with conversation history, available to all 36 agents.<br>
             <span class="changelog-tag tag-feat">feat</span><strong>Configurable Model Roles</strong> &mdash; 3 roles (fast/balanced/powerful) configurable from Settings UI, replacing 50+ hardcoded model strings.<br>
             <span class="changelog-tag tag-feat">feat</span><strong>Parallel Sub-Agents</strong> &mdash; up to 10 concurrent sub-agents with throttle middleware, configurable from Settings (default: 3).<br>
             <span class="changelog-tag tag-feat">feat</span><strong>API Agent v2</strong> &mdash; web page fetching, self-healing JSON, auto-continuation for truncated responses, context-aware credential storage.<br>
@@ -585,9 +612,9 @@ footer {
         <div class="changelog-content">
           <h4>Agent Auto-Improvements, DocumentAgent & HangmanGameAgent</h4>
           <p>
-            <span class="changelog-tag tag-feat">feat</span><strong>23 agents</strong> &mdash; added <strong>DocumentAgent</strong> (PDF, Excel generation) and <strong>HangmanGameAgent</strong> (word games) to the roster.<br>
+            <span class="changelog-tag tag-feat">feat</span><strong>36 agents</strong> &mdash; added <strong>DocumentAgent</strong> (PDF, Excel generation) and <strong>HangmanGameAgent</strong> (word games) to the roster.<br>
             <span class="changelog-tag tag-feat">feat</span>Auto-improved <strong>MoodCheckAgent</strong>, <strong>ReminderAgent</strong>, <strong>SmartMeetingAgent</strong>, <strong>TodoAgent</strong> and <strong>WebSearchAgent</strong> with richer prompts and expanded capabilities.<br>
-            <span class="changelog-tag tag-feat">feat</span>Updated homepage with all 23 agents, refreshed SEO metadata and architecture diagram.
+            <span class="changelog-tag tag-feat">feat</span>Updated homepage with all 36 agents, refreshed SEO metadata and architecture diagram.
           </p>
         </div>
       </div>
@@ -669,7 +696,7 @@ footer {
         <div class="changelog-content">
           <h4>Full LLM Router & Smart DevAgent</h4>
           <p>
-            <span class="changelog-tag tag-feat">feat</span>DevAgent upgraded with GitLab integration and smart commands.<br>
+            <span class="changelog-tag tag-feat">feat</span>DevAgent upgraded with GitHub integration and smart commands.<br>
             <span class="changelog-tag tag-feat">feat</span>Manager heartbeat for instance monitoring.<br>
             <span class="changelog-tag tag-feat">feat</span>Integrated web chat panel on the dashboard.<br>
             <span class="changelog-tag tag-fix">fix</span>Supervisor auto-restart for queue workers, container build failure protection.
@@ -699,7 +726,7 @@ footer {
         <div class="step-content">
           <h3>Clone & Install</h3>
           <p>Clone the repository and run the interactive installer. It sets up all 5 containers automatically.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://gitlab.com/zenidev/zeniclaw.git /opt/zeniclaw<br>cd /opt/zeniclaw<br>bash install.sh</div>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw<br>bash install.sh</div>
         </div>
       </div>
       <div class="install-step">
@@ -738,7 +765,7 @@ footer {
       @else
         <a href="{{ route('login') }}" class="btn btn-primary">Sign In</a>
       @endauth
-      <a href="https://gitlab.com/zenidev/zeniclaw" class="btn btn-secondary" target="_blank">View on GitLab</a>
+      <a href="https://github.com/zeniclaw/core" class="btn btn-secondary" target="_blank">View on GitHub</a>
       <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" class="btn btn-whatsapp" target="_blank" rel="noopener">&#x1F4AC; Join Community</a>
     </div>
   </div>
@@ -747,7 +774,7 @@ footer {
 <footer>
   <div class="footer-inner">
     <ul class="footer-links">
-      <li><a href="https://gitlab.com/zenidev/zeniclaw" target="_blank">GitLab</a></li>
+      <li><a href="https://github.com/zeniclaw/core" target="_blank">GitHub</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#changelog">Changelog</a></li>
       <li><a href="#install">Install</a></li>

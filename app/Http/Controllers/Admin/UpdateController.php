@@ -11,36 +11,45 @@ use Illuminate\Support\Facades\Http;
 
 class UpdateController extends Controller
 {
-    private string $gitlabProject = 'zenidev%2Fzeniclaw';
+    private string $githubRepo = 'zeniclaw/core';
 
     public function index()
     {
         $currentVersion = trim(file_get_contents(storage_path('app/version.txt')) ?: '1.0.0');
-        $token = AppSetting::get('gitlab_access_token');
-        $headers = $token ? ['PRIVATE-TOKEN' => $token] : [];
+        $token = AppSetting::get('github_access_token');
+        $headers = $token ? ['Authorization' => "Bearer {$token}"] : [];
+        $headers['Accept'] = 'application/vnd.github.v3+json';
 
-        // Fetch latest tags
+        // Fetch latest tags (GitHub API)
         $latestVersion = $currentVersion;
         $tags = [];
         try {
-            $tagsResp = Http::timeout(8)->withHeaders($headers)->get("https://gitlab.com/api/v4/projects/{$this->gitlabProject}/repository/tags");
+            $tagsResp = Http::timeout(8)->withHeaders($headers)->get("https://api.github.com/repos/{$this->githubRepo}/tags", [
+                'per_page' => 10,
+            ]);
             if ($tagsResp->successful()) {
-                $tags = $tagsResp->json();
-                $latestVersion = $tags[0]['name'] ?? $currentVersion;
+                $rawTags = $tagsResp->json();
+                $tags = collect($rawTags)->map(fn($t) => ['name' => $t['name']])->toArray();
+                $latestVersion = $rawTags[0]['name'] ?? $currentVersion;
             }
         } catch (\Exception $e) {
-            // GitLab unreachable — continue with current
+            // GitHub unreachable — continue with current
         }
 
-        // Fetch last 5 commits
+        // Fetch last 5 commits (GitHub API)
         $commits = [];
         try {
-            $commitsResp = Http::timeout(8)->withHeaders($headers)->get("https://gitlab.com/api/v4/projects/{$this->gitlabProject}/repository/commits", [
-                'ref_name' => 'main',
+            $commitsResp = Http::timeout(8)->withHeaders($headers)->get("https://api.github.com/repos/{$this->githubRepo}/commits", [
+                'sha' => 'main',
                 'per_page' => 5,
             ]);
             if ($commitsResp->successful()) {
-                $commits = $commitsResp->json();
+                $commits = collect($commitsResp->json())->map(fn($c) => [
+                    'id' => $c['sha'],
+                    'title' => explode("\n", $c['commit']['message'])[0],
+                    'author_name' => $c['commit']['author']['name'] ?? 'unknown',
+                    'created_at' => $c['commit']['author']['date'] ?? now()->toIso8601String(),
+                ])->toArray();
             }
         } catch (\Exception $e) {
             // ignore

@@ -193,7 +193,7 @@ class ContinuousImproveCommand extends Command
 
         if (!is_dir($this->workdir)) {
             $this->info("Cloning repo to {$this->workdir}...");
-            $gitlabUrl = AppSetting::get('gitlab_url') ?: 'https://gitlab.com/zenidev/zeniclaw.git';
+            $gitlabUrl = AppSetting::get('gitlab_url') ?: 'https://github.com/zeniclaw/core.git';
             $result = Process::env($env)->timeout(120)->run(
                 sprintf('git clone %s %s 2>&1', escapeshellarg($gitlabUrl), escapeshellarg($this->workdir))
             );
@@ -224,7 +224,7 @@ class ContinuousImproveCommand extends Command
 
         $project = Project::create([
             'name' => 'ZeniClaw (Auto-Improve)',
-            'gitlab_url' => 'https://gitlab.com/zenidev/zeniclaw.git',
+            'gitlab_url' => 'https://github.com/zeniclaw/core.git',
             'request_description' => 'Projet auto-genere pour les ameliorations continues.',
             'requester_phone' => 'system',
             'requester_name' => 'Continuous Improve',

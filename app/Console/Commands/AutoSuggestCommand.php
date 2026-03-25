@@ -167,7 +167,7 @@ class AutoSuggestCommand extends Command
 
         $project = Project::create([
             'name' => 'ZeniClaw (Auto-Improve)',
-            'gitlab_url' => 'https://gitlab.com/zenidev/zeniclaw.git',
+            'gitlab_url' => 'https://github.com/zeniclaw/core.git',
             'request_description' => 'Projet auto-genere pour les auto-ameliorations de ZeniClaw.',
             'requester_phone' => 'system',
             'requester_name' => 'ZeniClaw Auto-Improve',

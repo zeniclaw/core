@@ -8,8 +8,8 @@ use Symfony\Component\Process\Process;
 
 class ZeniclawUpdate extends Command
 {
-    protected $signature = 'zeniclaw:update {--token= : GitLab access token (overrides DB setting)}';
-    protected $description = 'Pull latest code from GitLab, rebuild and restart the container';
+    protected $signature = 'zeniclaw:update {--token= : GitHub access token (overrides DB setting)}';
+    protected $description = 'Pull latest code from GitHub, rebuild and restart the container';
 
     public function handle(): int
     {
@@ -17,7 +17,7 @@ class ZeniclawUpdate extends Command
         $token = $this->option('token') ?? '';
         if (empty($token)) {
             try {
-                $token = \App\Models\AppSetting::get('gitlab_access_token') ?? '';
+                $token = \App\Models\AppSetting::get('github_access_token') ?? '';
             } catch (\Exception $e) {
                 $this->warn('⚠ Cannot read DB (running outside Docker?), trying without token...');
             }
@@ -36,7 +36,7 @@ class ZeniclawUpdate extends Command
 
     private function updateViaHelper(string $token, string $repoPath): int
     {
-        $this->info('▶ Pulling latest code from GitLab...');
+        $this->info('▶ Pulling latest code from GitHub...');
         $process = new Process(['sudo', '/usr/local/bin/zeniclaw-update', $token], $repoPath);
         $process->setTimeout(120);
         $process->run(fn($type, $buf) => $this->getOutput()->write($buf));
@@ -60,7 +60,7 @@ class ZeniclawUpdate extends Command
         $this->info('▶ Pulling latest code (host mode)...');
 
         $pullCmd = !empty($token)
-            ? ['git', '-c', "url.https://oauth2:{$token}@gitlab.com/.insteadOf=https://gitlab.com/", 'pull', 'origin', 'main']
+            ? ['git', '-c', "url.https://x-access-token:{$token}@github.com/.insteadOf=https://github.com/", 'pull', 'origin', 'main']
             : ['git', 'pull', 'origin', 'main'];
 
         $process = new Process($pullCmd, $repoPath);

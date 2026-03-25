@@ -1,6 +1,6 @@
 #!/bin/bash
 # Helper script run as root from the update command
-# Usage: /usr/local/bin/zeniclaw-update [gitlab-token]
+# Usage: /usr/local/bin/zeniclaw-update [github-token]
 # Supports both Podman and Docker runtimes.
 set -e
 
@@ -26,7 +26,7 @@ cd "$REPO"
 
 # Git pull
 if [ -n "$TOKEN" ]; then
-    git -c "url.https://oauth2:${TOKEN}@gitlab.com/.insteadOf=https://gitlab.com/" pull origin main
+    git -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=https://github.com/" pull origin main
 else
     git pull origin main
 fi

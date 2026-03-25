@@ -898,7 +898,7 @@ ask_proxy_early() {
 
 # --- Clone or Update Repository ----------------------------------------------
 
-REPO_URL="https://gitlab.com/zenidev/zeniclaw.git"
+REPO_URL="https://github.com/zeniclaw/core.git"
 INSTALL_DIR="${ZENICLAW_DIR:-/opt/zeniclaw}"
 BRANCH="${ZENICLAW_BRANCH:-main}"
 
