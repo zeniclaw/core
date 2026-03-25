@@ -162,6 +162,22 @@ class SettingsController extends Controller
         // Restart queue workers so they pick up the new model config
         \Illuminate\Support\Facades\Artisan::call('queue:restart');
 
+        // Auto-warmup on-prem models in background
+        $onpremUrl = AppSetting::get('onprem_api_url');
+        if ($onpremUrl) {
+            foreach (['fast', 'balanced', 'powerful'] as $role) {
+                $m = $request->input("model_role_{$role}");
+                if ($m && !str_starts_with($m, 'claude-') && !str_starts_with($m, 'gpt-')) {
+                    $cmd = sprintf(
+                        'nohup curl -s -X POST %s/api/generate -d %s > /dev/null 2>&1 &',
+                        escapeshellarg(rtrim($onpremUrl, '/')),
+                        escapeshellarg(json_encode(['model' => $m, 'prompt' => 'hi', 'keep_alive' => -1, 'stream' => false, 'options' => ['num_predict' => 1]]))
+                    );
+                    exec($cmd);
+                }
+            }
+        }
+
         return redirect()->route('settings.index')->with('success', 'Roles de modeles mis a jour. Workers redemarres.');
     }
 

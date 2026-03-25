@@ -10,7 +10,7 @@ ARG NO_PROXY="localhost,127.0.0.1,db,redis,waha,ollama,app"
 # System deps + Docker CLI (for self-update via docker.sock)
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
-    libxml2-dev nginx supervisor procps sudo cron \
+    libxml2-dev nginx supervisor procps sudo cron poppler-utils \
     && ARCH=$(uname -m) \
     && (curl -fsSL --retry 3 --retry-delay 5 -o /tmp/docker.tgz \
        https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz \

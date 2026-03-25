@@ -8,6 +8,7 @@ use App\Http\Controllers\AgentMemoryController;
 use App\Http\Controllers\AgentSessionController;
 use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\CustomAgentController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\DashboardController;
@@ -101,6 +102,21 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agents/{agent}/private-agent-access', [AgentController::class, 'updatePrivateAgentAccess'])->name('agents.private-agent-access');
     Route::post('/agents/{agent}/private-agent-secrets', [AgentController::class, 'updatePrivateAgentSecrets'])->name('agents.private-agent-secrets');
 
+    // Custom Agents (user-created AI agents with RAG training)
+    Route::get('/agents/{agent}/custom-agents', [CustomAgentController::class, 'index'])->name('custom-agents.index');
+    Route::get('/agents/{agent}/custom-agents/create', [CustomAgentController::class, 'create'])->name('custom-agents.create');
+    Route::post('/agents/{agent}/custom-agents', [CustomAgentController::class, 'store'])->name('custom-agents.store');
+    Route::get('/agents/{agent}/custom-agents/{customAgent}', [CustomAgentController::class, 'show'])->name('custom-agents.show');
+    Route::put('/agents/{agent}/custom-agents/{customAgent}', [CustomAgentController::class, 'update'])->name('custom-agents.update');
+    Route::delete('/agents/{agent}/custom-agents/{customAgent}', [CustomAgentController::class, 'destroy'])->name('custom-agents.destroy');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/toggle', [CustomAgentController::class, 'toggle'])->name('custom-agents.toggle');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/documents', [CustomAgentController::class, 'uploadDocument'])->name('custom-agents.documents.upload');
+    Route::delete('/agents/{agent}/custom-agents/{customAgent}/documents/{document}', [CustomAgentController::class, 'destroyDocument'])->name('custom-agents.documents.destroy');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/documents/{document}/reprocess', [CustomAgentController::class, 'reprocessDocument'])->name('custom-agents.documents.reprocess');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/update-tools', [CustomAgentController::class, 'updateTools'])->name('custom-agents.update-tools');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/update-access', [CustomAgentController::class, 'updateAccess'])->name('custom-agents.update-access');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/test-chat', [CustomAgentController::class, 'testChat'])->name('custom-agents.test-chat');
+
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');
     Route::get('/reminders/create', [ReminderController::class, 'create'])->name('reminders.create');
@@ -181,6 +197,11 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/api/ollama/pull', [OllamaController::class, 'pull'])->name('api.ollama.pull');
     Route::get('/api/ollama/pull-status', [OllamaController::class, 'pullStatus'])->name('api.ollama.pull-status');
     Route::post('/api/ollama/save-url', [OllamaController::class, 'saveUrl'])->name('api.ollama.save-url');
+    Route::get('/api/ollama/server-check', [OllamaController::class, 'serverCheck'])->name('api.ollama.server-check');
+    Route::get('/api/ollama/status', [OllamaController::class, 'status'])->name('api.ollama.status');
+    Route::post('/api/ollama/start', [OllamaController::class, 'start'])->name('api.ollama.start');
+    Route::post('/api/ollama/warmup', [OllamaController::class, 'warmup'])->name('api.ollama.warmup');
+    Route::get('/api/ollama/loaded', [OllamaController::class, 'loaded'])->name('api.ollama.loaded');
 
     // API Tokens
     Route::post('/settings/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');

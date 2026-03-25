@@ -17,62 +17,58 @@ use App\Models\AppSetting;
 class ModelResolver
 {
     private const DEFAULTS = [
-        'fast'     => 'claude-sonnet-4-6',
+        'fast'     => 'claude-haiku-4-5-20251001',
         'balanced' => 'claude-sonnet-4-6',
         'powerful' => 'claude-opus-4-6',
     ];
 
-    public const AVAILABLE_MODELS = [
-        // Cloud (Anthropic)
-        'claude-haiku-4-5-20251001'  => 'Claude Haiku 4.5 (rapide, economique)',
-        'claude-sonnet-4-6'         => 'Claude Sonnet 4.6 (equilibre, rapide)',
-        'claude-sonnet-4-20250514'   => 'Claude Sonnet 4 (ancien)',
-        'claude-opus-4-6'           => 'Claude Opus 4.6 (puissant)',
-        'claude-opus-4-20250514'     => 'Claude Opus 4 (ancien)',
-        // On-prem (Ollama/vLLM) — ultra-light
-        'qwen2.5:0.5b'              => 'Qwen 2.5 0.5B (on-prem, ultra-rapide, ~0.4 Go)',
-        'qwen2.5:1.5b'              => 'Qwen 2.5 1.5B (on-prem, rapide, ~1 Go)',
-        'gemma2:2b'                 => 'Gemma 2 2B (on-prem, Google, ~1.6 Go)',
-        // On-prem — standard
-        'qwen2.5:3b'                => 'Qwen 2.5 3B (on-prem, leger, ~2 Go)',
-        'phi3:mini'                 => 'Phi-3 Mini 3.8B (on-prem, Microsoft, ~2.3 Go)',
-        'llama3.2:3b'               => 'Llama 3.2 3B (on-prem, Meta, ~2 Go)',
-        'qwen2.5:7b'                => 'Qwen 2.5 7B (on-prem, intelligent, ~4.7 Go)',
-        'qwen2.5-coder:7b'          => 'Qwen 2.5 Coder 7B (on-prem, code, ~4.7 Go)',
-        'qwen2.5:14b'               => 'Qwen 2.5 14B (on-prem, puissant, ~9 Go)',
-        'deepseek-coder-v2:16b'     => 'DeepSeek Coder V2 16B (on-prem, code, ~9 Go)',
+    /** Cloud models — only current versions */
+    public const CLOUD_MODELS = [
+        'claude-haiku-4-5-20251001'  => 'Claude Haiku 4.5',
+        'claude-sonnet-4-6'         => 'Claude Sonnet 4.6',
+        'claude-opus-4-6'           => 'Claude Opus 4.6',
     ];
+
+    /** On-prem model labels (used when installed via Ollama) */
+    public const ONPREM_LABELS = [
+        'qwen2.5:0.5b'              => 'Qwen 2.5 0.5B (ultra-rapide)',
+        'qwen2.5:1.5b'              => 'Qwen 2.5 1.5B (rapide)',
+        'gemma2:2b'                 => 'Gemma 2 2B (Google)',
+        'qwen2.5:3b'                => 'Qwen 2.5 3B (leger)',
+        'phi3:mini'                 => 'Phi-3 Mini 3.8B (Microsoft)',
+        'llama3.2:3b'               => 'Llama 3.2 3B (Meta)',
+        'qwen2.5:7b'                => 'Qwen 2.5 7B (intelligent)',
+        'qwen2.5-coder:7b'          => 'Qwen 2.5 Coder 7B (code)',
+        'qwen2.5:14b'               => 'Qwen 2.5 14B (puissant)',
+        'deepseek-coder-v2:16b'     => 'DeepSeek Coder V2 16B (code)',
+        'mistral:7b'                => 'Mistral 7B (francais)',
+        'llama3.1:8b'               => 'Llama 3.1 8B (Meta)',
+        'mixtral:8x7b'              => 'Mixtral 8x7B (MoE)',
+    ];
+
+    /** @deprecated Use CLOUD_MODELS + ONPREM_LABELS instead */
+    public const AVAILABLE_MODELS = self::CLOUD_MODELS;
 
     private static ?array $cache = null;
     private static ?array $ollamaModelsCache = null;
 
     /**
-     * Fetch models from Ollama API and merge with static list.
+     * Return only available models: cloud + installed on-prem.
      */
     public static function allModels(): array
     {
         $ollamaModels = self::getOllamaModels();
         $models = [];
 
-        // Cloud models — always shown
-        foreach (self::AVAILABLE_MODELS as $key => $label) {
-            if (str_starts_with($key, 'claude-')) {
-                $models[$key] = $label;
-            } else {
-                // On-prem static model — mark as installed or not
-                if (in_array($key, $ollamaModels)) {
-                    $models[$key] = $label;
-                } else {
-                    $models[$key] = $label . ' (non installe)';
-                }
-            }
+        // Cloud models — always available
+        foreach (self::CLOUD_MODELS as $key => $label) {
+            $models[$key] = $label;
         }
 
-        // Add Ollama models not in static list (manually imported)
+        // On-prem — only installed models
         foreach ($ollamaModels as $name) {
-            if (!isset($models[$name])) {
-                $models[$name] = "{$name} (on-prem, importe)";
-            }
+            $label = self::ONPREM_LABELS[$name] ?? $name;
+            $models[$name] = $label . ' [on-prem]';
         }
 
         return $models;

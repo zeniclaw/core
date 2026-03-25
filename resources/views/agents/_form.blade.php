@@ -30,7 +30,7 @@ $models = \App\Services\ModelResolver::allModels();
             <label class="block text-sm font-medium text-gray-700 mb-1">Model <span class="text-red-500">*</span></label>
             <select name="model" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
                 @foreach($models as $value => $label)
-                    <option value="{{ $value }}" {{ old('model', $agent->model ?? 'claude-sonnet-4-5') === $value ? 'selected' : '' }}>
+                    <option value="{{ $value }}" {{ old('model', $agent->model ?? 'claude-sonnet-4-6') === $value ? 'selected' : '' }}>
                         {{ $label }}
                     </option>
                 @endforeach

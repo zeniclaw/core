@@ -133,6 +133,10 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
 
     protected function log(AgentContext $context, string $message, array $extra = [], string $level = 'info'): void
     {
+        if (empty($context->agent?->id)) {
+            \Illuminate\Support\Facades\Log::warning("[{$this->name()}] log skipped: agent_id manquant — {$message}", ['from' => $context->from]);
+            return;
+        }
         AgentLog::create([
             'agent_id' => $context->agent->id,
             'level' => $level,

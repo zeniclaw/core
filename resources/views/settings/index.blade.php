@@ -266,187 +266,453 @@ NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
                 </div>
                 @endif
 
-                {{-- Model download manager --}}
-                @php
-                    $ollamaModels = [
-                        // Ultra-light (petites machines)
-                        ['id' => 'qwen2.5:0.5b',      'name' => 'Qwen 2.5 0.5B (ultra-rapide)', 'size' => '~0.4 Go', 'specs' => '1 Go RAM, 1 CPU'],
-                        ['id' => 'qwen2.5:1.5b',      'name' => 'Qwen 2.5 1.5B (rapide)',    'size' => '~1 Go',  'specs' => '2 Go RAM, 1 CPU'],
-                        ['id' => 'gemma2:2b',         'name' => 'Gemma 2 2B (Google)',       'size' => '~1.6 Go', 'specs' => '4 Go RAM, 2 CPU'],
-                        // Standard
-                        ['id' => 'qwen2.5:3b',        'name' => 'Qwen 2.5 3B (leger)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
-                        ['id' => 'phi3:mini',         'name' => 'Phi-3 Mini 3.8B (Microsoft)', 'size' => '~2.3 Go', 'specs' => '4 Go RAM, 2 CPU'],
-                        ['id' => 'llama3.2:3b',       'name' => 'Llama 3.2 3B (Meta)',      'size' => '~2 Go',  'specs' => '4 Go RAM, 2 CPU'],
-                        ['id' => 'qwen2.5:7b',        'name' => 'Qwen 2.5 7B (intelligent)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
-                        ['id' => 'qwen2.5-coder:7b',  'name' => 'Qwen 2.5 Coder 7B (code)', 'size' => '~4.7 Go', 'specs' => '8 Go RAM, 4 CPU'],
-                        ['id' => 'qwen2.5:14b',       'name' => 'Qwen 2.5 14B (puissant)',  'size' => '~9 Go',  'specs' => '16 Go RAM, 4 CPU'],
-                        ['id' => 'deepseek-coder-v2:16b', 'name' => 'DeepSeek Coder V2 (code)', 'size' => '~9 Go', 'specs' => '16 Go RAM, 4 CPU'],
-                    ];
-                @endphp
-                <div class="mt-3 space-y-2">
-                    <p class="text-xs font-medium text-gray-600 mb-1">Modeles disponibles</p>
-
-                    @foreach($ollamaModels as $m)
-                    <div class="flex items-center gap-3 p-2 bg-white border border-gray-200 rounded-lg" id="ollama-model-{{ str_replace(['.', ':'], '-', $m['id']) }}">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-gray-900">{{ $m['name'] }}</p>
-                            <p class="text-xs text-gray-500">{{ $m['id'] }} — {{ $m['size'] }} <span class="text-gray-400">| Min: {{ $m['specs'] }}</span></p>
+                {{-- Ollama Service Status --}}
+                <div class="mt-4" x-data="ollamaStatusApp()" x-init="check()">
+                    <div class="flex items-center gap-3 p-3 bg-white border rounded-lg" :class="status === 'running' ? 'border-green-200' : status === 'exited' ? 'border-red-200' : 'border-gray-200'">
+                        <div class="flex-shrink-0">
+                            <span x-show="checking" class="inline-block w-3 h-3 rounded-full bg-gray-300 animate-pulse"></span>
+                            <span x-show="!checking && status === 'running'" class="inline-block w-3 h-3 rounded-full bg-green-500"></span>
+                            <span x-show="!checking && status === 'exited'" class="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+                            <span x-show="!checking && !status" class="inline-block w-3 h-3 rounded-full bg-gray-400"></span>
                         </div>
-                        <div class="ollama-status">
-                            <button type="button" onclick="ollamaPull('{{ $m['id'] }}', this)"
-                                    class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
-                                Telecharger
-                            </button>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-900">
+                                Service Ollama
+                                <span x-show="version" class="text-xs font-mono text-gray-400 ml-1" x-text="'v' + version"></span>
+                            </p>
+                            <p class="text-xs" :class="status === 'running' ? 'text-green-600' : status === 'exited' ? 'text-red-600' : 'text-gray-500'"
+                               x-text="status === 'running' ? 'En ligne — ' + url : status === 'exited' ? 'Arrete' : status === null ? 'Container non trouve (ollama non installe ?)' : 'Verification...'"></p>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <template x-if="!checking && status !== 'running'">
+                                <button type="button" @@click="startOllama()" :disabled="starting"
+                                        class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                                    <template x-if="starting">
+                                        <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                    </template>
+                                    <span x-text="starting ? 'Demarrage...' : 'Demarrer Ollama'"></span>
+                                </button>
+                            </template>
+                            <template x-if="!checking && status === 'running'">
+                                <button type="button" @@click="check()" class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200" title="Rafraichir">&#8635;</button>
+                            </template>
                         </div>
                     </div>
-                    @endforeach
+                    <template x-if="error">
+                        <p class="text-xs text-red-600 mt-1" x-text="error"></p>
+                    </template>
+                </div>
+                <script>
+                function ollamaStatusApp() {
+                    return {
+                        checking: true, starting: false, status: null, version: null, url: '', error: null,
+                        async check() {
+                            this.checking = true; this.error = null;
+                            try {
+                                var res = await fetch('{{ route("api.ollama.status") }}');
+                                var data = await res.json();
+                                this.status = data.running ? 'running' : (data.container_status || null);
+                                this.version = data.version;
+                                this.url = data.url;
+                            } catch(e) { this.status = null; }
+                            this.checking = false;
+                        },
+                        async startOllama() {
+                            this.starting = true; this.error = null;
+                            try {
+                                var res = await fetch('{{ route("api.ollama.start") }}', {
+                                    method: 'POST',
+                                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Content-Type': 'application/json' },
+                                });
+                                var data = await res.json();
+                                if (!res.ok) { this.error = data.error || 'Erreur'; this.starting = false; return; }
+                                // Wait for it to be healthy
+                                await new Promise(r => setTimeout(r, 3000));
+                                await this.check();
+                            } catch(e) { this.error = e.message; }
+                            this.starting = false;
+                        },
+                    };
+                }
+                </script>
+
+                {{-- Loaded Models in Memory --}}
+                <div class="mt-4" x-data="ollamaLoadedApp()" x-init="refresh()">
+                    <div class="bg-white border border-gray-200 rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                                <span class="text-base">🧠</span> Modeles charges en memoire
+                            </h4>
+                            <button type="button" @@click="refresh()" class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100">&#8635; Rafraichir</button>
+                        </div>
+                        <template x-if="loaded.length === 0 && !loading">
+                            <p class="text-xs text-gray-400 py-2">Aucun modele charge — le premier appel sera plus lent (~10-30s).</p>
+                        </template>
+                        <template x-if="loading">
+                            <p class="text-xs text-gray-400 py-2">Chargement...</p>
+                        </template>
+                        <div class="space-y-2">
+                            <template x-for="m in loaded" :key="m.name">
+                                <div class="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded-lg">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                        <span class="text-sm font-medium text-gray-900" x-text="m.name"></span>
+                                        <span class="text-[10px] text-gray-500" x-text="formatSize(m.size)"></span>
+                                    </div>
+                                    <span class="text-[10px] text-green-600 font-medium">En memoire</span>
+                                </div>
+                            </template>
+                        </div>
+                        {{-- Warmup button --}}
+                        <template x-if="!loading">
+                            <div class="mt-3 flex items-center gap-2" x-data="{ warmModel: '', warming: false }">
+                                <select x-model="warmModel" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                    <option value="">Charger un modele...</option>
+                                    @foreach(\App\Services\ModelResolver::allModels() as $mId => $mLabel)
+                                        @if(!str_starts_with($mId, 'claude-') && !str_starts_with($mId, 'gpt-'))
+                                        <option value="{{ $mId }}">{{ $mLabel }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <button type="button" @@click="if(warmModel){warming=true;warmup(warmModel).then(()=>{warming=false;refresh()})}"
+                                        :disabled="!warmModel || warming"
+                                        class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-1">
+                                    <template x-if="warming">
+                                        <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                    </template>
+                                    <span x-text="warming ? 'Chargement...' : 'Charger en memoire'"></span>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <script>
+                function ollamaLoadedApp() {
+                    return {
+                        loaded: [], loading: false,
+                        async refresh() {
+                            this.loading = true;
+                            try {
+                                var res = await fetch('{{ route("api.ollama.loaded") }}');
+                                var data = await res.json();
+                                this.loaded = data.models || [];
+                            } catch(e) { this.loaded = []; }
+                            this.loading = false;
+                        },
+                        async warmup(model) {
+                            try {
+                                await fetch('{{ route("api.ollama.warmup") }}', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                                    body: JSON.stringify({ model: model }),
+                                });
+                            } catch(e) {}
+                        },
+                        formatSize(bytes) {
+                            if (!bytes) return '';
+                            var gb = bytes / 1024 / 1024 / 1024;
+                            return gb >= 1 ? gb.toFixed(1) + ' Go' : (bytes / 1024 / 1024).toFixed(0) + ' Mo';
+                        },
+                    };
+                }
+                </script>
+
+                {{-- Server Check + Dynamic Model Catalog --}}
+                <div class="mt-4" id="server-check-container" x-data="serverCheckApp()">
+                    <button type="button" @@click="runCheck()" :disabled="loading"
+                            class="w-full px-4 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                        <span x-show="!loading">Analyser le serveur & modeles compatibles</span>
+                        <span x-show="loading" class="flex items-center gap-2">
+                            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            Analyse en cours...
+                        </span>
+                    </button>
+
+                    <template x-if="checked">
+                    <div class="mt-4 space-y-4">
+                        {{-- Hardware summary --}}
+                        <div class="bg-white border border-gray-200 rounded-xl p-4">
+                            <h4 class="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                <span class="text-lg">🖥️</span> Configuration serveur
+                            </h4>
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {{-- CPU --}}
+                                <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                    <p class="text-2xl font-bold text-indigo-600" x-text="server.cpu_cores"></p>
+                                    <p class="text-[10px] text-gray-500 mt-0.5">vCPU</p>
+                                    <p class="text-[10px] text-gray-400 truncate" x-text="server.cpu_model" :title="server.cpu_model"></p>
+                                </div>
+                                {{-- RAM --}}
+                                <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                    <p class="text-2xl font-bold" :class="server.ram_percent > 85 ? 'text-red-600' : server.ram_percent > 60 ? 'text-amber-600' : 'text-green-600'" x-text="server.ram_total_gb + ' Go'"></p>
+                                    <p class="text-[10px] text-gray-500 mt-0.5">RAM totale</p>
+                                    <div class="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                                        <div class="h-1.5 rounded-full transition-all" :class="server.ram_percent > 85 ? 'bg-red-500' : server.ram_percent > 60 ? 'bg-amber-500' : 'bg-green-500'" :style="'width:' + server.ram_percent + '%'"></div>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400 mt-0.5" x-text="server.ram_available_gb + ' Go dispo'"></p>
+                                </div>
+                                {{-- Disk --}}
+                                <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                    <p class="text-2xl font-bold" :class="server.disk_percent > 85 ? 'text-red-600' : server.disk_percent > 70 ? 'text-amber-600' : 'text-green-600'" x-text="server.disk_free_gb + ' Go'"></p>
+                                    <p class="text-[10px] text-gray-500 mt-0.5">Espace libre</p>
+                                    <div class="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                                        <div class="h-1.5 rounded-full transition-all" :class="server.disk_percent > 85 ? 'bg-red-500' : server.disk_percent > 70 ? 'bg-amber-500' : 'bg-green-500'" :style="'width:' + server.disk_percent + '%'"></div>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400 mt-0.5" x-text="server.disk_total_gb + ' Go total'"></p>
+                                </div>
+                                {{-- GPU --}}
+                                <div class="text-center p-3 bg-gray-50 rounded-lg">
+                                    <template x-if="server.gpu">
+                                        <div>
+                                            <p class="text-lg font-bold text-green-600" x-text="server.gpu_vram_mb ? (server.gpu_vram_mb / 1024).toFixed(0) + ' Go' : 'Oui'"></p>
+                                            <p class="text-[10px] text-gray-500 mt-0.5">GPU VRAM</p>
+                                            <p class="text-[10px] text-gray-400 truncate" x-text="server.gpu"></p>
+                                        </div>
+                                    </template>
+                                    <template x-if="!server.gpu">
+                                        <div>
+                                            <p class="text-2xl font-bold text-gray-400">—</p>
+                                            <p class="text-[10px] text-gray-500 mt-0.5">GPU</p>
+                                            <p class="text-[10px] text-gray-400">Non detecte</p>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            {{-- Load --}}
+                            <div class="flex items-center gap-4 mt-3 text-xs text-gray-500">
+                                <span>Charge CPU: <span class="font-mono" x-text="server.load_avg ? server.load_avg.join(' / ') : '—'"></span></span>
+                                <span>Ollama: <span :class="server.ollama_connected ? 'text-green-600 font-medium' : 'text-red-500'" x-text="server.ollama_connected ? 'Connecte' : 'Non connecte'"></span></span>
+                            </div>
+                        </div>
+
+                        {{-- Filter tabs --}}
+                        <div class="flex gap-2">
+                            <button type="button" @@click="filter = 'recommended'" :class="filter === 'recommended' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                                Recommandes <span class="ml-1 opacity-70" x-text="'(' + models.filter(m => m.status === \'ok\').length + ')'"></span>
+                            </button>
+                            <button type="button" @@click="filter = 'onprem'" :class="filter === 'onprem' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                                On-Prem <span class="ml-1 opacity-70" x-text="'(' + models.filter(m => m.type === \'onprem\').length + ')'"></span>
+                            </button>
+                            <button type="button" @@click="filter = 'cloud'" :class="filter === 'cloud' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                                Cloud <span class="ml-1 opacity-70" x-text="'(' + models.filter(m => m.type === \'cloud\').length + ')'"></span>
+                            </button>
+                            <button type="button" @@click="filter = 'all'" :class="filter === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                                Tous
+                            </button>
+                        </div>
+
+                        {{-- Model list --}}
+                        <div class="space-y-2">
+                            <template x-for="m in filteredModels()" :key="m.id">
+                            <div class="flex items-center gap-3 p-3 bg-white border rounded-lg transition-colors"
+                                 :class="m.status === 'impossible' ? 'border-red-200 opacity-60' : m.status === 'warning' ? 'border-amber-200' : 'border-gray-200'"
+                                 :id="'ollama-model-' + m.id.replace(/[.:]/g, '-')">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <p class="text-sm font-medium text-gray-900" x-text="m.name"></p>
+                                        {{-- Type badge --}}
+                                        <span class="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                                              :class="m.type === 'cloud' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'"
+                                              x-text="m.type === 'cloud' ? m.provider : 'On-Prem'"></span>
+                                        {{-- Compatibility badge --}}
+                                        <span class="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                                              :class="m.status === 'ok' ? 'bg-green-100 text-green-700' : m.status === 'warning' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'"
+                                              x-text="m.status === 'ok' ? 'Compatible' : m.status === 'warning' ? 'Limite' : 'Impossible'"></span>
+                                        {{-- Installed badge --}}
+                                        <template x-if="isInstalled(m.id)">
+                                            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-green-100 text-green-700">Installe</span>
+                                        </template>
+                                        {{-- Speed --}}
+                                        <span class="text-[9px] text-gray-400" x-text="m.speed"></span>
+                                    </div>
+                                    <div class="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
+                                        <span class="font-mono" x-text="m.id"></span>
+                                        <template x-if="m.type === 'onprem'">
+                                            <span x-text="'~' + m.disk_gb + ' Go | ' + m.ram_gb + ' Go RAM | ' + m.min_cpu + ' CPU'"></span>
+                                        </template>
+                                    </div>
+                                    <template x-if="m.warnings && m.warnings.length > 0">
+                                        <div class="mt-1 space-y-0.5">
+                                            <template x-for="w in m.warnings">
+                                                <p class="text-[10px]" :class="m.status === 'impossible' ? 'text-red-500' : 'text-amber-600'" x-text="w"></p>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    {{-- Tags --}}
+                                    <div class="flex gap-1 mt-1.5">
+                                        <template x-for="t in m.tags">
+                                            <span class="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[9px]" x-text="t"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                                {{-- Action --}}
+                                <div class="ollama-status flex-shrink-0">
+                                    <template x-if="m.type === 'onprem' && m.compatible && !isInstalled(m.id)">
+                                        <button type="button" @@click="pullModel(m.id)"
+                                                class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                                            Telecharger
+                                        </button>
+                                    </template>
+                                    <template x-if="m.type === 'onprem' && isInstalled(m.id)">
+                                        <button type="button" @@click="pullModel(m.id, true)"
+                                                class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200" title="Retelecharger">
+                                            &#8635;
+                                        </button>
+                                    </template>
+                                    <template x-if="m.type === 'onprem' && !m.compatible">
+                                        <span class="text-[10px] text-red-400">Serveur trop petit</span>
+                                    </template>
+                                    <template x-if="m.type === 'cloud'">
+                                        <span class="px-2 py-1 bg-blue-50 text-blue-600 rounded text-[10px]">API</span>
+                                    </template>
+                                </div>
+                            </div>
+                            </template>
+                        </div>
+                    </div>
+                    </template>
 
                     <p id="ollama-connection-error" class="text-xs text-red-600 mt-1 hidden"></p>
                 </div>
 
                 <script>
-                var OLLAMA_MODELS = @json(array_column($ollamaModels, 'id'));
+                function serverCheckApp() {
+                    return {
+                        loading: false,
+                        checked: false,
+                        server: {},
+                        models: [],
+                        installed: [],
+                        filter: 'recommended',
+                        pollers: {},
 
-                // Check installed models on page load, then check pull status (errors override "installed")
-                document.addEventListener('DOMContentLoaded', async function() {
-                    await ollamaCheckInstalled();
-                    OLLAMA_MODELS.forEach(function(m) { ollamaCheckPulling(m); });
-                });
+                        async runCheck() {
+                            this.loading = true;
+                            try {
+                                // Auto-save URL first
+                                var urlInput = document.querySelector('input[name="onprem_api_url"]');
+                                var urlVal = urlInput ? urlInput.value.trim() : '';
+                                if (urlVal) {
+                                    await fetch('{{ route("api.ollama.save-url") }}', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                                        body: JSON.stringify({ url: urlVal }),
+                                    });
+                                }
+                                var res = await fetch('{{ route("api.ollama.server-check") }}');
+                                var data = await res.json();
+                                this.server = data.server;
+                                this.models = data.models;
+                                this.installed = data.installed || [];
+                                this.checked = true;
 
-                function ollamaGetStatusEl(model) {
-                    var slug = model.replace(/[.:]/g, '-');
-                    var el = document.getElementById('ollama-model-' + slug);
-                    return el ? el.querySelector('.ollama-status') : null;
-                }
-
-                function ollamaSetInstalled(model) {
-                    var el = ollamaGetStatusEl(model);
-                    if (!el) return;
-                    el.innerHTML = '<div class="flex items-center gap-2">' +
-                        '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium whitespace-nowrap">Installe</span>' +
-                        '<button type="button" onclick="ollamaForceRepull(\'' + model + '\', this)" ' +
-                        'class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200" title="Retelecharger">↻</button></div>';
-                }
-
-                function ollamaSetProgress(model, percent, detail) {
-                    var el = ollamaGetStatusEl(model);
-                    if (!el) return;
-                    el.innerHTML = '<div class="w-40">' +
-                        '<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">' +
-                        '<span>' + (detail || 'Telechargement...') + '</span>' +
-                        '<span>' + percent + '%</span></div>' +
-                        '<div class="w-full bg-gray-200 rounded-full h-2">' +
-                        '<div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" style="width:' + percent + '%"></div>' +
-                        '</div></div>';
-                }
-
-                function ollamaSetError(model, detail) {
-                    var el = ollamaGetStatusEl(model);
-                    if (!el) return;
-                    el.innerHTML = '<div class="flex items-center gap-2">' +
-                        '<span class="text-xs text-red-600">' + detail + '</span>' +
-                        '<button type="button" onclick="ollamaPull(\'' + model + '\', this)" ' +
-                        'class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200">Reessayer</button></div>';
-                }
-
-                async function ollamaCheckInstalled() {
-                    try {
-                        var res = await fetch('{{ route("api.ollama.models") }}');
-                        if (!res.ok) return;
-                        var data = await res.json();
-                        var installed = (data.models || []).map(function(m) { return m.name; });
-                        OLLAMA_MODELS.forEach(function(model) {
-                            var base = model.split(':')[0];
-                            var tag = model.split(':')[1] || 'latest';
-                            if (installed.some(function(i) { return i === model || i === model + ':latest' || (i.startsWith(base + ':') && i.includes(tag)); })) {
-                                ollamaSetInstalled(model);
+                                // Check pull status for all on-prem models
+                                for (var m of this.models.filter(x => x.type === 'onprem')) {
+                                    this.checkPulling(m.id);
+                                }
+                            } catch (e) {
+                                alert('Erreur lors de l\'analyse: ' + e.message);
                             }
-                        });
-                    } catch (e) {
-                        // Ollama not reachable — buttons stay as-is
-                    }
-                }
+                            this.loading = false;
+                        },
 
-                async function ollamaCheckPulling(model) {
-                    try {
-                        var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
-                        if (!res.ok) return;
-                        var data = await res.json();
-                        if (data.status === 'pulling') {
-                            ollamaSetProgress(model, data.percent || 0, data.detail || '');
-                            ollamaStartPolling(model);
-                        } else if (data.status === 'done') {
-                            ollamaSetInstalled(model);
-                        } else if (data.status === 'error') {
-                            ollamaSetError(model, data.detail || 'Erreur');
-                        }
-                    } catch (e) {}
-                }
+                        filteredModels() {
+                            if (this.filter === 'recommended') return this.models.filter(m => m.status === 'ok');
+                            if (this.filter === 'onprem') return this.models.filter(m => m.type === 'onprem');
+                            if (this.filter === 'cloud') return this.models.filter(m => m.type === 'cloud');
+                            return this.models;
+                        },
 
-                async function ollamaForceRepull(model, btn) {
-                    // Clear cached pull status so it doesn't show as "already pulling"
-                    try {
-                        await fetch('{{ route("api.ollama.pull") }}', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                            body: JSON.stringify({ model: model, force: true }),
-                        });
-                    } catch(e) {}
-                    ollamaSetProgress(model, 0, 'Retelecharging...');
-                    ollamaStartPolling(model);
-                }
+                        isInstalled(modelId) {
+                            var base = modelId.split(':')[0];
+                            var tag = modelId.split(':')[1] || 'latest';
+                            return this.installed.some(i => i === modelId || i === modelId + ':latest' || (i.startsWith(base + ':') && i.includes(tag)));
+                        },
 
-                async function ollamaPull(model, btn) {
-                    // Auto-save URL if not configured yet
-                    var urlInput = document.querySelector('input[name="onprem_api_url"]');
-                    var urlVal = urlInput ? urlInput.value.trim() : '';
-                    if (urlVal) {
-                        await fetch('{{ route("api.ollama.save-url") }}', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                            body: JSON.stringify({ url: urlVal }),
-                        });
-                    }
-
-                    ollamaSetProgress(model, 0, 'Demarrage...');
-                    try {
-                        var res = await fetch('{{ route("api.ollama.pull") }}', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                            body: JSON.stringify({ model: model }),
-                        });
-                        if (!res.ok) {
-                            var err = await res.json();
-                            ollamaSetError(model, err.error || 'Erreur');
-                            return;
-                        }
-                        ollamaStartPolling(model);
-                    } catch (e) {
-                        ollamaSetError(model, 'Erreur reseau');
-                    }
-                }
-
-                var ollamaPollers = {};
-                function ollamaStartPolling(model) {
-                    if (ollamaPollers[model]) return;
-                    ollamaPollers[model] = setInterval(async function() {
-                        try {
-                            var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
-                            if (!res.ok) return;
-                            var data = await res.json();
-                            if (data.status === 'done') {
-                                ollamaSetInstalled(model);
-                                clearInterval(ollamaPollers[model]);
-                                delete ollamaPollers[model];
-                            } else if (data.status === 'error') {
-                                ollamaSetError(model, data.detail || 'Erreur');
-                                clearInterval(ollamaPollers[model]);
-                                delete ollamaPollers[model];
-                            } else {
-                                ollamaSetProgress(model, data.percent || 0, data.detail || '');
+                        async pullModel(model, force) {
+                            this.setProgress(model, 0, 'Demarrage...');
+                            try {
+                                var res = await fetch('{{ route("api.ollama.pull") }}', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                                    body: JSON.stringify({ model: model, force: !!force }),
+                                });
+                                if (!res.ok) {
+                                    var err = await res.json();
+                                    this.setError(model, err.error || 'Erreur');
+                                    return;
+                                }
+                                this.startPolling(model);
+                            } catch (e) {
+                                this.setError(model, 'Erreur reseau');
                             }
-                        } catch (e) {}
-                    }, 2000);
+                        },
+
+                        async checkPulling(model) {
+                            try {
+                                var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
+                                if (!res.ok) return;
+                                var data = await res.json();
+                                if (data.status === 'pulling') {
+                                    this.setProgress(model, data.percent || 0, data.detail || '');
+                                    this.startPolling(model);
+                                } else if (data.status === 'error') {
+                                    this.setError(model, data.detail || 'Erreur');
+                                }
+                            } catch(e) {}
+                        },
+
+                        setProgress(model, percent, detail) {
+                            var el = this.getStatusEl(model);
+                            if (!el) return;
+                            el.innerHTML = '<div class="w-36"><div class="flex items-center justify-between text-xs text-gray-600 mb-0.5"><span>' +
+                                (detail||'Telechargement...') + '</span><span>' + percent + '%</span></div>' +
+                                '<div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-indigo-600 h-2 rounded-full transition-all" style="width:' + percent + '%"></div></div></div>';
+                        },
+
+                        setError(model, detail) {
+                            var self = this;
+                            var el = this.getStatusEl(model);
+                            if (!el) return;
+                            var retryId = 'retry-' + model.replace(/[.:]/g, '-');
+                            el.innerHTML = '<div class="flex items-center gap-2">' +
+                                '<span class="text-xs text-red-600">' + detail + '</span>' +
+                                '<button type="button" id="' + retryId + '" class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200">Reessayer</button></div>';
+                            document.getElementById(retryId).addEventListener('click', function() { self.pullModel(model, true); });
+                        },
+
+                        getStatusEl(model) {
+                            var slug = model.replace(/[.:]/g, '-');
+                            var el = document.getElementById('ollama-model-' + slug);
+                            return el ? el.querySelector('.ollama-status') : null;
+                        },
+
+                        startPolling(model) {
+                            var self = this;
+                            if (self.pollers[model]) return;
+                            self.pollers[model] = setInterval(async function() {
+                                try {
+                                    var res = await fetch('{{ route("api.ollama.pull-status") }}?model=' + encodeURIComponent(model));
+                                    if (!res.ok) return;
+                                    var data = await res.json();
+                                    if (data.status === 'done') {
+                                        if (!self.installed.includes(model)) self.installed.push(model);
+                                        // Reset the status element to let Alpine re-render
+                                        var el = self.getStatusEl(model);
+                                        if (el) el.innerHTML = '';
+                                        clearInterval(self.pollers[model]);
+                                        delete self.pollers[model];
+                                    } else if (data.status === 'error') {
+                                        self.setError(model, data.detail || 'Erreur');
+                                        clearInterval(self.pollers[model]);
+                                        delete self.pollers[model];
+                                    } else {
+                                        self.setProgress(model, data.percent || 0, data.detail || '');
+                                    }
+                                } catch(e) {}
+                            }, 2000);
+                        },
+                    };
                 }
                 </script>
             </div>
@@ -496,6 +762,41 @@ NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 class="font-semibold text-gray-900 mb-1">🎯 Roles de modeles</h2>
         <p class="text-sm text-gray-500 mb-5">Configurez quel modele utiliser pour chaque type de tache. Tous les agents utilisent ces roles automatiquement.</p>
+
+        {{-- Presets --}}
+        @php
+            $onpremInstalled = collect($availableModels)->filter(fn($l, $k) => !str_starts_with($k, 'claude-') && !str_starts_with($k, 'gpt-'))->keys();
+            $bestOnprem = $onpremInstalled->first(fn($m) => str_contains($m, '7b'))
+                       ?? $onpremInstalled->first(fn($m) => str_contains($m, '3b'))
+                       ?? $onpremInstalled->first();
+            $lightOnprem = $onpremInstalled->first(fn($m) => str_contains($m, '1.5b') || str_contains($m, '0.5b'))
+                        ?? $onpremInstalled->first(fn($m) => str_contains($m, '2b') || str_contains($m, '3b'))
+                        ?? $bestOnprem;
+        @endphp
+        <div class="flex flex-wrap gap-2 mb-4" x-data>
+            <span class="text-xs text-gray-500 self-center mr-1">Presets :</span>
+            <button type="button" onclick="applyPreset('claude-haiku-4-5-20251001','claude-sonnet-4-6','claude-opus-4-6')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors">
+                ☁️ Full Cloud
+            </button>
+            @if($bestOnprem)
+            <button type="button" onclick="applyPreset('{{ $lightOnprem }}','{{ $bestOnprem }}','{{ $bestOnprem }}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors">
+                🖥️ Full On-Prem
+            </button>
+            <button type="button" onclick="applyPreset('{{ $lightOnprem }}','claude-sonnet-4-6','claude-opus-4-6')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors">
+                ⚡ Hybride (on-prem rapide + cloud puissant)
+            </button>
+            @endif
+        </div>
+        <script>
+        function applyPreset(fast, balanced, powerful) {
+            document.querySelector('select[name="model_role_fast"]').value = fast;
+            document.querySelector('select[name="model_role_balanced"]').value = balanced;
+            document.querySelector('select[name="model_role_powerful"]').value = powerful;
+        }
+        </script>
 
         <form method="POST" action="{{ route('settings.model-roles') }}" class="space-y-4">
             @csrf

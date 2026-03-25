@@ -30,6 +30,7 @@
                         {{ $agent->whitelist_enabled ? 'Whitelist ON' : 'Whitelist OFF' }}
                     </button>
                 </form>
+                <a href="{{ route('custom-agents.index', $agent) }}" class="px-4 py-2 border border-purple-200 rounded-lg text-sm text-purple-700 hover:bg-purple-50 transition-colors">🔒 Agents prives</a>
                 <a href="{{ route('agents.edit', $agent) }}" class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">Edit</a>
                 <form method="POST" action="{{ route('agents.destroy', $agent) }}"
                       x-data @submit.prevent="if(confirm('Delete this agent?')) $el.submit()">

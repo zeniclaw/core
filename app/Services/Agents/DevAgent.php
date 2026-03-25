@@ -122,8 +122,24 @@ class DevAgent extends BaseAgent
 
     public function handle(AgentContext $context): AgentResult
     {
+        // Safety timeout: prevent the synchronous dispatch from hanging indefinitely
+        // on slow Anthropic API calls (classifyIntent + retries can compound).
+        set_time_limit(300);
+
+        $handleStart = microtime(true);
+        Log::info('DevAgent: handle start', [
+            'from' => $context->from,
+            'body_preview' => mb_substr($context->body ?? '', 0, 80),
+        ]);
+
         try {
-            return $this->handleInner($context);
+            $result = $this->handleInner($context);
+            $handleMs = (int) ((microtime(true) - $handleStart) * 1000);
+            Log::info('DevAgent: handle done', [
+                'duration_ms' => $handleMs,
+                'action' => $result->action,
+            ]);
+            return $result;
         } catch (\Throwable $e) {
             Log::error('DevAgent handle() exception', [
                 'from' => $context->from,
@@ -2085,6 +2101,7 @@ PROMPT;
             'status' => 'queued',
             'task_description' => $project->request_description,
             'timeout_minutes' => $defaultTimeout,
+            'spawning_agent' => 'dev',
         ]);
 
         RunSubAgentJob::dispatch($subAgent);
@@ -2117,6 +2134,7 @@ PROMPT;
             'task_description' => $description,
             'timeout_minutes' => $defaultTimeout,
             'is_readonly' => true,
+            'spawning_agent' => 'dev',
         ]);
 
         RunSubAgentJob::dispatch($subAgent);

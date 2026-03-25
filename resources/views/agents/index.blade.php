@@ -235,6 +235,63 @@
         </form>
     </div>
     @endforeach
+
+    {{-- Custom/Private Agents --}}
+    @foreach($agents as $agent)
+    @php $customs = $customAgentsData[$agent->id] ?? collect(); @endphp
+    @if($customs->isNotEmpty())
+    <div>
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">🔒 Agents prives — {{ $agent->name }}</h3>
+            <a href="{{ route('custom-agents.create', $agent) }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Nouvel agent prive</a>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            @foreach($customs as $ca)
+            <a href="{{ route('custom-agents.show', [$agent, $ca]) }}" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow group">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center text-xl flex-shrink-0">{{ $ca->avatar }}</div>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                            <span class="font-semibold text-sm text-gray-900 truncate group-hover:text-indigo-600 transition-colors">{{ $ca->name }}</span>
+                            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium {{ $ca->is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500' }}">
+                                {{ $ca->is_active ? 'Actif' : 'Inactif' }}
+                            </span>
+                            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-100 text-amber-700">PRIVE</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-0.5 line-clamp-1">{{ $ca->description ?: 'Pas de description' }}</p>
+                        <div class="flex items-center gap-3 mt-2 text-[10px] text-gray-400">
+                            <span>{{ $ca->documents_count }} doc{{ $ca->documents_count > 1 ? 's' : '' }}</span>
+                            <span>{{ $ca->chunks_count }} chunks</span>
+                            @if($ca->enabled_tools && count($ca->enabled_tools) > 0)
+                            <span>{{ count($ca->enabled_tools) }} outils</span>
+                            @endif
+                            <span>{{ $ca->created_at->diffForHumans() }}</span>
+                        </div>
+                    </div>
+                </div>
+            </a>
+            @endforeach
+        </div>
+    </div>
+    @endif
+    @endforeach
+
+    {{-- Link to manage private agents if none exist yet --}}
+    @foreach($agents as $agent)
+    @php $customs = $customAgentsData[$agent->id] ?? collect(); @endphp
+    @if($customs->isEmpty())
+    <div class="flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div class="flex items-center gap-3">
+            <span class="text-xl">🔒</span>
+            <div>
+                <span class="text-sm font-medium text-gray-700">Agents prives — {{ $agent->name }}</span>
+                <p class="text-xs text-gray-400">Creez des agents IA formes avec vos documents</p>
+            </div>
+        </div>
+        <a href="{{ route('custom-agents.index', $agent) }}" class="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Gerer</a>
+    </div>
+    @endif
+    @endforeach
     @endif
 </div>
 

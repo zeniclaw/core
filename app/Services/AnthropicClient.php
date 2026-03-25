@@ -387,6 +387,104 @@ class AnthropicClient
     }
 
     /**
+     * Stream a chat response from Ollama/OpenAI-compatible API.
+     * Yields events compatible with chatStream() format.
+     */
+    private function chatStreamOnPrem(array $messages, string $model, string $systemPrompt = '', int $maxTokens = 4096): \Generator
+    {
+        $baseUrl = $this->getOrDetectOnPremUrl();
+        if (!$baseUrl) {
+            yield ['type' => 'error', 'data' => 'No Ollama instance found'];
+            return;
+        }
+
+        $check = $this->checkModelAvailable($baseUrl, $model);
+        if (!$check['available']) {
+            if (!empty($check['models'])) {
+                $model = $check['models'][0];
+            } else {
+                yield ['type' => 'error', 'data' => "Model {$model} not available on Ollama"];
+                return;
+            }
+        }
+
+        // Build OpenAI-compatible messages with system prompt
+        $oaiMessages = [];
+        if ($systemPrompt) {
+            $oaiMessages[] = ['role' => 'system', 'content' => $systemPrompt];
+        }
+        foreach ($messages as $msg) {
+            $oaiMessages[] = $msg;
+        }
+
+        $body = [
+            'model' => $model,
+            'messages' => $oaiMessages,
+            'max_tokens' => $maxTokens,
+            'stream' => true,
+        ];
+
+        $headers = ['Content-Type: application/json'];
+        $apiKey = AppSetting::get('onprem_api_key');
+        if ($apiKey) {
+            $headers[] = "Authorization: Bearer {$apiKey}";
+        }
+
+        $url = rtrim($baseUrl, '/') . '/v1/chat/completions';
+
+        try {
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => implode("\r\n", $headers),
+                    'content' => json_encode($body),
+                    'timeout' => 120,
+                    'ignore_errors' => true,
+                ],
+            ]);
+
+            $stream = @fopen($url, 'r', false, $context);
+            if (!$stream) {
+                yield ['type' => 'error', 'data' => 'Failed to open on-prem stream'];
+                return;
+            }
+
+            while (!feof($stream)) {
+                $line = fgets($stream);
+                if ($line === false) break;
+                $line = trim($line);
+
+                if (empty($line) || !str_starts_with($line, 'data: ')) continue;
+
+                $json = substr($line, 6);
+                if ($json === '[DONE]') break;
+
+                $event = json_decode($json, true);
+                if (!$event) continue;
+
+                $delta = $event['choices'][0]['delta'] ?? [];
+                $finishReason = $event['choices'][0]['finish_reason'] ?? null;
+
+                if (isset($delta['content']) && $delta['content'] !== '') {
+                    yield ['type' => 'text_delta', 'data' => $delta['content']];
+                }
+
+                if ($finishReason) {
+                    yield ['type' => 'done', 'data' => [
+                        'stop_reason' => $finishReason === 'stop' ? 'end_turn' : $finishReason,
+                        'usage' => $event['usage'] ?? null,
+                    ]];
+                }
+            }
+
+            fclose($stream);
+        } catch (\Throwable $e) {
+            Log::error('On-prem stream error', ['model' => $model, 'error' => $e->getMessage()]);
+            yield ['type' => 'error', 'data' => $e->getMessage()];
+        }
+    }
+
+    /**
      * Check if an on-prem model supports tool_use via OpenAI-compatible API.
      */
     private function supportsOnPremTools(string $model): bool
@@ -1010,6 +1108,12 @@ class AnthropicClient
      */
     public function chatStream(array $messages, string $model, string $systemPrompt = '', array $tools = [], int $maxTokens = 4096): \Generator
     {
+        // Route on-prem models to Ollama streaming
+        if ($this->isOnPremModel($model)) {
+            yield from $this->chatStreamOnPrem($messages, $model, $systemPrompt, $maxTokens);
+            return;
+        }
+
         $apiKey = $this->getApiKey();
         if (!$apiKey) {
             yield ['type' => 'error', 'data' => 'No API key configured'];

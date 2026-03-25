@@ -11,7 +11,7 @@ class SmartContextAgent extends BaseAgent
     private ContextStore $contextStore;
 
     /** Minimum confidence score for a fact to be stored */
-    private const MIN_SCORE = 0.3;
+    private const MIN_SCORE = 0.2;
 
     /** Maximum facts extracted per message */
     private const MAX_FACTS_PER_MESSAGE = 5;
@@ -184,10 +184,6 @@ class SmartContextAgent extends BaseAgent
             return AgentResult::silent(['reason' => 'numeric_only_skipped']);
         }
 
-        // Skip question-only messages (unlikely to contain durable personal facts)
-        if (preg_match('/^\p{L}[\p{L}\p{N}\s\'\-,]{3,}\?+\s*$/u', $trimmed) && substr_count($trimmed, '?') >= 1 && mb_strlen($trimmed) < 80) {
-            return AgentResult::silent(['reason' => 'question_only_skipped']);
-        }
 
         try {
             $existingFacts = $this->contextStore->retrieve($context->from);

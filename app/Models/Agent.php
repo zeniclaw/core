@@ -40,6 +40,7 @@ class Agent extends Model
         return $this->model;
     }
 
+    public function customAgents(): HasMany    { return $this->hasMany(\App\Models\CustomAgent::class); }
     public function user(): BelongsTo        { return $this->belongsTo(User::class); }
     public function secrets(): HasMany       { return $this->hasMany(AgentSecret::class); }
     public function reminders(): HasMany     { return $this->hasMany(Reminder::class); }

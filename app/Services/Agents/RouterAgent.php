@@ -368,6 +368,31 @@ PROMPT;
             $lines[] = "";
         }
 
+        // Inject custom/private agents for routing
+        try {
+            $customAgents = \App\Models\CustomAgent::where('is_active', true)->get();
+            foreach ($customAgents as $ca) {
+                $key = $ca->routingKey();
+                $tag = $ca->isCoded() ? 'PRIVE' : 'CUSTOM';
+
+                // For coded agents, use keywords/description from the agent class
+                if ($ca->isCoded() && ($coded = $ca->makeCodedAgent())) {
+                    $desc = method_exists($coded, 'description') ? $coded->description() : ($ca->description ?? '');
+                    $kw = method_exists($coded, 'keywords') ? implode(', ', $coded->keywords()) : mb_strtolower($ca->name);
+                } else {
+                    $desc = $ca->description ?? 'Agent personnalise';
+                    $kw = mb_strtolower($ca->name);
+                }
+
+                $lines[] = "■ \"{$key}\" (agent {$tag})";
+                $lines[] = "  Description: [{$tag}] {$ca->name} — {$desc}";
+                $lines[] = "  Mots-cles: {$kw}";
+                $lines[] = "";
+            }
+        } catch (\Throwable $e) {
+            Log::warning('RouterAgent: failed to load custom agents: ' . $e->getMessage());
+        }
+
         return implode("\n", $lines);
     }
 
@@ -466,6 +491,11 @@ CATALOG;
 
         $parsed = json_decode($clean, true);
 
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::warning('RouterAgent: JSON decode error', ['error' => json_last_error_msg(), 'raw' => substr($clean, 0, 500)]);
+            return $this->fallbackRoute($context);
+        }
+
         if (!$parsed || empty($parsed['agent'])) {
             Log::warning('RouterAgent: failed to parse response', ['raw' => $response]);
             return $default;
@@ -493,7 +523,7 @@ CATALOG;
                 'assistant',
             ];
         }
-        if (!in_array($parsed['agent'], $validAgents)) {
+        if (!in_array($parsed['agent'], $validAgents) && !str_starts_with($parsed['agent'], 'custom_')) {
             $parsed['agent'] = 'chat';
         }
 

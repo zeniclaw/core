@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Models\AgentLog;
+use App\Models\CustomAgent;
 use App\Models\UserBriefPreference;
 use App\Models\UserAgentAnalytic;
 use Illuminate\Http\Request;
@@ -285,15 +286,6 @@ class AgentController extends Controller
             'updated_at' => '2026-03-09',
             'description' => 'Coaching personnalise & suggestions intelligentes',
         ],
-        'zenibiz_docs' => [
-            'label' => 'ZENIBIZ DOCS',
-            'icon' => '📚',
-            'color' => 'amber',
-            'version' => '1.0.0',
-            'updated_at' => '2026-03-23',
-            'description' => 'Agent prive: gestion documentaire ZENIBIZ via API REST',
-            'is_private' => true,
-        ],
     ];
 
     public function index(Request $request)
@@ -332,7 +324,16 @@ class AgentController extends Controller
 
         $subAgentMeta = self::SUB_AGENTS;
 
-        return view('agents.index', compact('agents', 'subAgentData', 'subAgentMeta'));
+        // Load custom/private agents per agent
+        $customAgentsData = [];
+        foreach ($agents as $agent) {
+            $customAgentsData[$agent->id] = CustomAgent::where('agent_id', $agent->id)
+                ->withCount(['documents', 'chunks'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+        }
+
+        return view('agents.index', compact('agents', 'subAgentData', 'subAgentMeta', 'customAgentsData'));
     }
 
     public function create()

@@ -208,29 +208,64 @@ function dashboardChat() {
             this.loading = true;
             this.$nextTick(() => this.scrollBottom());
 
+            // Add placeholder assistant message for streaming
+            const assistantMsg = { role: 'assistant', text: '', time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) };
+            this.messages.push(assistantMsg);
+            const msgIndex = this.messages.length - 1;
+
             try {
-                const res = await fetch('{{ route("api.chat") }}', {
+                const res = await fetch('{{ route("api.chat.stream") }}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
                     body: JSON.stringify({ message: text, agent_id: this.agentId || null })
                 });
-                const data = await res.json();
 
-                if (data.ok) {
-                    var msg = { role: 'assistant', text: data.reply, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) };
-                    if (data.files && data.files.length > 0) {
-                        msg.files = data.files;
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            var eventType = line.substring(7).trim();
+                        }
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const payload = JSON.parse(line.substring(6));
+                                if (eventType === 'token' && payload.text) {
+                                    this.messages[msgIndex].text += payload.text;
+                                    this.$nextTick(() => this.scrollBottom());
+                                } else if (eventType === 'done') {
+                                    if (payload.full_reply) {
+                                        this.messages[msgIndex].text = payload.full_reply;
+                                    }
+                                    if (payload.files && payload.files.length > 0) {
+                                        this.messages[msgIndex].files = payload.files;
+                                    }
+                                    if (payload.sub_agent_id) {
+                                        this.pollSubAgent(payload.sub_agent_id);
+                                    }
+                                } else if (eventType === 'error') {
+                                    this.messages[msgIndex].text = '\u26a0 ' + (payload.message || 'Something went wrong');
+                                }
+                            } catch (e) {}
+                        }
                     }
-                    this.messages.push(msg);
-                    // If a SubAgent was dispatched, poll for completion
-                    if (data.sub_agent_id) {
-                        this.pollSubAgent(data.sub_agent_id);
-                    }
-                } else {
-                    this.messages.push({ role: 'assistant', text: '\u26a0 ' + (data.error || 'Something went wrong'), time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                }
+
+                // If no text was received at all
+                if (!this.messages[msgIndex].text) {
+                    this.messages[msgIndex].text = '\u26a0 No response received';
                 }
             } catch (e) {
-                this.messages.push({ role: 'assistant', text: '\u26a0 Network error: ' + e.message, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+                this.messages[msgIndex].text = '\u26a0 Network error: ' + e.message;
             }
 
             this.loading = false;

@@ -39,6 +39,7 @@ class AgentOrchestrator
     private const EXCLUDED_AGENTS = [
         'BaseAgent',
         'RouterAgent',
+        'ZenibizDocsAgent', // Migrated to custom/private agents system
     ];
 
     public function __construct()
@@ -368,16 +369,18 @@ class AgentOrchestrator
                 $dispatchAgent = 'dev';
             }
 
-            // If image received and peer has access to zenibiz_docs, redirect there
-            // (for photo-to-PDF document flow)
+            // If image received and peer has access to a coded custom agent
+            // that handles images (e.g. ZenibizDocsAgent photo-to-PDF), redirect there
             if ($context->hasMedia && $dispatchAgent === 'screenshot') {
                 $mime = $context->mimetype ?? ($context->media['mimetype'] ?? '');
-                AgentLog::create(['agent_id' => $context->agent->id, 'level' => 'info', 'message' => 'ZENIBIZ_REDIRECT_CHECK', 'context' => ['mime' => $mime, 'hasMedia' => $context->hasMedia, 'dispatch' => $dispatchAgent, 'from' => $context->from, 'has_zenibiz' => isset($this->agents['zenibiz_docs']), 'private' => $context->agent->private_sub_agents]]);
-                if (str_starts_with($mime, 'image/') && isset($this->agents['zenibiz_docs'])) {
-                    $privateAccess = $context->agent->private_sub_agents ?? [];
-                    $allowedPeers = $privateAccess['zenibiz_docs'] ?? [];
-                    if (in_array($context->from, $allowedPeers)) {
-                        $dispatchAgent = 'zenibiz_docs';
+                if (str_starts_with($mime, 'image/')) {
+                    $imageCustomAgent = \App\Models\CustomAgent::where('agent_id', $context->agent->id)
+                        ->where('is_active', true)
+                        ->whereNotNull('agent_class')
+                        ->get()
+                        ->first(fn($ca) => $ca->isPeerAllowed($context->from));
+                    if ($imageCustomAgent) {
+                        $dispatchAgent = $imageCustomAgent->routingKey();
                     }
                 }
             }
@@ -831,6 +834,38 @@ class AgentOrchestrator
         if ($depth >= $this->maxHandoffs) {
             Log::warning('AgentOrchestrator: max handoff depth reached', ['agent' => $agentName]);
             $agentName = 'chat'; // Fallback to chat
+        }
+
+        // Custom agent routing: "custom_{id}" → CustomAgentRunner
+        if (str_starts_with($agentName, 'custom_')) {
+            $customAgentId = (int) substr($agentName, 7);
+            $customAgent = \App\Models\CustomAgent::where('id', $customAgentId)
+                ->where('agent_id', $context->agent->id)
+                ->where('is_active', true)
+                ->first();
+
+            if ($customAgent) {
+                // Check peer access control
+                if (!$customAgent->isPeerAllowed($context->from)) {
+                    Log::info("Custom agent '{$agentName}' blocked for peer {$context->from}");
+                    $agentName = 'chat';
+                } else {
+                    // Use coded agent class if available, otherwise CustomAgentRunner
+                    $runner = $customAgent->isCoded()
+                        ? $customAgent->makeCodedAgent()
+                        : new \App\Services\CustomAgentRunner($customAgent);
+
+                    \App\Events\BeforeAgentHandle::dispatch($runner, $context, $agentName);
+                    $handleStart = microtime(true);
+                    $result = $runner->handle($context);
+                    $handleDuration = (microtime(true) - $handleStart) * 1000;
+                    \App\Events\AfterAgentHandle::dispatch($runner, $context, $result, $agentName, $handleDuration);
+                    return $result;
+                }
+            }
+
+            Log::warning("Custom agent not found or inactive: {$agentName}");
+            $agentName = 'chat';
         }
 
         $agent = $this->agents[$agentName] ?? $this->agents['chat'];
