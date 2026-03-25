@@ -503,6 +503,62 @@ class AgentController extends Controller
         return back()->with('success', 'Modeles des sub-agents mis a jour.');
     }
 
+    /**
+     * Toggle a single sub-agent on/off (AJAX).
+     */
+    public function toggleSubAgent(Request $request, Agent $agent, string $subAgent)
+    {
+        $this->authorize('update', $agent);
+
+        if (!array_key_exists($subAgent, self::SUB_AGENTS)) {
+            return response()->json(['error' => 'Unknown sub-agent'], 404);
+        }
+
+        $disabled = $agent->disabled_sub_agents ?? [];
+
+        if (in_array($subAgent, $disabled)) {
+            $disabled = array_values(array_diff($disabled, [$subAgent]));
+            $enabled = true;
+        } else {
+            $disabled[] = $subAgent;
+            $enabled = false;
+        }
+
+        $agent->update(['disabled_sub_agents' => $disabled ?: null]);
+
+        return response()->json([
+            'success' => true,
+            'enabled' => $enabled,
+            'sub_agent' => $subAgent,
+        ]);
+    }
+
+    /**
+     * Bulk enable or disable all sub-agents.
+     */
+    public function bulkToggleSubAgents(Request $request, Agent $agent)
+    {
+        $this->authorize('update', $agent);
+
+        $action = $request->input('action'); // 'enable_all' or 'disable_all'
+
+        if ($action === 'disable_all') {
+            // Disable all except chat (always needs to be available as fallback)
+            $allKeys = array_keys(self::SUB_AGENTS);
+            $disabled = array_values(array_diff($allKeys, ['chat']));
+            $agent->update(['disabled_sub_agents' => $disabled]);
+        } else {
+            // Enable all
+            $agent->update(['disabled_sub_agents' => null]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'action' => $action,
+            'disabled_count' => count($agent->disabled_sub_agents ?? []),
+        ]);
+    }
+
     public function updatePrivateAgentAccess(Request $request, Agent $agent)
     {
         $this->authorize('update', $agent);

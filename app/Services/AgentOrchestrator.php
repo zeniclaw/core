@@ -238,8 +238,16 @@ class AgentOrchestrator
             $routing = $this->router->route($context);
             \App\Events\AfterRouting::dispatch($context, $routing);
 
-            // 2b. Check private agent access — redirect to chat if unauthorized
+            // 2b. Check if sub-agent is disabled — redirect to chat
             $routedAgentName = $routing['agent'];
+            if ($routedAgentName !== 'chat' && $context->agent->isSubAgentDisabled($routedAgentName)) {
+                Log::info("Sub-agent '{$routedAgentName}' is disabled for agent #{$context->agent->id}, falling back to chat");
+                $routing['agent'] = 'chat';
+                $routing['reasoning'] = "Agent '{$routedAgentName}' is disabled";
+                $routedAgentName = 'chat';
+            }
+
+            // 2c. Check private agent access — redirect to chat if unauthorized
             $routedAgentInstance = $this->agents[$routedAgentName] ?? null;
             if ($routedAgentInstance && $routedAgentInstance->isPrivate()) {
                 $privateAccess = $context->agent->private_sub_agents ?? [];

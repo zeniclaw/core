@@ -96,9 +96,10 @@
             </div>
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
                 @php
-                    $activeCount = ($subAgentData[$agent->id]['counts'] ?? collect())->filter(fn($c) => $c > 0)->count();
+                    $disabledCount = count($agent->disabled_sub_agents ?? []);
+                    $enabledCount = count($subAgentMeta) - $disabledCount;
                 @endphp
-                <p class="text-2xl font-bold text-blue-600">{{ $activeCount }}</p>
+                <p class="text-2xl font-bold text-green-600">{{ $enabledCount }}</p>
                 <p class="text-xs text-gray-500 mt-1">Agents actifs</p>
             </div>
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
@@ -114,15 +115,30 @@
         <form method="POST" action="{{ route('agents.sub-agent-models', $agent) }}">
             @csrf
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                {{-- Bulk toggle buttons --}}
+                <div class="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
+                    <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Sub-agents</span>
+                    <div class="flex items-center gap-2" x-data>
+                        <button type="button" @click="bulkToggle('{{ route('agents.bulk-toggle-sub-agents', $agent) }}', 'enable_all')"
+                                class="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 rounded-lg hover:bg-green-200 transition-colors">
+                            Tout activer
+                        </button>
+                        <button type="button" @click="bulkToggle('{{ route('agents.bulk-toggle-sub-agents', $agent) }}', 'disable_all')"
+                                class="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 transition-colors">
+                            Tout desactiver
+                        </button>
+                    </div>
+                </div>
+
                 {{-- Header --}}
                 <div class="hidden sm:grid grid-cols-12 gap-2 px-5 py-3 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <div class="col-span-1 text-center">Actif</div>
                     <div class="col-span-3">Agent</div>
-                    <div class="col-span-3">Description</div>
+                    <div class="col-span-2">Description</div>
                     <div class="col-span-2 text-center">Modele</div>
                     <div class="col-span-1 text-center">Version</div>
-                    <div class="col-span-1 text-center">MAJ</div>
                     <div class="col-span-1 text-center">Msgs</div>
-                    <div class="col-span-1 text-center">Activite</div>
+                    <div class="col-span-2 text-center">Activite</div>
                 </div>
 
                 @foreach($subAgentMeta as $key => $meta)
@@ -131,19 +147,25 @@
                     $count = ($subAgentData[$agent->id]['counts'] ?? collect())->get($key, 0);
                     $lastAt = $subAgentData[$agent->id]['lastActivity'][$key] ?? null;
                     $currentModel = data_get($agent->sub_agent_models, $key, 'default');
+                    $isDisabled = $agent->isSubAgentDisabled($key);
                 @endphp
                 <div class="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
 
                     {{-- Mobile layout --}}
-                    <div class="sm:hidden p-4 space-y-2">
+                    <div class="sm:hidden p-4 space-y-2" x-data="{ enabled: {{ $isDisabled ? 'false' : 'true' }} }">
                         <div class="flex items-center justify-between">
-                            <a href="{{ route('agents.sub-agent', [$agent, $key]) }}" class="flex items-center gap-2.5">
-                                <span class="w-8 h-8 rounded-lg {{ $colors['bg'] }} flex items-center justify-center text-lg">{{ $meta['icon'] }}</span>
-                                <div>
-                                    <span class="font-semibold text-sm text-gray-900">{{ $meta['label'] }}</span>
-                                    <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono {{ $colors['badge'] }}">v{{ $meta['version'] }}</span>
-                                </div>
-                            </a>
+                            <div class="flex items-center gap-2.5">
+                                <button type="button" @click="toggleAgent('{{ route('agents.toggle-sub-agent', [$agent, $key]) }}', $data)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none" :class="enabled ? 'bg-green-500' : 'bg-gray-300'">
+                                    <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="enabled ? 'translate-x-4' : 'translate-x-0'"></span>
+                                </button>
+                                <a href="{{ route('agents.sub-agent', [$agent, $key]) }}" class="flex items-center gap-2.5">
+                                    <span class="w-8 h-8 rounded-lg {{ $colors['bg'] }} flex items-center justify-center text-lg">{{ $meta['icon'] }}</span>
+                                    <div>
+                                        <span class="font-semibold text-sm" :class="enabled ? 'text-gray-900' : 'text-gray-400 line-through'">{{ $meta['label'] }}</span>
+                                        <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono {{ $colors['badge'] }}">v{{ $meta['version'] }}</span>
+                                    </div>
+                                </a>
+                            </div>
                             <span class="{{ $colors['text'] }} font-semibold text-sm">{{ $count }}</span>
                         </div>
                         <p class="text-xs text-gray-500">{{ $meta['description'] }}</p>
@@ -162,35 +184,43 @@
                     </div>
 
                     {{-- Desktop layout --}}
-                    <div class="hidden sm:grid grid-cols-12 gap-2 px-5 py-3 items-center">
+                    <div class="hidden sm:grid grid-cols-12 gap-2 px-5 py-3 items-center" x-data="{ enabled: {{ $isDisabled ? 'false' : 'true' }} }">
+                        <div class="col-span-1 text-center">
+                            <button type="button" @click="toggleAgent('{{ route('agents.toggle-sub-agent', [$agent, $key]) }}', $data)"
+                                    class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                                    :class="enabled ? 'bg-green-500' : 'bg-gray-300'">
+                                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                                      :class="enabled ? 'translate-x-4' : 'translate-x-0'"></span>
+                            </button>
+                        </div>
                         <div class="col-span-3">
                             <a href="{{ route('agents.sub-agent', [$agent, $key]) }}" class="flex items-center gap-3 group">
-                                <span class="w-8 h-8 rounded-lg {{ $colors['bg'] }} flex items-center justify-center text-lg flex-shrink-0">{{ $meta['icon'] }}</span>
+                                <span class="w-8 h-8 rounded-lg {{ $colors['bg'] }} flex items-center justify-center text-lg flex-shrink-0" :class="!enabled && 'opacity-40'">{{ $meta['icon'] }}</span>
                                 <div class="min-w-0">
-                                    <span class="font-semibold text-sm text-gray-900 group-hover:text-indigo-600 transition-colors">{{ $meta['label'] }}</span>
+                                    <span class="font-semibold text-sm group-hover:text-indigo-600 transition-colors" :class="enabled ? 'text-gray-900' : 'text-gray-400 line-through'">{{ $meta['label'] }}</span>
                                     @if(!empty($meta['is_private']))
                                     <span class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-100 text-amber-700">PRIVE</span>
                                     @endif
                                 </div>
                             </a>
                         </div>
-                        <div class="col-span-3 text-xs text-gray-500 truncate" title="{{ $meta['description'] }}">{{ $meta['description'] }}</div>
+                        <div class="col-span-2 text-xs text-gray-500 truncate" :class="!enabled && 'opacity-40'" title="{{ $meta['description'] }}">{{ $meta['description'] }}</div>
                         <div class="col-span-2 text-center">
                             <select name="sub_agent_models[{{ $key }}]"
-                                    class="w-full px-1.5 py-1 border border-gray-200 rounded text-[10px] focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                    class="w-full px-1.5 py-1 border border-gray-200 rounded text-[10px] focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    :disabled="!enabled" :class="!enabled && 'opacity-40'">
                                 @foreach($availableModels as $modelValue => $modelLabel)
                                     <option value="{{ $modelValue }}" {{ $currentModel === $modelValue ? 'selected' : '' }}>{{ $modelLabel }}</option>
                                 @endforeach
                             </select>
                         </div>
                         <div class="col-span-1 text-center">
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono {{ $colors['badge'] }}">v{{ $meta['version'] }}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono {{ $colors['badge'] }}" :class="!enabled && 'opacity-40'">v{{ $meta['version'] }}</span>
                         </div>
-                        <div class="col-span-1 text-center text-[10px] text-gray-400">{{ \Carbon\Carbon::parse($meta['updated_at'])->format('d/m') }}</div>
                         <div class="col-span-1 text-center">
-                            <span class="font-semibold text-sm {{ $count > 0 ? $colors['text'] : 'text-gray-400' }}">{{ $count }}</span>
+                            <span class="font-semibold text-sm {{ $count > 0 ? $colors['text'] : 'text-gray-400' }}" :class="!enabled && 'opacity-40'">{{ $count }}</span>
                         </div>
-                        <div class="col-span-1 text-center text-[10px] text-gray-400">{{ $lastAt ? $lastAt->diffForHumans(short: true) : '—' }}</div>
+                        <div class="col-span-2 text-center text-[10px] text-gray-400" :class="!enabled && 'opacity-40'">{{ $lastAt ? $lastAt->diffForHumans(short: true) : '—' }}</div>
                     </div>
                 </div>
                 @endforeach
@@ -207,4 +237,41 @@
     @endforeach
     @endif
 </div>
+
+
+<script>
+function toggleAgent(url, data) {
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            data.enabled = d.enabled;
+        }
+    });
+}
+
+function bulkToggle(url, action) {
+    const label = action === 'enable_all' ? 'activer' : 'desactiver';
+    if (!confirm(`Voulez-vous ${label} tous les sub-agents ?`)) return;
+
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action }),
+    }).then(r => r.json()).then(d => {
+        if (d.success) {
+            window.location.reload();
+        }
+    });
+}
+</script>
 @endsection

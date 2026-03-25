@@ -11,13 +11,22 @@ class Agent extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status', 'whitelist_enabled', 'sub_agent_models', 'private_sub_agents'];
+    protected $fillable = ['user_id', 'name', 'description', 'system_prompt', 'model', 'status', 'whitelist_enabled', 'sub_agent_models', 'disabled_sub_agents', 'private_sub_agents'];
 
     protected $casts = [
         'whitelist_enabled' => 'boolean',
         'sub_agent_models' => 'array',
+        'disabled_sub_agents' => 'array',
         'private_sub_agents' => 'array',
     ];
+
+    /**
+     * Check if a sub-agent is disabled for this agent.
+     */
+    public function isSubAgentDisabled(string $subAgentKey): bool
+    {
+        return in_array($subAgentKey, $this->disabled_sub_agents ?? []);
+    }
 
     /**
      * Get the configured model for a sub-agent, falling back to the agent's main model.
