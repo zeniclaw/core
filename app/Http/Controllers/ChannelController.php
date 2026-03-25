@@ -113,10 +113,17 @@ class ChannelController extends Controller
             $response = $this->waha()->get("{$this->wahaBase}/api/sessions/{$this->sessionName}");
             if ($response->successful()) {
                 $data = $response->json();
+                // Extract phone number from WAHA me.id (format: "32460214884:4@s.whatsapp.net")
+                $rawId = $data['me']['id'] ?? '';
+                $phone = preg_replace('/[:@].*/', '', $rawId);
+                if ($phone) {
+                    $phone = '+' . $phone;
+                }
+
                 return response()->json([
                     'connected' => ($data['status'] ?? '') === 'WORKING',
                     'status' => $data['status'] ?? 'STOPPED',
-                    'phone' => $data['me']['pushname'] ?? null,
+                    'phone' => $phone ?: ($data['me']['pushname'] ?? null),
                 ]);
             }
             return response()->json(['connected' => false, 'status' => 'STOPPED']);
