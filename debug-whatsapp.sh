@@ -23,7 +23,7 @@ ACTIONS=()
 echo -e "\n${BOLD}${CYAN}═══ ZeniClaw WhatsApp Diagnostic ═══${NC}\n"
 
 # ── 1. Container status ──────────────────────────────────────────
-echo -e "${BOLD}[1/7] Container Status${NC}"
+echo -e "${BOLD}[1/9] Container Status${NC}"
 
 APP_STATUS=$(docker inspect zeniclaw_app --format '{{.State.Status}}' 2>/dev/null || echo "not_found")
 WAHA_STATUS=$(docker inspect zeniclaw_waha --format '{{.State.Status}}' 2>/dev/null || echo "not_found")
@@ -47,7 +47,7 @@ else
 fi
 
 # ── 2. WAHA API reachability ─────────────────────────────────────
-echo -e "\n${BOLD}[2/7] WAHA API${NC}"
+echo -e "\n${BOLD}[2/9] WAHA API${NC}"
 
 WAHA_HEALTH=$(docker exec zeniclaw_app curl -sf -o /dev/null -w "%{http_code}" -H "X-Api-Key: zeniclaw-waha-2026" http://waha:3000/api/sessions/default 2>/dev/null || echo "000")
 
@@ -66,7 +66,7 @@ else
 fi
 
 # ── 3. WhatsApp session status ───────────────────────────────────
-echo -e "\n${BOLD}[3/7] WhatsApp Session${NC}"
+echo -e "\n${BOLD}[3/9] WhatsApp Session${NC}"
 
 SESSION_JSON=$(docker exec zeniclaw_app curl -sf -H "X-Api-Key: zeniclaw-waha-2026" http://waha:3000/api/sessions/default 2>/dev/null || echo "{}")
 SESSION_STATUS=$(echo "$SESSION_JSON" | grep -oP '"status"\s*:\s*"\K[^"]+' | head -1 || echo "unknown")
@@ -104,11 +104,28 @@ if [ -n "$WEBHOOK_URL" ]; then
     fi
 else
     fail "No webhook URL configured"
-    ISSUES+=("No webhook URL")
+    ISSUES+=("No webhook URL — WAHA won't forward messages to the app")
+    ACTIONS+=("Recreate session with webhook: docker exec zeniclaw_app curl -sf -X POST -H 'X-Api-Key: zeniclaw-waha-2026' -H 'Content-Type: application/json' -d '{\"name\":\"default\",\"config\":{\"webhooks\":[{\"url\":\"http://app:80/webhook/whatsapp/1\",\"events\":[\"message\"]}]}}' http://waha:3000/api/sessions/start")
+fi
+
+# Webhook events check
+WEBHOOK_EVENTS=$(echo "$SESSION_JSON" | grep -oP '"events"\s*:\s*\[\K[^\]]*' | head -1 || echo "")
+if [ -n "$WEBHOOK_EVENTS" ]; then
+    if echo "$WEBHOOK_EVENTS" | grep -q "message"; then
+        ok "Webhook events: includes 'message'"
+    else
+        fail "Webhook events: [$WEBHOOK_EVENTS] — missing 'message' event!"
+        ISSUES+=("Webhook is configured but 'message' event is not subscribed")
+        ACTIONS+=("Recreate session with message event subscription")
+    fi
+else
+    if [ -n "$WEBHOOK_URL" ]; then
+        warn "Webhook events: not specified (WAHA may default to all events)"
+    fi
 fi
 
 # ── 4. WAHA reconnect loop detection ────────────────────────────
-echo -e "\n${BOLD}[4/7] Connection Stability${NC}"
+echo -e "\n${BOLD}[4/9] Connection Stability${NC}"
 
 RECENT_LOGS=$(docker logs zeniclaw_waha --since=60s 2>&1 || echo "")
 DISCONNECT_COUNT=$(echo "$RECENT_LOGS" | grep -c "Connection closed" 2>/dev/null || true)
@@ -127,7 +144,7 @@ else
 fi
 
 # ── 5. Webhook delivery ─────────────────────────────────────────
-echo -e "\n${BOLD}[5/7] Webhook Delivery${NC}"
+echo -e "\n${BOLD}[5/9] Webhook Delivery${NC}"
 
 APP_LOGS=$(docker logs zeniclaw_app --since=300s 2>&1 || echo "")
 WEBHOOK_HITS=$(echo "$APP_LOGS" | grep -c "webhook/whatsapp" 2>/dev/null || true)
@@ -158,7 +175,7 @@ if [ "$MEDIA_WARNINGS" -gt 0 ]; then
 fi
 
 # ── 6. App health ───────────────────────────────────────────────
-echo -e "\n${BOLD}[6/7] App Health${NC}"
+echo -e "\n${BOLD}[6/9] App Health${NC}"
 
 APP_ERRORS=$(echo "$APP_LOGS" | grep -c "production.ERROR" 2>/dev/null || true)
 APP_ERRORS=${APP_ERRORS:-0}
@@ -185,7 +202,7 @@ else
 fi
 
 # ── 7. Network ──────────────────────────────────────────────────
-echo -e "\n${BOLD}[7/7] Docker Network${NC}"
+echo -e "\n${BOLD}[7/9] Docker Network${NC}"
 
 APP_NETWORKS=$(docker inspect zeniclaw_app --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || echo "none")
 WAHA_NETWORKS=$(docker inspect zeniclaw_waha --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || echo "none")
@@ -209,6 +226,76 @@ else
     ISSUES+=("App and WAHA are not on the same Docker network")
     ACTIONS+=("docker compose down && docker compose up -d")
 fi
+
+# ── 8. WAHA recent logs ──────────────────────────────────────────
+echo -e "\n${BOLD}[8/9] WAHA Logs (last 10 min)${NC}"
+
+WAHA_RECENT=$(docker logs zeniclaw_waha --since=600s 2>&1 || echo "")
+WAHA_MSG_COUNT=$(echo "$WAHA_RECENT" | grep -ci "message\|webhook\|event\|received" 2>/dev/null || true)
+WAHA_MSG_COUNT=${WAHA_MSG_COUNT:-0}
+WAHA_ERR_COUNT=$(echo "$WAHA_RECENT" | grep -ci "error\|fail\|exception" 2>/dev/null || true)
+WAHA_ERR_COUNT=${WAHA_ERR_COUNT:-0}
+
+if [ "$WAHA_MSG_COUNT" -gt 0 ]; then
+    ok "WAHA activity: $WAHA_MSG_COUNT message/event lines"
+    echo ""
+    info "Recent WAHA message activity:"
+    echo "$WAHA_RECENT" | grep -i "message\|webhook\|event\|received" | tail -10 | while read -r line; do
+        echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+    done
+else
+    warn "No message activity in WAHA logs (last 10 min)"
+fi
+
+if [ "$WAHA_ERR_COUNT" -gt 0 ]; then
+    fail "WAHA errors: $WAHA_ERR_COUNT"
+    echo ""
+    info "Recent WAHA errors:"
+    echo "$WAHA_RECENT" | grep -i "error\|fail\|exception" | tail -5 | while read -r line; do
+        echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+    done
+fi
+
+# ── 9. App logs deep dive ────────────────────────────────────────
+echo -e "\n${BOLD}[9/9] App Logs (last 10 min)${NC}"
+
+APP_LOGS_FULL=$(docker logs zeniclaw_app --since=600s 2>&1 || echo "")
+APP_WH_LINES=$(echo "$APP_LOGS_FULL" | grep -i "webhook\|whatsapp\|message.received\|channel" 2>/dev/null | tail -10 || true)
+APP_ERR_LINES=$(echo "$APP_LOGS_FULL" | grep -i "production.ERROR\|Exception\|CRITICAL" 2>/dev/null | tail -5 || true)
+APP_QUEUE_LINES=$(echo "$APP_LOGS_FULL" | grep -i "queue\|job\|RunTask\|processed" 2>/dev/null | tail -5 || true)
+
+if [ -n "$APP_WH_LINES" ]; then
+    ok "App webhook/message activity found"
+    echo ""
+    info "Recent webhook/message lines:"
+    echo "$APP_WH_LINES" | while read -r line; do
+        echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+    done
+else
+    warn "No webhook/message lines in app logs (last 10 min)"
+fi
+
+if [ -n "$APP_ERR_LINES" ]; then
+    fail "App errors found"
+    echo ""
+    info "Recent errors:"
+    echo "$APP_ERR_LINES" | while read -r line; do
+        echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+    done
+else
+    ok "No errors in app logs (last 10 min)"
+fi
+
+if [ -n "$APP_QUEUE_LINES" ]; then
+    info "Queue/job activity:"
+    echo "$APP_QUEUE_LINES" | while read -r line; do
+        echo -e "    ${DIM}$(echo "$line" | cut -c1-200)${NC}"
+    done
+fi
+
+# ── Session JSON dump ────────────────────────────────────────────
+echo -e "\n${BOLD}Full WAHA Session Config:${NC}"
+echo "$SESSION_JSON" | python3 -m json.tool 2>/dev/null || echo "$SESSION_JSON"
 
 # ── Summary ─────────────────────────────────────────────────────
 echo -e "\n${BOLD}${CYAN}═══ Diagnostic Summary ═══${NC}\n"
