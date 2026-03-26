@@ -314,7 +314,7 @@
                     <p class="text-sm text-indigo-700 font-medium mb-2">Lien cree ! Copiez-le :</p>
                     <div class="flex items-center gap-2">
                         <input type="text" value="{{ session('share_url') }}" readonly class="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono text-indigo-800" id="shareUrl">
-                        <button onclick="navigator.clipboard.writeText(document.getElementById('shareUrl').value); this.textContent='Copie !'; setTimeout(() => this.textContent='Copier', 2000);"
+                        <button onclick="copyText(document.getElementById('shareUrl').value, this)"
                                 class="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Copier</button>
                     </div>
                 </div>
@@ -341,7 +341,7 @@
                                 </div>
                             </div>
                             @if($share->isValid())
-                            <button onclick="navigator.clipboard.writeText('{{ url("/partner/{$share->token}") }}'); this.textContent='Copie !'; setTimeout(() => this.textContent='Copier', 2000);"
+                            <button onclick="copyText('{{ url("/partner/{$share->token}") }}', this)"
                                     class="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Copier</button>
                             <form method="POST" action="{{ route('custom-agents.shares.revoke', [$agent, $customAgent, $share]) }}"
                                   onsubmit="return confirm('Revoquer ce lien ?')">
@@ -407,6 +407,24 @@
 </div>
 
 <script>
+function copyText(text, btn) {
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text);
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    }
+    var orig = btn.textContent;
+    btn.textContent = 'Copie !';
+    setTimeout(function() { btn.textContent = orig; }, 2000);
+}
+
 function customAgentPage() {
     return {
         isActive: {{ $customAgent->is_active ? 'true' : 'false' }},
