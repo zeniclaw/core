@@ -245,7 +245,7 @@ class CustomAgentController extends Controller
 
         $file = $request->file('file');
         $path = $file->store('custom-agent-docs', 'local');
-        $fullPath = storage_path('app/' . $path);
+        $fullPath = storage_path('app/private/' . $path);
         $mime = $file->getMimeType();
 
         $chunker = new KnowledgeChunker();

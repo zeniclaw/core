@@ -138,7 +138,7 @@ class KnowledgeChunker
      */
     public function extractText(string $filePath, string $mimeType): string
     {
-        Log::info("KnowledgeChunker: extractText", ['path' => $filePath, 'mime' => $mimeType, 'size' => filesize($filePath)]);
+        Log::info("KnowledgeChunker: extractText", ['path' => $filePath, 'mime' => $mimeType, 'exists' => file_exists($filePath), 'size' => file_exists($filePath) ? filesize($filePath) : 'N/A']);
 
         if (str_contains($mimeType, 'pdf')) {
             $text = $this->extractPdf($filePath);
