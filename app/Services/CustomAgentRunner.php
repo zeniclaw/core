@@ -594,77 +594,57 @@ class CustomAgentRunner extends BaseAgent
             ? $this->customAgent->model
             : $this->resolveModel($context);
 
-        // Track which step we're on via cache (keyed by session + skill)
+        // Track which step we're on via cache
         $cacheKey = "skill_step:{$context->from}:{$skill->id}";
         $currentStep = (int) \Illuminate\Support\Facades\Cache::get($cacheKey, 0);
 
-        // If we've gone past all steps, reset and let normal chat handle it
+        // Past all steps → reset, fall through to normal chat
         if ($currentStep >= count($routine)) {
             \Illuminate\Support\Facades\Cache::forget($cacheKey);
-            return null; // Fall through to normal chat
+            return null;
         }
 
         $step = $routine[$currentStep];
         $stepType = $step['type'] ?? 'prompt';
         $stepContent = $step['content'] ?? '';
 
-        // Build context for this step
-        $conversationContext = "Tu executes la routine \"{$skill->name}\" (etape " . ($currentStep + 1) . "/" . count($routine) . ").\n";
-        if ($skill->description) {
-            $conversationContext .= "Description: {$skill->description}\n";
-        }
-        $conversationContext .= "Instruction pour cette etape: {$stepContent}\n";
-
-        // Add RAG knowledge
+        // Build system prompt for this step
         $tier = $this->classifyModel($model);
-        $ragContext = $this->retrieveKnowledge($context->body ?? $skill->name, $tier);
-        if (!empty($ragContext)) {
-            $conversationContext .= "\nConnaissances disponibles:\n";
-            foreach (array_slice($ragContext, 0, 3) as $chunk) {
-                $conversationContext .= "- " . mb_substr($chunk['content'], 0, 300) . "\n";
-            }
-        }
+        $systemPrompt = $this->buildSkillStepPrompt($skill, $currentStep, $routine, $context, $tier);
 
-        // Add conversation history for continuity
-        $history = $this->memory->read($context->agent->id, $context->from);
-        $entries = $history['entries'] ?? [];
-        $recent = array_slice($entries, -3);
-        if (!empty($recent)) {
-            $conversationContext .= "\nHistorique recent:\n";
-            foreach ($recent as $entry) {
-                if (!empty($entry['sender_message'])) $conversationContext .= "Utilisateur: {$entry['sender_message']}\n";
-                if (!empty($entry['agent_reply'])) $conversationContext .= "Agent: " . mb_substr($entry['agent_reply'], 0, 200) . "\n";
-            }
-        }
-
-        $conversationContext .= "\nMessage utilisateur: " . ($context->body ?? '');
-        $conversationContext .= "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+        // Determine if we should use agentic loop (tools)
+        $enabledTools = $this->customAgent->enabled_tools ?? [];
+        $hasTools = !empty($enabledTools);
+        $canUseTools = in_array($tier, [ModelTier::Balanced, ModelTier::Powerful]);
+        $needsAction = in_array($stepType, ['action', 'api_call', 'script']) || $hasTools;
 
         $reply = '';
-        if ($stepType === 'prompt' && $stepContent) {
-            $reply = $this->claude->chat($conversationContext, $model, $this->customAgent->system_prompt ?? '', 500);
+
+        if ($needsAction && $hasTools && $canUseTools) {
+            // ── Agentic loop: can actually execute tools (API calls, code, etc.) ──
+            $reply = $this->executeStepWithTools($context, $systemPrompt, $model, $enabledTools, $stepContent);
         } elseif ($stepType === 'script') {
-            $scriptName = $step['script'] ?? '';
-            $script = $this->customAgent->scripts()->where('name', $scriptName)->where('is_active', true)->first();
-            $reply = $script ? "[Script \"{$script->name}\" execute]" : "[Script non trouve]";
+            // ── Script execution ──
+            $reply = $this->executeStepScript($step, $context, $model);
+        } else {
+            // ── Simple chat (prompt only) ──
+            $userMsg = "Message utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+            $reply = $this->claude->chat($userMsg, $model, $systemPrompt, 800);
         }
 
         if (!$reply) {
-            $reply = "❌ Erreur : le modèle LLM ({$model}) n'a pas répondu pour l'étape " . ($currentStep + 1) . "/" . count($routine) . " de la routine \"{$skill->name}\".\n\nInstruction de l'étape : {$stepContent}\n\nTapez **stop** pour quitter la routine ou réessayez.";
-            \Illuminate\Support\Facades\Log::warning("Skill routine step failed", [
-                'skill' => $skill->name,
-                'step' => $currentStep + 1,
-                'model' => $model,
-                'instruction' => $stepContent,
+            $reply = "❌ Erreur : le modèle ({$model}) n'a pas répondu pour l'étape " . ($currentStep + 1) . "/" . count($routine) . " de la routine \"{$skill->name}\".\n\nInstruction : {$stepContent}\n\nTapez **stop** pour quitter ou réessayez.";
+            \Illuminate\Support\Facades\Log::warning("Skill step failed", [
+                'skill' => $skill->name, 'step' => $currentStep + 1, 'model' => $model,
             ]);
-            // Don't advance step — let user retry
+            // Don't advance — let user retry
             \Illuminate\Support\Facades\Cache::put($cacheKey, $currentStep, 3600);
+        } else {
+            // Advance to next step
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $currentStep + 1, 3600);
         }
 
-        // Advance to next step for next message
-        \Illuminate\Support\Facades\Cache::put($cacheKey, $currentStep + 1, 3600); // 1h TTL
-
-        // Only show skill name on first step
+        // Prefix with skill name on first step
         if ($currentStep === 0) {
             $reply = "⚡ **{$skill->name}**\n\n{$reply}";
         }
@@ -679,6 +659,127 @@ class CustomAgentRunner extends BaseAgent
             'step' => $currentStep + 1,
             'total_steps' => count($routine),
         ]);
+    }
+
+    /**
+     * Build system prompt for a skill step, with RAG + history + credentials.
+     */
+    private function buildSkillStepPrompt(\App\Models\CustomAgentSkill $skill, int $step, array $routine, AgentContext $context, ModelTier $tier): string
+    {
+        $stepContent = $routine[$step]['content'] ?? '';
+        $parts = [];
+
+        // Base agent prompt
+        if ($this->customAgent->system_prompt) {
+            $parts[] = $this->customAgent->system_prompt;
+        }
+
+        // Skill context
+        $parts[] = "Tu executes la routine \"{$skill->name}\" (etape " . ($step + 1) . "/" . count($routine) . ").";
+        if ($skill->description) {
+            $parts[] = "Objectif de la routine: {$skill->description}";
+        }
+        $parts[] = "INSTRUCTION POUR CETTE ETAPE:\n{$stepContent}";
+
+        // RAG knowledge
+        $ragContext = $this->retrieveKnowledge($context->body ?? $skill->name, $tier);
+        if (!empty($ragContext)) {
+            $ragBlock = "CONNAISSANCES (documents):\n";
+            foreach (array_slice($ragContext, 0, 3) as $c) {
+                $ragBlock .= "[{$c['document_title']}] " . mb_substr($c['content'], 0, 400) . "\n\n";
+            }
+            $parts[] = $ragBlock;
+        }
+
+        // Credentials (keys + descriptions, not values)
+        $creds = $this->customAgent->credentials()->where('is_active', true)->pluck('description', 'key');
+        if ($creds->isNotEmpty()) {
+            $credBlock = "CREDENTIALS DISPONIBLES (utilise getCredential('key') pour lire la valeur):\n";
+            foreach ($creds as $key => $desc) {
+                $credBlock .= "- {$key}" . ($desc ? ": {$desc}" : '') . "\n";
+            }
+            $parts[] = $credBlock;
+        }
+
+        // Workspace
+        $parts[] = "WORKSPACE: " . $this->customAgent->workspacePath();
+
+        // Conversation history
+        $history = $this->memory->read($context->agent->id, $context->from);
+        $entries = array_slice($history['entries'] ?? [], -3);
+        if (!empty($entries)) {
+            $histBlock = "Historique recent:\n";
+            foreach ($entries as $e) {
+                if (!empty($e['sender_message'])) $histBlock .= "User: {$e['sender_message']}\n";
+                if (!empty($e['agent_reply'])) $histBlock .= "Agent: " . mb_substr($e['agent_reply'], 0, 200) . "\n";
+            }
+            $parts[] = $histBlock;
+        }
+
+        $parts[] = "Tu DOIS executer l'instruction de cette etape. Si tu as besoin d'appeler une API ou executer du code, utilise les outils disponibles. N'invente pas de mecanisme d'approbation — execute directement.";
+
+        return implode("\n\n", $parts);
+    }
+
+    /**
+     * Execute a skill step using the agentic loop (with tools).
+     */
+    private function executeStepWithTools(AgentContext $context, string $systemPrompt, string $model, array $enabledGroups, string $stepInstruction): string
+    {
+        $allowedToolNames = $this->getEnabledToolNames($enabledGroups);
+
+        $allTools = $context->toolRegistry
+            ? $context->toolRegistry->definitions()
+            : AgentTools::definitions();
+
+        $filteredTools = array_values(array_filter($allTools, function ($tool) use ($allowedToolNames) {
+            return in_array($tool['name'] ?? '', $allowedToolNames);
+        }));
+
+        // The user message is the step instruction + the actual user input
+        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
+
+        $loop = new AgenticLoop(maxIterations: 10, debug: false);
+
+        try {
+            $loopResult = $loop->run(
+                userMessage: $userMessage,
+                systemPrompt: $systemPrompt,
+                model: $model,
+                context: $context,
+                tools: $filteredTools,
+            );
+            return $loopResult->reply ?: '';
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Skill agentic loop failed: " . $e->getMessage());
+            // Fallback to simple chat
+            return $this->claude->chat($userMessage, $model, $systemPrompt, 800) ?: '';
+        }
+    }
+
+    /**
+     * Execute a script step (find and run the named script).
+     */
+    private function executeStepScript(array $step, AgentContext $context, string $model): string
+    {
+        $scriptName = $step['script'] ?? $step['content'] ?? '';
+        $script = $this->customAgent->scripts()
+            ->where('name', $scriptName)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$script) {
+            return "❌ Script \"{$scriptName}\" non trouvé ou inactif.";
+        }
+
+        // Execute via run_code tool if available, otherwise just reference it
+        $enabledTools = $this->customAgent->enabled_tools ?? [];
+        if (in_array('code', $enabledTools)) {
+            $prompt = "Execute ce script {$script->language}:\n```{$script->language}\n{$script->code}\n```\nUtilise l'outil run_code pour l'executer. Retourne le resultat.";
+            return $this->claude->chat($prompt, $model, '', 800) ?: "Script \"{$script->name}\" référencé mais exécution non disponible.";
+        }
+
+        return "📋 Script \"{$script->name}\" ({$script->language}):\n```{$script->language}\n{$script->code}\n```\n\n_Pour l'exécuter automatiquement, activez le groupe d'outils \"Execution de code\" sur cet agent._";
     }
 
     /**
