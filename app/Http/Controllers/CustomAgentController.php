@@ -239,7 +239,7 @@ class CustomAgentController extends Controller
 
         // File upload
         $request->validate([
-            'file' => 'required|file|max:10240', // 10MB max
+            'file' => 'required|file|max:51200', // 50MB max
             'title' => 'nullable|string|max:200',
         ]);
 

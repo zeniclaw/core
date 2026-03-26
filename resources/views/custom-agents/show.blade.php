@@ -80,7 +80,7 @@
                             <div>
                                 <input type="file" name="file" required accept=".pdf,.txt,.csv,.docx,.doc,.json,.xml,.md"
                                        class="w-full text-sm text-gray-500 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100">
-                                <p class="text-xs text-gray-400 mt-1">PDF, TXT, CSV, DOCX, JSON, XML (max 10 Mo)</p>
+                                <p class="text-xs text-gray-400 mt-1">PDF, TXT, CSV, DOCX, JSON, XML (max 50 Mo)</p>
                             </div>
                             <input type="text" name="title" placeholder="Titre (optionnel)" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
                             <button type="submit" class="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Importer</button>
