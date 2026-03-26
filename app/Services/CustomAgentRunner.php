@@ -126,6 +126,12 @@ class CustomAgentRunner extends BaseAgent
     {
         $this->log($context, "Custom agent '{$this->customAgent->name}' handling message");
 
+        // 0. Check if message triggers a skill routine
+        $skillResult = $this->trySkillTrigger($context);
+        if ($skillResult) {
+            return $skillResult;
+        }
+
         // 1. Resolve model — prefer custom agent's explicit model, otherwise use routing/fast default
         $model = $this->customAgent->model !== 'default'
             ? $this->customAgent->model
@@ -508,6 +514,143 @@ class CustomAgentRunner extends BaseAgent
     }
 
     /**
+     * Check if the user message matches a skill trigger phrase.
+     * If matched, execute the routine steps sequentially and return the combined result.
+     */
+    private function trySkillTrigger(AgentContext $context): ?AgentResult
+    {
+        $body = mb_strtolower(trim($context->body ?? ''));
+        if (!$body) return null;
+
+        $skills = $this->customAgent->skills()
+            ->where('is_active', true)
+            ->whereNotNull('trigger_phrase')
+            ->get();
+
+        $matchedSkill = null;
+        foreach ($skills as $skill) {
+            $trigger = mb_strtolower(trim($skill->trigger_phrase));
+            if (!$trigger) continue;
+            // Match if message contains the trigger phrase
+            if (str_contains($body, $trigger)) {
+                $matchedSkill = $skill;
+                break;
+            }
+        }
+
+        if (!$matchedSkill) return null;
+
+        $this->log($context, "Skill triggered: {$matchedSkill->name}");
+
+        return $this->executeSkillRoutine($matchedSkill, $context);
+    }
+
+    /**
+     * Execute a skill's routine steps sequentially.
+     */
+    private function executeSkillRoutine(\App\Models\CustomAgentSkill $skill, AgentContext $context): AgentResult
+    {
+        $routine = $skill->routine ?? [];
+        if (empty($routine)) {
+            return AgentResult::reply("Skill \"{$skill->name}\" n'a pas de routine configurée.");
+        }
+
+        $model = $this->customAgent->model !== 'default'
+            ? $this->customAgent->model
+            : $this->resolveModel($context);
+
+        $results = [];
+        $conversationContext = "Tu executes la routine \"{$skill->name}\".\n";
+        if ($skill->description) {
+            $conversationContext .= "Description: {$skill->description}\n";
+        }
+
+        // Add RAG knowledge for context
+        $tier = $this->classifyModel($model);
+        $ragContext = $this->retrieveKnowledge($context->body ?? $skill->name, $tier);
+        if (!empty($ragContext)) {
+            $conversationContext .= "\nConnaissances disponibles:\n";
+            foreach (array_slice($ragContext, 0, 3) as $chunk) {
+                $conversationContext .= "- " . mb_substr($chunk['content'], 0, 300) . "\n";
+            }
+        }
+
+        foreach ($routine as $step) {
+            $stepType = $step['type'] ?? 'prompt';
+            $stepContent = $step['content'] ?? '';
+
+            if ($stepType === 'prompt' && $stepContent) {
+                $fullPrompt = $conversationContext . "\nEtape en cours: " . $stepContent;
+                if (!empty($results)) {
+                    $fullPrompt .= "\n\nResultats precedents:\n" . implode("\n---\n", $results);
+                }
+                $fullPrompt .= "\n\nMessage utilisateur: " . ($context->body ?? '');
+
+                $response = $this->claude->chat($fullPrompt, $model, $this->customAgent->system_prompt ?? '', 500);
+                if ($response) {
+                    $results[] = $response;
+                }
+            } elseif ($stepType === 'script') {
+                // Find and note the script (execution is logged but sandboxed)
+                $scriptName = $step['script'] ?? '';
+                $script = $this->customAgent->scripts()->where('name', $scriptName)->where('is_active', true)->first();
+                if ($script) {
+                    $results[] = "[Script \"{$script->name}\" ({$script->language}) référencé — exécution sandboxée non implémentée]";
+                }
+            }
+        }
+
+        $combined = implode("\n\n", $results);
+        if (!$combined) {
+            $combined = "La routine \"{$skill->name}\" n'a produit aucun résultat.";
+        }
+
+        // Prefix with skill name
+        $reply = "⚡ **{$skill->name}**\n\n{$combined}";
+
+        $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $reply);
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, [
+            'custom_agent_id' => $this->customAgent->id,
+            'skill_triggered' => $skill->name,
+        ]);
+    }
+
+    /**
+     * Build context about available skills and scripts for the system prompt.
+     */
+    private function buildSkillsContext(): string
+    {
+        $skills = $this->customAgent->skills()->where('is_active', true)->get();
+        $scripts = $this->customAgent->scripts()->where('is_active', true)->get();
+
+        if ($skills->isEmpty() && $scripts->isEmpty()) {
+            return '';
+        }
+
+        $parts = [];
+
+        if ($skills->isNotEmpty()) {
+            $parts[] = "SKILLS DISPONIBLES (routines que tu peux executer) :";
+            foreach ($skills as $skill) {
+                $trigger = $skill->trigger_phrase ? " (declencheur: \"{$skill->trigger_phrase}\")" : '';
+                $parts[] = "- {$skill->name}{$trigger}: " . ($skill->description ?: 'Pas de description');
+            }
+            $parts[] = "Si l'utilisateur mentionne un de ces skills ou son declencheur, execute la routine correspondante.";
+        }
+
+        if ($scripts->isNotEmpty()) {
+            $parts[] = "\nSCRIPTS DISPONIBLES :";
+            foreach ($scripts as $script) {
+                $parts[] = "- {$script->name} ({$script->language}): " . ($script->description ?: 'Pas de description');
+            }
+        }
+
+        return implode("\n", $parts);
+    }
+
+    /**
      * Build system prompt with RAG knowledge injected, format adapted to model tier.
      */
     private function buildSystemPrompt(array $ragChunks, AgentContext $context, ModelTier $tier): string
@@ -535,6 +678,12 @@ class CustomAgentRunner extends BaseAgent
             if ($memoryContext) {
                 $parts[] = $memoryContext;
             }
+        }
+
+        // Inject available skills and scripts so the agent knows about them
+        $skillsInfo = $this->buildSkillsContext();
+        if ($skillsInfo) {
+            $parts[] = $skillsInfo;
         }
 
         $parts[] = "Réponds en français sauf si l'utilisateur écrit dans une autre langue.";

@@ -177,23 +177,54 @@
   </div>
 
   {{-- ══════ SKILLS TAB ══════ --}}
-  <div x-show="tab === 'skills'">
+  <div x-show="tab === 'skills'" x-data="assistantChat('skill')">
     <div class="grid gap-6 lg:grid-cols-3">
-      {{-- Create skill --}}
-      <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6 lg:col-span-1">
-        <h3 class="font-semibold text-gray-200 mb-4">Nouvelle routine</h3>
-        <form method="POST" action="{{ route('partner.skills.store', $share->token) }}" class="space-y-3">
-          @csrf
-          <input type="text" name="name" required placeholder="Nom de la routine *" maxlength="150" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
-          <textarea name="description" rows="2" placeholder="Description (optionnel)" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500"></textarea>
-          <input type="text" name="trigger_phrase" placeholder="Phrase declencheur (ex: briefing du matin)" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Routine (JSON)</label>
-            <textarea name="routine" required rows="6" placeholder='[{"type":"prompt","content":"Resume les derniers messages"}]'
-                      class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono"></textarea>
+      {{-- AI Assistant + Manual form --}}
+      <div class="lg:col-span-1 space-y-4">
+        {{-- AI Assistant --}}
+        <div class="bg-gray-900 rounded-2xl border border-purple-800/50 p-5">
+          <h3 class="font-semibold text-purple-300 mb-3 flex items-center gap-2">🤖 Assistant IA — Creer une routine</h3>
+          <p class="text-xs text-gray-400 mb-3">Decrivez ce que vous voulez et l'IA vous guidera pour creer la routine.</p>
+
+          <div class="bg-gray-950 rounded-xl p-3 mb-3 max-h-64 overflow-y-auto space-y-2" x-ref="assistMsgsSkill">
+            <template x-for="msg in assistMessages" :key="msg.id">
+              <div :class="msg.role === 'user' ? 'text-right' : ''">
+                <span :class="msg.role === 'user' ? 'bg-purple-700 text-white' : 'bg-gray-800 text-gray-200'"
+                      class="inline-block rounded-xl px-3 py-2 text-xs max-w-[90%] whitespace-pre-wrap" x-text="msg.content"></span>
+              </div>
+            </template>
+            <div x-show="assistLoading" class="text-xs text-gray-500">Reflexion...</div>
           </div>
-          <button type="submit" class="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700">Creer la routine</button>
-        </form>
+
+          <form @submit.prevent="sendAssist()" class="flex gap-2">
+            <input type="text" x-model="assistInput" :disabled="assistLoading" placeholder="Ex: je veux un briefing du matin..."
+                   class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-purple-500">
+            <button type="submit" :disabled="assistLoading || !assistInput.trim()"
+                    class="px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-40">Envoyer</button>
+          </form>
+
+          {{-- Auto-fill form when AI generates the skill --}}
+          <template x-if="generatedData">
+            <div class="mt-3 p-3 bg-green-900/30 border border-green-800 rounded-xl">
+              <p class="text-xs text-green-400 font-medium mb-2">✅ Routine generee ! Verifiez et sauvegardez :</p>
+              <button @click="fillForm()" class="w-full px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">Remplir le formulaire</button>
+            </div>
+          </template>
+        </div>
+
+        {{-- Manual form --}}
+        <div class="bg-gray-900 rounded-2xl border border-gray-800 p-5">
+          <h3 class="font-semibold text-gray-200 mb-3 text-sm">Ou creer manuellement</h3>
+          <form method="POST" action="{{ route('partner.skills.store', $share->token) }}" class="space-y-3" x-ref="skillForm">
+            @csrf
+            <input type="text" name="name" required placeholder="Nom *" maxlength="150" x-ref="skillName" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
+            <textarea name="description" rows="2" placeholder="Description" x-ref="skillDesc" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500"></textarea>
+            <input type="text" name="trigger_phrase" placeholder="Phrase declencheur" x-ref="skillTrigger" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
+            <textarea name="routine" required rows="6" placeholder='[{"type":"prompt","content":"..."}]' x-ref="skillRoutine"
+                      class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono"></textarea>
+            <button type="submit" class="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700">Sauvegarder</button>
+          </form>
+        </div>
       </div>
 
       {{-- Skills list --}}
@@ -233,24 +264,57 @@
   </div>
 
   {{-- ══════ SCRIPTS TAB ══════ --}}
-  <div x-show="tab === 'scripts'">
+  <div x-show="tab === 'scripts'" x-data="assistantChat('script')">
     <div class="grid gap-6 lg:grid-cols-3">
-      {{-- Create script --}}
-      <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6 lg:col-span-1">
-        <h3 class="font-semibold text-gray-200 mb-4">Nouveau script</h3>
-        <form method="POST" action="{{ route('partner.scripts.store', $share->token) }}" class="space-y-3">
-          @csrf
-          <input type="text" name="name" required placeholder="Nom du script *" maxlength="150" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
-          <textarea name="description" rows="2" placeholder="Description (optionnel)" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500"></textarea>
-          <select name="language" required class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200">
-            <option value="python">Python</option>
-            <option value="php">PHP</option>
-            <option value="bash">Bash</option>
-            <option value="node">Node.js</option>
-          </select>
-          <textarea name="code" required rows="10" placeholder="# Votre code ici..." class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono"></textarea>
-          <button type="submit" class="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">Creer le script</button>
-        </form>
+      {{-- AI Assistant + Manual form --}}
+      <div class="lg:col-span-1 space-y-4">
+        {{-- AI Assistant --}}
+        <div class="bg-gray-900 rounded-2xl border border-green-800/50 p-5">
+          <h3 class="font-semibold text-green-300 mb-3 flex items-center gap-2">🤖 Assistant IA — Creer un script</h3>
+          <p class="text-xs text-gray-400 mb-3">Decrivez ce que le script doit faire et l'IA generera le code.</p>
+
+          <div class="bg-gray-950 rounded-xl p-3 mb-3 max-h-64 overflow-y-auto space-y-2" x-ref="assistMsgsScript">
+            <template x-for="msg in assistMessages" :key="msg.id">
+              <div :class="msg.role === 'user' ? 'text-right' : ''">
+                <span :class="msg.role === 'user' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-200'"
+                      class="inline-block rounded-xl px-3 py-2 text-xs max-w-[90%] whitespace-pre-wrap" x-text="msg.content"></span>
+              </div>
+            </template>
+            <div x-show="assistLoading" class="text-xs text-gray-500">Reflexion...</div>
+          </div>
+
+          <form @submit.prevent="sendAssist()" class="flex gap-2">
+            <input type="text" x-model="assistInput" :disabled="assistLoading" placeholder="Ex: un script qui genere un rapport CSV..."
+                   class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-green-500">
+            <button type="submit" :disabled="assistLoading || !assistInput.trim()"
+                    class="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-40">Envoyer</button>
+          </form>
+
+          <template x-if="generatedData">
+            <div class="mt-3 p-3 bg-green-900/30 border border-green-800 rounded-xl">
+              <p class="text-xs text-green-400 font-medium mb-2">✅ Script genere ! Verifiez et sauvegardez :</p>
+              <button @click="fillForm()" class="w-full px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">Remplir le formulaire</button>
+            </div>
+          </template>
+        </div>
+
+        {{-- Manual form --}}
+        <div class="bg-gray-900 rounded-2xl border border-gray-800 p-5">
+          <h3 class="font-semibold text-gray-200 mb-3 text-sm">Ou creer manuellement</h3>
+          <form method="POST" action="{{ route('partner.scripts.store', $share->token) }}" class="space-y-3" x-ref="scriptForm">
+            @csrf
+            <input type="text" name="name" required placeholder="Nom *" maxlength="150" x-ref="scriptName" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
+            <textarea name="description" rows="2" placeholder="Description" x-ref="scriptDesc" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500"></textarea>
+            <select name="language" required x-ref="scriptLang" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200">
+              <option value="python">Python</option>
+              <option value="php">PHP</option>
+              <option value="bash">Bash</option>
+              <option value="node">Node.js</option>
+            </select>
+            <textarea name="code" required rows="10" placeholder="# Code..." x-ref="scriptCode" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono"></textarea>
+            <button type="submit" class="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">Sauvegarder</button>
+          </form>
+        </div>
       </div>
 
       {{-- Scripts list --}}
@@ -295,6 +359,76 @@
 </footer>
 
 <script>
+function assistantChat(mode) {
+  return {
+    assistMessages: [],
+    assistInput: '',
+    assistLoading: false,
+    assistMsgId: 0,
+    generatedData: null,
+    mode: mode,
+
+    async sendAssist() {
+      const msg = this.assistInput.trim();
+      if (!msg) return;
+
+      this.assistMessages.push({ id: ++this.assistMsgId, role: 'user', content: msg });
+      this.assistInput = '';
+      this.assistLoading = true;
+
+      try {
+        const history = this.assistMessages.map(m => ({ role: m.role, content: m.content }));
+        const res = await fetch('{{ route("partner.assist", $share->token) }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+          body: JSON.stringify({ message: msg, mode: this.mode, history: JSON.stringify(history.slice(0, -1)) }),
+        });
+        const data = await res.json();
+        const reply = data.reply || 'Erreur.';
+
+        this.assistMessages.push({ id: ++this.assistMsgId, role: 'assistant', content: reply });
+
+        // Check if AI generated a ready skill/script
+        const marker = this.mode === 'skill' ? '---SKILL_READY---' : '---SCRIPT_READY---';
+        if (reply.includes(marker)) {
+          const jsonStr = reply.split(marker)[1].trim();
+          try {
+            this.generatedData = JSON.parse(jsonStr);
+          } catch(e) {
+            // Try to extract JSON from the response
+            const match = jsonStr.match(/\{[\s\S]*\}/);
+            if (match) {
+              try { this.generatedData = JSON.parse(match[0]); } catch(e2) {}
+            }
+          }
+        }
+      } catch (e) {
+        this.assistMessages.push({ id: ++this.assistMsgId, role: 'assistant', content: 'Erreur de communication.' });
+      }
+
+      this.assistLoading = false;
+    },
+
+    fillForm() {
+      if (!this.generatedData) return;
+      const d = this.generatedData;
+
+      if (this.mode === 'skill') {
+        if (this.$refs.skillName) this.$refs.skillName.value = d.name || '';
+        if (this.$refs.skillDesc) this.$refs.skillDesc.value = d.description || '';
+        if (this.$refs.skillTrigger) this.$refs.skillTrigger.value = d.trigger_phrase || '';
+        if (this.$refs.skillRoutine) this.$refs.skillRoutine.value = JSON.stringify(d.routine || [], null, 2);
+      } else {
+        if (this.$refs.scriptName) this.$refs.scriptName.value = d.name || '';
+        if (this.$refs.scriptDesc) this.$refs.scriptDesc.value = d.description || '';
+        if (this.$refs.scriptLang) this.$refs.scriptLang.value = d.language || 'python';
+        if (this.$refs.scriptCode) this.$refs.scriptCode.value = d.code || '';
+      }
+      this.generatedData = null;
+    }
+  };
+}
+
 function partnerPortal() {
   return {
     tab: 'chat',

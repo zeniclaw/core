@@ -50,6 +50,7 @@ Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')-
     Route::get('/', [\App\Http\Controllers\PartnerPortalController::class, 'show'])->name('show');
     Route::post('/documents', [\App\Http\Controllers\PartnerPortalController::class, 'uploadDocument'])->name('documents.upload');
     Route::post('/chat', [\App\Http\Controllers\PartnerPortalController::class, 'chat'])->name('chat');
+    Route::post('/assist', [\App\Http\Controllers\PartnerPortalController::class, 'assistCreate'])->name('assist');
     Route::post('/skills', [\App\Http\Controllers\PartnerPortalController::class, 'storeSkill'])->name('skills.store');
     Route::put('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'updateSkill'])->name('skills.update');
     Route::delete('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'destroySkill'])->name('skills.destroy');

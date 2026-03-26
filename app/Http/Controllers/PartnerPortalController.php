@@ -275,6 +275,89 @@ class PartnerPortalController extends Controller
         return back()->with('success', 'Script supprimé.');
     }
 
+    /**
+     * AI Assistant: help partner create skills/scripts via conversation.
+     */
+    public function assistCreate(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+        $customAgent = $share->customAgent;
+
+        $request->validate([
+            'message' => 'required|string|max:3000',
+            'mode' => 'required|in:skill,script',
+            'history' => 'nullable|string', // JSON array of previous messages
+        ]);
+
+        $mode = $request->input('mode');
+        $history = json_decode($request->input('history', '[]'), true) ?: [];
+
+        $systemPrompt = $this->buildAssistantPrompt($mode, $customAgent);
+
+        // Build conversation for the LLM
+        $messages = $systemPrompt . "\n\n";
+        foreach ($history as $msg) {
+            $role = $msg['role'] === 'user' ? 'Utilisateur' : 'Assistant';
+            $messages .= "{$role}: {$msg['content']}\n";
+        }
+        $messages .= "Utilisateur: {$request->input('message')}";
+
+        $model = \App\Services\ModelResolver::fast();
+        $client = new \App\Services\AnthropicClient();
+        $reply = $client->chat($messages, $model, '', 1500);
+
+        if (!$reply) {
+            return response()->json(['reply' => "Erreur de communication avec l'IA. Réessayez."]);
+        }
+
+        return response()->json(['reply' => $reply]);
+    }
+
+    private function buildAssistantPrompt(string $mode, $customAgent): string
+    {
+        if ($mode === 'skill') {
+            return "Tu es un assistant specialise dans la creation de routines (skills) pour un agent IA nomme \"{$customAgent->name}\".
+
+L'agent a cette description: " . ($customAgent->description ?: 'Agent IA personnalise') . "
+
+Tu dois aider l'utilisateur a creer une routine en lui posant des questions:
+1. Quel est l'objectif de la routine ?
+2. Quelles etapes doit-elle suivre ?
+3. Quel sera le declencheur (phrase pour l'activer) ?
+
+Quand tu as assez d'infos, genere le JSON final EXACTEMENT dans ce format (et RIEN d'autre apres le JSON):
+---SKILL_READY---
+{
+  \"name\": \"Nom de la routine\",
+  \"description\": \"Description claire\",
+  \"trigger_phrase\": \"phrase declencheur\",
+  \"routine\": [{\"type\":\"prompt\",\"content\":\"Instruction pour l'etape 1\"},{\"type\":\"prompt\",\"content\":\"Instruction pour l'etape 2\"}]
+}
+
+Guide l'utilisateur etape par etape. Sois concis et pratique. Reponds en francais.";
+        }
+
+        return "Tu es un assistant specialise dans la creation de scripts pour un agent IA nomme \"{$customAgent->name}\".
+
+L'agent a cette description: " . ($customAgent->description ?: 'Agent IA personnalise') . "
+
+Tu dois aider l'utilisateur a creer un script en lui posant des questions:
+1. Que doit faire le script ?
+2. Quel langage prefere-t-il ? (Python, PHP, Bash, Node.js)
+3. Quelles donnees en entree/sortie ?
+
+Quand tu as assez d'infos, genere le code final EXACTEMENT dans ce format (et RIEN d'autre apres):
+---SCRIPT_READY---
+{
+  \"name\": \"Nom du script\",
+  \"description\": \"Description claire\",
+  \"language\": \"python\",
+  \"code\": \"# le code ici...\"
+}
+
+Guide l'utilisateur etape par etape. Sois concis et pratique. Reponds en francais.";
+    }
+
     private function processAsync(CustomAgentDocument $document): void
     {
         try {
