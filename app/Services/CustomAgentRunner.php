@@ -644,9 +644,10 @@ class CustomAgentRunner extends BaseAgent
             // ── Script execution ──
             $reply = $this->executeStepScript($step, $context, $model);
         } else {
-            // ── Simple chat (prompt only) ──
-            $userMsg = "Message utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
-            $reply = $this->claude->chat($userMsg, $model, $systemPrompt, 800);
+            // ── Simple chat (prompt only) — use CLI with system-prompt-file for long prompts ──
+            $userMsg = "Instruction: {$stepContent}\n\nMessage utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
+            $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
         }
 
         if (!$reply) {
@@ -923,6 +924,42 @@ class CustomAgentRunner extends BaseAgent
         $parts[] = "\nUtilise ces informations pour personnaliser tes reponses.";
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Chat via Claude CLI with system-prompt-file (handles long prompts).
+     */
+    private function chatViaCli(string $userMessage, string $systemPrompt, string $model): string
+    {
+        $apiKey = \App\Models\AppSetting::get('anthropic_api_key');
+        if (!$apiKey) return '';
+
+        $slug = match (true) {
+            str_contains($model, 'opus') => 'opus',
+            str_contains($model, 'haiku') => 'haiku',
+            default => 'sonnet',
+        };
+
+        $tmpFile = tempnam('/tmp', 'zc_sys_');
+        file_put_contents($tmpFile, $systemPrompt);
+
+        $cmd = sprintf(
+            'CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 2>/dev/null',
+            escapeshellarg($apiKey),
+            escapeshellarg($userMessage),
+            escapeshellarg($tmpFile),
+            escapeshellarg($slug)
+        );
+
+        $output = shell_exec($cmd);
+        @unlink($tmpFile);
+
+        if ($output) {
+            $data = json_decode($output, true);
+            return $data['result'] ?? '';
+        }
+
+        return '';
     }
 
     /**
