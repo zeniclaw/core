@@ -14,6 +14,7 @@
         "phpoffice/phpspreadsheet": "^5.5",
         "phpoffice/phpword": "^1.4",
         "predis/predis": "^3.4",
+        "smalot/pdfparser": "^2.12",
         "spatie/image": "^3.0",
         "thiagoalessio/tesseract_ocr": "^2.0"
     },
