@@ -16,6 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'webhook/*',
             'api/public-chat',
+            'partner/*/chat',
+            'partner/*/assist',
         ]);
         $middleware->alias([
             'role' => \App\Http\Middleware\RequireRole::class,
