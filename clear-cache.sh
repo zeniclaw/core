@@ -4,6 +4,10 @@
 
 set -e
 
+# Ensure Claude CLI temp dirs are writable
+mkdir -p /tmp/.claude/session-env /tmp/.claude/shell-snapshots 2>/dev/null || true
+chmod -R 777 /tmp/.claude 2>/dev/null || true
+
 echo "=== ZeniClaw Cache Clear ==="
 
 echo "[1/7] Config cache..."
