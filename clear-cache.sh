@@ -23,8 +23,11 @@ php /var/www/html/artisan view:clear
 echo "[4/7] Event cache..."
 php /var/www/html/artisan event:clear 2>/dev/null || true
 
-echo "[5/7] OPcache..."
-php -r "if (function_exists('opcache_reset')) { opcache_reset(); echo 'OPcache reset OK'; } else { echo 'OPcache not enabled'; }" && echo ""
+echo "[5/7] OPcache (CLI + FPM)..."
+php -r "if (function_exists('opcache_reset')) { opcache_reset(); echo 'OPcache CLI reset OK'; } else { echo 'OPcache not enabled'; }" && echo ""
+# Also reset FPM OPcache via HTTP (CLI reset doesn't affect FPM)
+echo '<?php opcache_reset(); echo "FPM OPcache reset OK"; unlink(__FILE__);' > /var/www/html/public/_opcache_reset.php
+curl -s http://localhost/_opcache_reset.php 2>/dev/null && echo "" || echo "FPM OPcache reset skipped"
 
 echo "[6/7] PHP-FPM reload..."
 if command -v supervisorctl &>/dev/null; then
