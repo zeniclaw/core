@@ -146,8 +146,10 @@ class CustomAgentRunner extends BaseAgent
         // 2. Classify model capabilities
         $tier = $this->classifyModel($model);
 
-        // 3. Retrieve relevant knowledge via adaptive RAG
-        $ragContext = $this->retrieveKnowledge($context->body ?? '', $tier);
+        // 3. Retrieve relevant knowledge via adaptive RAG (skip for very short messages)
+        $body = $context->body ?? '';
+        $isShortMessage = mb_strlen(trim($body)) < 30;
+        $ragContext = $isShortMessage ? [] : $this->retrieveKnowledge($body, $tier);
 
         // 4. Build system prompt with injected knowledge (format adapted to tier)
         $systemPrompt = $this->buildSystemPrompt($ragContext, $context, $tier);
