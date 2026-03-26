@@ -178,13 +178,11 @@ class CustomAgentRunner extends BaseAgent
             'rag_chunks' => count($ragContext),
         ]);
 
-        // Inject model info into metadata
-        $result->metadata = array_merge($result->metadata ?? [], [
+        // Return with model info in metadata
+        return AgentResult::reply($result->reply, array_merge($result->metadata ?? [], [
             'model' => $model,
             'tier' => $tier->value,
-        ]);
-
-        return $result;
+        ]));
     }
 
     /**
