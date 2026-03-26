@@ -86,4 +86,29 @@ class CustomAgent extends Model
     {
         return 'custom_' . $this->id;
     }
+
+    /**
+     * Get the isolated workspace path for this agent.
+     * Creates the directory if it doesn't exist.
+     */
+    public function workspacePath(string $subdir = ''): string
+    {
+        $base = storage_path("app/private/custom-agents/{$this->id}");
+        $path = $subdir ? "{$base}/{$subdir}" : $base;
+
+        if (!is_dir($path)) {
+            mkdir($path, 0775, true);
+        }
+
+        return $path;
+    }
+
+    /**
+     * Get the relative storage path for this agent (for Laravel Storage facade).
+     */
+    public function storagePath(string $subdir = ''): string
+    {
+        $base = "custom-agents/{$this->id}";
+        return $subdir ? "{$base}/{$subdir}" : $base;
+    }
 }

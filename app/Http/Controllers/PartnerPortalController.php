@@ -100,7 +100,7 @@ class PartnerPortalController extends Controller
         ]);
 
         $file = $request->file('file');
-        $path = $file->store('custom-agent-docs', 'local');
+        $path = $file->store("custom-agents/{$customAgent->id}/docs", 'local');
         $fullPath = storage_path('app/private/' . $path);
         $mime = $file->getMimeType();
 

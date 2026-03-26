@@ -718,6 +718,10 @@ class CustomAgentRunner extends BaseAgent
             $parts[] = $skillsInfo;
         }
 
+        // Inject workspace path so agent knows where to store/read files
+        $workspace = $this->customAgent->workspacePath();
+        $parts[] = "ESPACE DE TRAVAIL : {$workspace}\nSi tu dois telecharger, generer ou stocker des fichiers, utilise ce repertoire. Sous-dossiers : docs/, scripts/, downloads/";
+
         $parts[] = "Réponds en français sauf si l'utilisateur écrit dans une autre langue.";
 
         return implode("\n\n", $parts);
