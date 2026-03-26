@@ -884,7 +884,7 @@ footer {
         {{-- Founder card --}}
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; margin-bottom: 1.5rem;">
           <div style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem;">
-            <div style="width: 72px; height: 72px; border-radius: 50%; background: var(--gradient); display: flex; align-items: center; justify-content: center; font-size: 2rem; flex-shrink: 0;">GT</div>
+            <img src="https://www.zenibiz.com/guillaume_tilleul.jpg" alt="Guillaume Tilleul" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--border);">
             <div>
               <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 2px;">Guillaume Tilleul</h3>
               <p style="font-size: 0.85rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">
