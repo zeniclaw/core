@@ -522,8 +522,44 @@ class CustomAgentRunner extends BaseAgent
         $body = mb_strtolower(trim($context->body ?? ''));
         if (!$body) return null;
 
-        // First check: are we already in the middle of a routine?
         $activeSkills = $this->customAgent->skills()->where('is_active', true)->get();
+
+        // Allow user to cancel any active routine
+        if (in_array($body, ['stop', 'annuler', 'cancel', 'quitter', 'sortir', 'exit'])) {
+            foreach ($activeSkills as $skill) {
+                $cacheKey = "skill_step:{$context->from}:{$skill->id}";
+                \Illuminate\Support\Facades\Cache::forget($cacheKey);
+            }
+            return null; // Fall through to normal chat
+        }
+
+        // Check if message matches a NEW trigger phrase (takes priority over active routines)
+        $matchedSkill = null;
+        foreach ($activeSkills as $skill) {
+            $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
+            // Strip surrounding quotes from trigger
+            $trigger = trim($trigger, "\"'");
+            if (!$trigger) continue;
+            if (str_contains($body, $trigger)) {
+                $matchedSkill = $skill;
+                break;
+            }
+        }
+
+        if ($matchedSkill) {
+            // Cancel any other active routines
+            foreach ($activeSkills as $skill) {
+                if ($skill->id !== $matchedSkill->id) {
+                    \Illuminate\Support\Facades\Cache::forget("skill_step:{$context->from}:{$skill->id}");
+                }
+            }
+            // Reset step counter for fresh trigger
+            \Illuminate\Support\Facades\Cache::put("skill_step:{$context->from}:{$matchedSkill->id}", 0, 3600);
+            $this->log($context, "Skill triggered: {$matchedSkill->name}");
+            return $this->executeSkillRoutine($matchedSkill, $context);
+        }
+
+        // No new trigger — check if there's an active routine in progress
         foreach ($activeSkills as $skill) {
             $cacheKey = "skill_step:{$context->from}:{$skill->id}";
             $currentStep = \Illuminate\Support\Facades\Cache::get($cacheKey);
@@ -534,26 +570,7 @@ class CustomAgentRunner extends BaseAgent
             }
         }
 
-        // Second check: does the message match a trigger phrase?
-        $matchedSkill = null;
-        foreach ($activeSkills as $skill) {
-            $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
-            if (!$trigger) continue;
-            if (str_contains($body, $trigger)) {
-                $matchedSkill = $skill;
-                break;
-            }
-        }
-
-        if (!$matchedSkill) return null;
-
-        // Reset step counter for fresh trigger
-        $cacheKey = "skill_step:{$context->from}:{$matchedSkill->id}";
-        \Illuminate\Support\Facades\Cache::put($cacheKey, 0, 3600);
-
-        $this->log($context, "Skill triggered: {$matchedSkill->name}");
-
-        return $this->executeSkillRoutine($matchedSkill, $context);
+        return null;
     }
 
     /**
