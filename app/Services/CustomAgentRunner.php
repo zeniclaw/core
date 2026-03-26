@@ -228,7 +228,7 @@ class CustomAgentRunner extends BaseAgent
 
         // Save conversation
         $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $response);
-        $this->sendText($context->from, $response);
+        if (!$this->isWebChat($context)) $this->sendText($context->from, $response);
 
         return AgentResult::reply($response, [
             'custom_agent_id' => $this->customAgent->id,
@@ -275,7 +275,7 @@ class CustomAgentRunner extends BaseAgent
         }
 
         $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $response);
-        $this->sendText($context->from, $response);
+        if (!$this->isWebChat($context)) $this->sendText($context->from, $response);
 
         return AgentResult::reply($response, [
             'custom_agent_id' => $this->customAgent->id,
@@ -618,16 +618,17 @@ class CustomAgentRunner extends BaseAgent
         $tier = $this->classifyModel($model);
         $systemPrompt = $this->buildSkillStepPrompt($skill, $currentStep, $routine, $context, $tier);
 
-        // Determine if we should use agentic loop (tools)
+        // Determine execution mode based on step type
         $enabledTools = $this->customAgent->enabled_tools ?? [];
         $hasTools = !empty($enabledTools);
         $canUseTools = in_array($tier, [ModelTier::Balanced, ModelTier::Powerful]);
-        $needsAction = in_array($stepType, ['action', 'api_call', 'script']) || $hasTools;
+        // Only use agentic loop for explicit action steps — NOT for regular prompts
+        $needsAgenticLoop = in_array($stepType, ['action', 'api_call']);
 
         $reply = '';
 
-        if ($needsAction && $hasTools && $canUseTools) {
-            // ── Agentic loop: can actually execute tools (API calls, code, etc.) ──
+        if ($needsAgenticLoop && $hasTools && $canUseTools) {
+            // ── Agentic loop: execute real tools (API calls, web search, code) ──
             $reply = $this->executeStepWithTools($context, $systemPrompt, $model, $enabledTools, $stepContent);
         } elseif ($stepType === 'script') {
             // ── Script execution ──
@@ -656,7 +657,7 @@ class CustomAgentRunner extends BaseAgent
         }
 
         $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $reply);
-        $this->sendText($context->from, $reply);
+        if (!$this->isWebChat($context)) $this->sendText($context->from, $reply);
 
         return AgentResult::reply($reply, [
             'custom_agent_id' => $this->customAgent->id,
@@ -854,7 +855,7 @@ class CustomAgentRunner extends BaseAgent
         $reply = "✅ C'est noté ! J'ai mémorisé : \"{$content}\"\n\n_Je m'en souviendrai dans toutes nos futures conversations._";
 
         $this->memory->append($context->agent->id, $context->from, $context->senderName, $body, $reply);
-        $this->sendText($context->from, $reply);
+        if (!$this->isWebChat($context)) $this->sendText($context->from, $reply);
 
         return AgentResult::reply($reply, [
             'custom_agent_id' => $this->customAgent->id,
@@ -892,6 +893,15 @@ class CustomAgentRunner extends BaseAgent
         $parts[] = "\nUtilise ces informations pour personnaliser tes reponses.";
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Check if the context is a web/partner chat (not WhatsApp).
+     */
+    private function isWebChat(AgentContext $context): bool
+    {
+        return str_starts_with($context->from, 'web-custom-test-')
+            || str_starts_with($context->from, 'partner-');
     }
 
     /**
