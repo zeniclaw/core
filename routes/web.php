@@ -45,6 +45,19 @@ Route::get('/robots.txt', function () {
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
 Route::post('/contact', [\App\Http\Controllers\ContactFormController::class, 'send'])->name('contact.send');
 
+// Partner Portal (public, token-secured)
+Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')->group(function () {
+    Route::get('/', [\App\Http\Controllers\PartnerPortalController::class, 'show'])->name('show');
+    Route::post('/documents', [\App\Http\Controllers\PartnerPortalController::class, 'uploadDocument'])->name('documents.upload');
+    Route::post('/chat', [\App\Http\Controllers\PartnerPortalController::class, 'chat'])->name('chat');
+    Route::post('/skills', [\App\Http\Controllers\PartnerPortalController::class, 'storeSkill'])->name('skills.store');
+    Route::put('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'updateSkill'])->name('skills.update');
+    Route::delete('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'destroySkill'])->name('skills.destroy');
+    Route::post('/scripts', [\App\Http\Controllers\PartnerPortalController::class, 'storeScript'])->name('scripts.store');
+    Route::put('/scripts/{script}', [\App\Http\Controllers\PartnerPortalController::class, 'updateScript'])->name('scripts.update');
+    Route::delete('/scripts/{script}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyScript'])->name('scripts.destroy');
+});
+
 // Private agent approval (public, token-secured)
 Route::get('/approve/private/{token}', [AgentController::class, 'showPrivateApproval'])->name('approve.private.show');
 Route::post('/approve/private/{token}', [AgentController::class, 'processPrivateApproval'])->name('approve.private.process');
@@ -117,6 +130,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agents/{agent}/custom-agents/{customAgent}/update-tools', [CustomAgentController::class, 'updateTools'])->name('custom-agents.update-tools');
     Route::post('/agents/{agent}/custom-agents/{customAgent}/update-access', [CustomAgentController::class, 'updateAccess'])->name('custom-agents.update-access');
     Route::post('/agents/{agent}/custom-agents/{customAgent}/test-chat', [CustomAgentController::class, 'testChat'])->name('custom-agents.test-chat');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/shares', [CustomAgentController::class, 'createShare'])->name('custom-agents.shares.create');
+    Route::delete('/agents/{agent}/custom-agents/{customAgent}/shares/{share}', [CustomAgentController::class, 'revokeShare'])->name('custom-agents.shares.revoke');
 
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');

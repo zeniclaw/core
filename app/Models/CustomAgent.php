@@ -35,6 +35,21 @@ class CustomAgent extends Model
         return $this->hasMany(CustomAgentChunk::class);
     }
 
+    public function shares(): HasMany
+    {
+        return $this->hasMany(CustomAgentShare::class);
+    }
+
+    public function skills(): HasMany
+    {
+        return $this->hasMany(CustomAgentSkill::class);
+    }
+
+    public function scripts(): HasMany
+    {
+        return $this->hasMany(CustomAgentScript::class);
+    }
+
     /**
      * Check if a peer (WhatsApp ID) is authorized to use this agent.
      * If allowed_peers is empty/null, the agent is open to all.

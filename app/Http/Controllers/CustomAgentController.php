@@ -78,8 +78,9 @@ class CustomAgentController extends Controller
 
         $customAgent->loadCount(['documents', 'chunks']);
         $documents = $customAgent->documents()->orderBy('created_at', 'desc')->get();
+        $shares = $customAgent->shares()->orderBy('created_at', 'desc')->get();
 
-        return view('custom-agents.show', compact('agent', 'customAgent', 'documents'));
+        return view('custom-agents.show', compact('agent', 'customAgent', 'documents', 'shares'));
     }
 
     /**
@@ -347,6 +348,45 @@ class CustomAgentController extends Controller
     }
 
     // ── Helpers ────────────────────────────────────────────────────
+
+    // ── Shares ────────────────────────────────────────────────────
+
+    public function createShare(Request $request, Agent $agent, CustomAgent $customAgent)
+    {
+        $this->authorizeAgent($agent);
+        $this->ensureOwnership($agent, $customAgent);
+
+        $validated = $request->validate([
+            'partner_name' => 'nullable|string|max:100',
+            'expires_days' => 'nullable|integer|min:1|max:365',
+        ]);
+
+        $share = \App\Models\CustomAgentShare::create([
+            'custom_agent_id' => $customAgent->id,
+            'token' => \Illuminate\Support\Str::random(64),
+            'partner_name' => $validated['partner_name'] ?? null,
+            'permissions' => ['documents', 'chat', 'skills', 'scripts'],
+            'expires_at' => !empty($validated['expires_days']) ? now()->addDays($validated['expires_days']) : null,
+        ]);
+
+        $url = url("/partner/{$share->token}");
+
+        return redirect()->route('custom-agents.show', [$agent, $customAgent])
+            ->with('success', "Lien partenaire créé : {$url}")
+            ->with('share_url', $url);
+    }
+
+    public function revokeShare(Agent $agent, CustomAgent $customAgent, \App\Models\CustomAgentShare $share)
+    {
+        $this->authorizeAgent($agent);
+        $this->ensureOwnership($agent, $customAgent);
+
+        if ($share->custom_agent_id !== $customAgent->id) abort(403);
+
+        $share->update(['is_revoked' => true]);
+
+        return back()->with('success', 'Lien révoqué.');
+    }
 
     /**
      * Process document: try async (queue), fallback to sync if queue unavailable.

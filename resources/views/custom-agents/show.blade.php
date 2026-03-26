@@ -49,7 +49,7 @@
     {{-- Tabs --}}
     <div x-data="{ tab: 'documents' }">
         <div class="flex gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1 mb-4">
-            @foreach(['documents'=>'📄 Documents', 'tools'=>'🛠️ Outils', 'access'=>'🔒 Acces', 'chat'=>'💬 Test Chat', 'settings'=>'⚙️ Parametres'] as $t => $l)
+            @foreach(['documents'=>'📄 Documents', 'tools'=>'🛠️ Outils', 'access'=>'🔒 Acces', 'chat'=>'💬 Test Chat', 'share'=>'🔗 Partage', 'settings'=>'⚙️ Parametres'] as $t => $l)
             <button @@click="tab = '{{ $t }}'"
                     :class="tab === '{{ $t }}' ? 'bg-indigo-600 text-white shadow' : 'text-gray-500 hover:text-gray-800'"
                     class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all">{{ $l }}</button>
@@ -287,6 +287,73 @@
                         </form>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        {{-- SHARE tab --}}
+        <div x-show="tab === 'share'">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 class="font-semibold text-gray-800 mb-2">Liens partenaires</h3>
+                <p class="text-sm text-gray-500 mb-4">Generez un lien pour donner acces a un partenaire. Il pourra ajouter des documents, chatter avec l'agent, creer des skills et des scripts.</p>
+
+                <form method="POST" action="{{ route('custom-agents.shares.create', [$agent, $customAgent]) }}" class="flex items-end gap-3 mb-6">
+                    @csrf
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Nom du partenaire (optionnel)</label>
+                        <input type="text" name="partner_name" placeholder="Ex: Agence XYZ" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Expiration (jours)</label>
+                        <input type="number" name="expires_days" placeholder="Illimite" min="1" max="365" class="w-32 px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                    </div>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Generer le lien</button>
+                </form>
+
+                @if(session('share_url'))
+                <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
+                    <p class="text-sm text-indigo-700 font-medium mb-2">Lien cree ! Copiez-le :</p>
+                    <div class="flex items-center gap-2">
+                        <input type="text" value="{{ session('share_url') }}" readonly class="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono text-indigo-800" id="shareUrl">
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('shareUrl').value); this.textContent='Copie !'; setTimeout(() => this.textContent='Copier', 2000);"
+                                class="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Copier</button>
+                    </div>
+                </div>
+                @endif
+
+                @if(isset($shares) && $shares->count() > 0)
+                <div class="border-t border-gray-100 pt-4">
+                    <h4 class="text-sm font-medium text-gray-700 mb-3">Liens existants ({{ $shares->count() }})</h4>
+                    <div class="space-y-2">
+                        @foreach($shares as $share)
+                        <div class="flex items-center gap-3 p-3 rounded-lg {{ $share->is_revoked ? 'bg-gray-50 opacity-60' : 'bg-gray-50' }}">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-medium text-gray-800">{{ $share->partner_name ?: 'Sans nom' }}</span>
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $share->isValid() ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }}">
+                                        {{ $share->is_revoked ? 'Revoque' : ($share->expires_at && $share->expires_at->isPast() ? 'Expire' : 'Actif') }}
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-3 text-xs text-gray-400 mt-1">
+                                    <span>{{ $share->access_count }} acces</span>
+                                    @if($share->last_accessed_at)<span>Dernier: {{ $share->last_accessed_at->diffForHumans() }}</span>@endif
+                                    @if($share->expires_at)<span>Expire: {{ $share->expires_at->format('d/m/Y') }}</span>@endif
+                                    <span>Cree {{ $share->created_at->diffForHumans() }}</span>
+                                </div>
+                            </div>
+                            @if($share->isValid())
+                            <button onclick="navigator.clipboard.writeText('{{ url("/partner/{$share->token}") }}'); this.textContent='Copie !'; setTimeout(() => this.textContent='Copier', 2000);"
+                                    class="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Copier</button>
+                            <form method="POST" action="{{ route('custom-agents.shares.revoke', [$agent, $customAgent, $share]) }}"
+                                  onsubmit="return confirm('Revoquer ce lien ?')">
+                                @csrf @method('DELETE')
+                                <button class="px-2 py-1 text-xs text-red-500 hover:underline">Revoquer</button>
+                            </form>
+                            @endif
+                        </div>
+                        @endforeach
+                    </div>
+                </div>
+                @endif
             </div>
         </div>
 
