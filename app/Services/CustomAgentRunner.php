@@ -743,11 +743,8 @@ class CustomAgentRunner extends BaseAgent
      */
     private function executeStepWithTools(AgentContext $context, string $systemPrompt, string $model, array $enabledGroups, string $stepInstruction): string
     {
-        // Use CLI Claude directly with async progress tracking
         $apiKey = \App\Models\AppSetting::get('anthropic_api_key');
-        if (!$apiKey) {
-            return '';
-        }
+        if (!$apiKey) return '';
 
         $slug = match (true) {
             str_contains($model, 'opus') => 'opus',
@@ -755,16 +752,29 @@ class CustomAgentRunner extends BaseAgent
             default => 'sonnet',
         };
 
-        $fullPrompt = "{$systemPrompt}\n\n---\n\nEXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
+        // Inject credentials values directly into the instruction for the LLM
+        $enrichedInstruction = $stepInstruction;
+        $creds = $this->customAgent->credentials()->where('is_active', true)->get();
+        foreach ($creds as $cred) {
+            if (str_contains($stepInstruction, $cred->key)) {
+                $enrichedInstruction = str_replace(
+                    "credential {$cred->key}",
+                    "{$cred->key}: {$cred->decrypted_value}",
+                    $enrichedInstruction
+                );
+                $enrichedInstruction = str_replace(
+                    $cred->key,
+                    "{$cred->key} ({$cred->decrypted_value})",
+                    $enrichedInstruction
+                );
+            }
+        }
 
-        // Phase 1: Preparation
-        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Connexion au modele {$slug}...");
+        $userMessage = "EXECUTE CETTE INSTRUCTION:\n{$enrichedInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
 
-        // Write system prompt to temp file (avoids shell argument length limits)
+        // Write system prompt to temp file
         $tmpFile = tempnam('/tmp', 'zc_sys_');
         file_put_contents($tmpFile, $systemPrompt);
-
-        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
 
         $cmd = sprintf(
             'claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 8 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
@@ -773,42 +783,26 @@ class CustomAgentRunner extends BaseAgent
             escapeshellarg($slug)
         );
 
-        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Execution via CLI ({$slug})...");
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Connexion au modele {$slug}...");
+        $this->startProgressTimer($context, $this->currentStepLabel ?? 'Execution...');
 
-        // Use Process::run (blocking but reliable) with a background progress updater
-        $progressPid = $this->startProgressTimer($context, $this->currentStepLabel ?? 'Execution...');
+        // Execute via shell_exec (simpler, works from FPM context)
+        $env = "CLAUDE_CODE_OAUTH_TOKEN=" . escapeshellarg($apiKey) . " HOME=/tmp";
+        $fullCmd = "{$env} {$cmd}";
+        $output = shell_exec($fullCmd);
 
-        $result = \Illuminate\Support\Facades\Process::timeout(120)
-            ->env([
-                'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
-                'HOME' => '/tmp',
-            ])
-            ->run($cmd);
-
-        $this->stopProgressTimer($progressPid);
-
-        $output = $result->output();
-
-        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Reponse recue, traitement...");
         @unlink($tmpFile);
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Reponse recue...");
 
-        // Parse JSON result
-        $data = json_decode($output, true);
-        $reply = $data['result'] ?? '';
-
-        if ($reply) {
-            return $reply;
+        if ($output) {
+            $data = json_decode($output, true);
+            $reply = $data['result'] ?? '';
+            if ($reply) return $reply;
         }
 
-        \Illuminate\Support\Facades\Log::warning("executeStepWithTools: no result, trying fallback");
-
-        // Fallback: simple chat
-        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Fallback chat...");
-        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
-        $reply = $this->claude->chat($userMessage, $model, $systemPrompt, 800);
-        if ($reply) return $reply;
-
-        return '';
+        // Fallback: simple chat via AnthropicClient
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Fallback...");
+        return $this->claude->chat($userMessage, $model, $systemPrompt, 800) ?: '';
     }
 
     /**
