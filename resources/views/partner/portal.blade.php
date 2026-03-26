@@ -196,11 +196,15 @@
             <div x-show="assistLoading" class="text-xs text-gray-500">Reflexion...</div>
           </div>
 
-          <form @submit.prevent="sendAssist()" class="flex gap-2">
-            <input type="text" x-model="assistInput" :disabled="assistLoading" placeholder="Ex: je veux un briefing du matin..."
-                   class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-purple-500">
-            <button type="submit" :disabled="assistLoading || !assistInput.trim()"
-                    class="px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-40">Envoyer</button>
+          <form @submit.prevent="sendAssist()" class="space-y-2">
+            <textarea x-model="assistInput" :disabled="assistLoading" rows="3" placeholder="Ex: je veux un briefing du matin qui resume les taches en cours, verifie les rappels et propose 3 priorites..."
+                   class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 outline-none focus:border-purple-500 resize-y"
+                   @keydown.ctrl.enter="sendAssist()" @keydown.meta.enter="sendAssist()"></textarea>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-600">Ctrl+Enter pour envoyer</span>
+              <button type="submit" :disabled="assistLoading || !assistInput.trim()"
+                      class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-40">Envoyer</button>
+            </div>
           </form>
 
           {{-- Auto-fill form when AI generates the skill --}}
@@ -283,11 +287,15 @@
             <div x-show="assistLoading" class="text-xs text-gray-500">Reflexion...</div>
           </div>
 
-          <form @submit.prevent="sendAssist()" class="flex gap-2">
-            <input type="text" x-model="assistInput" :disabled="assistLoading" placeholder="Ex: un script qui genere un rapport CSV..."
-                   class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-green-500">
-            <button type="submit" :disabled="assistLoading || !assistInput.trim()"
-                    class="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-40">Envoyer</button>
+          <form @submit.prevent="sendAssist()" class="space-y-2">
+            <textarea x-model="assistInput" :disabled="assistLoading" rows="3" placeholder="Ex: un script Python qui genere un rapport CSV a partir des conversations de la semaine..."
+                   class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 outline-none focus:border-green-500 resize-y"
+                   @keydown.ctrl.enter="sendAssist()" @keydown.meta.enter="sendAssist()"></textarea>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-600">Ctrl+Enter pour envoyer</span>
+              <button type="submit" :disabled="assistLoading || !assistInput.trim()"
+                      class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-40">Envoyer</button>
+            </div>
           </form>
 
           <template x-if="generatedData">
