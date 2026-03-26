@@ -522,16 +522,23 @@ class CustomAgentRunner extends BaseAgent
         $body = mb_strtolower(trim($context->body ?? ''));
         if (!$body) return null;
 
-        $skills = $this->customAgent->skills()
-            ->where('is_active', true)
-            ->whereNotNull('trigger_phrase')
-            ->get();
+        // First check: are we already in the middle of a routine?
+        $activeSkills = $this->customAgent->skills()->where('is_active', true)->get();
+        foreach ($activeSkills as $skill) {
+            $cacheKey = "skill_step:{$context->from}:{$skill->id}";
+            $currentStep = \Illuminate\Support\Facades\Cache::get($cacheKey);
+            if ($currentStep !== null && $currentStep < count($skill->routine ?? [])) {
+                $this->log($context, "Continuing skill routine: {$skill->name} step " . ($currentStep + 1));
+                $result = $this->executeSkillRoutine($skill, $context);
+                if ($result) return $result;
+            }
+        }
 
+        // Second check: does the message match a trigger phrase?
         $matchedSkill = null;
-        foreach ($skills as $skill) {
-            $trigger = mb_strtolower(trim($skill->trigger_phrase));
+        foreach ($activeSkills as $skill) {
+            $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
             if (!$trigger) continue;
-            // Match if message contains the trigger phrase
             if (str_contains($body, $trigger)) {
                 $matchedSkill = $skill;
                 break;
@@ -540,13 +547,18 @@ class CustomAgentRunner extends BaseAgent
 
         if (!$matchedSkill) return null;
 
+        // Reset step counter for fresh trigger
+        $cacheKey = "skill_step:{$context->from}:{$matchedSkill->id}";
+        \Illuminate\Support\Facades\Cache::put($cacheKey, 0, 3600);
+
         $this->log($context, "Skill triggered: {$matchedSkill->name}");
 
         return $this->executeSkillRoutine($matchedSkill, $context);
     }
 
     /**
-     * Execute a skill's routine steps sequentially.
+     * Execute a skill's routine — only the CURRENT step, not all at once.
+     * Tracks progress via session memory so each user reply advances to the next step.
      */
     private function executeSkillRoutine(\App\Models\CustomAgentSkill $skill, AgentContext $context): AgentResult
     {
@@ -559,13 +571,28 @@ class CustomAgentRunner extends BaseAgent
             ? $this->customAgent->model
             : $this->resolveModel($context);
 
-        $results = [];
-        $conversationContext = "Tu executes la routine \"{$skill->name}\".\n";
+        // Track which step we're on via cache (keyed by session + skill)
+        $cacheKey = "skill_step:{$context->from}:{$skill->id}";
+        $currentStep = (int) \Illuminate\Support\Facades\Cache::get($cacheKey, 0);
+
+        // If we've gone past all steps, reset and let normal chat handle it
+        if ($currentStep >= count($routine)) {
+            \Illuminate\Support\Facades\Cache::forget($cacheKey);
+            return null; // Fall through to normal chat
+        }
+
+        $step = $routine[$currentStep];
+        $stepType = $step['type'] ?? 'prompt';
+        $stepContent = $step['content'] ?? '';
+
+        // Build context for this step
+        $conversationContext = "Tu executes la routine \"{$skill->name}\" (etape " . ($currentStep + 1) . "/" . count($routine) . ").\n";
         if ($skill->description) {
             $conversationContext .= "Description: {$skill->description}\n";
         }
+        $conversationContext .= "Instruction pour cette etape: {$stepContent}\n";
 
-        // Add RAG knowledge for context
+        // Add RAG knowledge
         $tier = $this->classifyModel($model);
         $ragContext = $this->retrieveKnowledge($context->body ?? $skill->name, $tier);
         if (!empty($ragContext)) {
@@ -575,38 +602,41 @@ class CustomAgentRunner extends BaseAgent
             }
         }
 
-        foreach ($routine as $step) {
-            $stepType = $step['type'] ?? 'prompt';
-            $stepContent = $step['content'] ?? '';
-
-            if ($stepType === 'prompt' && $stepContent) {
-                $fullPrompt = $conversationContext . "\nEtape en cours: " . $stepContent;
-                if (!empty($results)) {
-                    $fullPrompt .= "\n\nResultats precedents:\n" . implode("\n---\n", $results);
-                }
-                $fullPrompt .= "\n\nMessage utilisateur: " . ($context->body ?? '');
-
-                $response = $this->claude->chat($fullPrompt, $model, $this->customAgent->system_prompt ?? '', 500);
-                if ($response) {
-                    $results[] = $response;
-                }
-            } elseif ($stepType === 'script') {
-                // Find and note the script (execution is logged but sandboxed)
-                $scriptName = $step['script'] ?? '';
-                $script = $this->customAgent->scripts()->where('name', $scriptName)->where('is_active', true)->first();
-                if ($script) {
-                    $results[] = "[Script \"{$script->name}\" ({$script->language}) référencé — exécution sandboxée non implémentée]";
-                }
+        // Add conversation history for continuity
+        $history = $this->memory->read($context->agent->id, $context->from);
+        $entries = $history['entries'] ?? [];
+        $recent = array_slice($entries, -3);
+        if (!empty($recent)) {
+            $conversationContext .= "\nHistorique recent:\n";
+            foreach ($recent as $entry) {
+                if (!empty($entry['sender_message'])) $conversationContext .= "Utilisateur: {$entry['sender_message']}\n";
+                if (!empty($entry['agent_reply'])) $conversationContext .= "Agent: " . mb_substr($entry['agent_reply'], 0, 200) . "\n";
             }
         }
 
-        $combined = implode("\n\n", $results);
-        if (!$combined) {
-            $combined = "La routine \"{$skill->name}\" n'a produit aucun résultat.";
+        $conversationContext .= "\nMessage utilisateur: " . ($context->body ?? '');
+        $conversationContext .= "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+
+        $reply = '';
+        if ($stepType === 'prompt' && $stepContent) {
+            $reply = $this->claude->chat($conversationContext, $model, $this->customAgent->system_prompt ?? '', 500);
+        } elseif ($stepType === 'script') {
+            $scriptName = $step['script'] ?? '';
+            $script = $this->customAgent->scripts()->where('name', $scriptName)->where('is_active', true)->first();
+            $reply = $script ? "[Script \"{$script->name}\" execute]" : "[Script non trouve]";
         }
 
-        // Prefix with skill name
-        $reply = "⚡ **{$skill->name}**\n\n{$combined}";
+        if (!$reply) {
+            $reply = "Je continue...";
+        }
+
+        // Advance to next step for next message
+        \Illuminate\Support\Facades\Cache::put($cacheKey, $currentStep + 1, 3600); // 1h TTL
+
+        // Only show skill name on first step
+        if ($currentStep === 0) {
+            $reply = "⚡ **{$skill->name}**\n\n{$reply}";
+        }
 
         $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $reply);
         $this->sendText($context->from, $reply);
@@ -614,6 +644,8 @@ class CustomAgentRunner extends BaseAgent
         return AgentResult::reply($reply, [
             'custom_agent_id' => $this->customAgent->id,
             'skill_triggered' => $skill->name,
+            'step' => $currentStep + 1,
+            'total_steps' => count($routine),
         ]);
     }
 
