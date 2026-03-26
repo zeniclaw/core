@@ -43,6 +43,7 @@ Route::get('/robots.txt', function () {
     return response($content, 200, ['Content-Type' => 'text/plain']);
 });
 Route::post('/webhook/whatsapp/{agent}', [ChannelController::class, 'whatsappWebhook'])->name('webhook.whatsapp');
+Route::post('/contact', [\App\Http\Controllers\ContactFormController::class, 'send'])->name('contact.send');
 
 // Private agent approval (public, token-secured)
 Route::get('/approve/private/{token}', [AgentController::class, 'showPrivateApproval'])->name('approve.private.show');
