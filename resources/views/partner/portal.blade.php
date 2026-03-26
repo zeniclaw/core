@@ -178,15 +178,15 @@
 
   {{-- ══════ SKILLS TAB ══════ --}}
   <div x-show="tab === 'skills'" x-data="assistantChat('skill')">
-    <div class="grid gap-6 lg:grid-cols-3">
+    <div class="grid gap-6 lg:grid-cols-5">
       {{-- AI Assistant + Manual form --}}
-      <div class="lg:col-span-1 space-y-4">
+      <div class="lg:col-span-2 space-y-4">
         {{-- AI Assistant --}}
         <div class="bg-gray-900 rounded-2xl border border-purple-800/50 p-5">
           <h3 class="font-semibold text-purple-300 mb-3 flex items-center gap-2">🤖 Assistant IA — Creer une routine</h3>
           <p class="text-xs text-gray-400 mb-3">Decrivez ce que vous voulez et l'IA vous guidera pour creer la routine.</p>
 
-          <div class="bg-gray-950 rounded-xl p-3 mb-3 max-h-64 overflow-y-auto space-y-2" x-ref="assistMsgsSkill">
+          <div class="bg-gray-950 rounded-xl p-3 mb-3 min-h-[300px] max-h-[500px] overflow-y-auto space-y-2" x-ref="assistMsgsSkill">
             <template x-for="msg in assistMessages" :key="msg.id">
               <div :class="msg.role === 'user' ? 'text-right' : ''">
                 <span :class="msg.role === 'user' ? 'bg-purple-700 text-white' : 'bg-gray-800 text-gray-200'"
@@ -228,7 +228,7 @@
       </div>
 
       {{-- Skills list --}}
-      <div class="lg:col-span-2 space-y-3">
+      <div class="lg:col-span-3 space-y-3">
         @forelse($skills as $skill)
         <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
           <div class="flex items-start justify-between mb-2">
@@ -265,15 +265,15 @@
 
   {{-- ══════ SCRIPTS TAB ══════ --}}
   <div x-show="tab === 'scripts'" x-data="assistantChat('script')">
-    <div class="grid gap-6 lg:grid-cols-3">
+    <div class="grid gap-6 lg:grid-cols-5">
       {{-- AI Assistant + Manual form --}}
-      <div class="lg:col-span-1 space-y-4">
+      <div class="lg:col-span-2 space-y-4">
         {{-- AI Assistant --}}
         <div class="bg-gray-900 rounded-2xl border border-green-800/50 p-5">
           <h3 class="font-semibold text-green-300 mb-3 flex items-center gap-2">🤖 Assistant IA — Creer un script</h3>
           <p class="text-xs text-gray-400 mb-3">Decrivez ce que le script doit faire et l'IA generera le code.</p>
 
-          <div class="bg-gray-950 rounded-xl p-3 mb-3 max-h-64 overflow-y-auto space-y-2" x-ref="assistMsgsScript">
+          <div class="bg-gray-950 rounded-xl p-3 mb-3 min-h-[300px] max-h-[500px] overflow-y-auto space-y-2" x-ref="assistMsgsScript">
             <template x-for="msg in assistMessages" :key="msg.id">
               <div :class="msg.role === 'user' ? 'text-right' : ''">
                 <span :class="msg.role === 'user' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-200'"
@@ -318,7 +318,7 @@
       </div>
 
       {{-- Scripts list --}}
-      <div class="lg:col-span-2 space-y-3">
+      <div class="lg:col-span-3 space-y-3">
         @forelse($scripts as $script)
         <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
           <div class="flex items-start justify-between mb-2">
