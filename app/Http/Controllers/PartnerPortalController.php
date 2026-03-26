@@ -172,7 +172,31 @@ class PartnerPortalController extends Controller
         }
 
         $sessionKey = 'partner-' . $share->id;
-        $progress = \Illuminate\Support\Facades\Cache::get("agent_progress:{$sessionKey}", [
+        $cache = \Illuminate\Support\Facades\Cache::getFacadeRoot();
+
+        // Check if there's a timed progress running
+        $startTime = $cache->get("agent_progress:{$sessionKey}:start");
+        if ($startTime) {
+            $elapsed = time() - $startTime;
+            $stepLabel = $cache->get("agent_progress:{$sessionKey}:label", 'Execution...');
+
+            // Find the right phase
+            $phases = [0,3,6,10,15,20,30,45,60,90];
+            $phase = "En cours...";
+            foreach ($phases as $sec) {
+                if ($elapsed >= $sec) {
+                    $phase = $cache->get("agent_progress:{$sessionKey}:phase:{$sec}", $phase);
+                }
+            }
+
+            return response()->json([
+                'status' => 'skill',
+                'step' => $stepLabel,
+                'detail' => "{$phase} ({$elapsed}s)",
+            ]);
+        }
+
+        $progress = $cache->get("agent_progress:{$sessionKey}", [
             'status' => 'idle',
             'step' => '',
             'detail' => '',

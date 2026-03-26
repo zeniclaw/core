@@ -773,71 +773,21 @@ class CustomAgentRunner extends BaseAgent
             escapeshellarg($slug)
         );
 
-        // Launch async process
-        $proc = proc_open($cmd, [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ], $pipes, null, [
-            'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
-            'HOME' => '/tmp',
-        ]);
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Execution via CLI ({$slug})...");
 
-        if (!is_resource($proc)) {
-            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Erreur: impossible de lancer la CLI");
-            return '';
-        }
+        // Use Process::run (blocking but reliable) with a background progress updater
+        $progressPid = $this->startProgressTimer($context, $this->currentStepLabel ?? 'Execution...');
 
-        fclose($pipes[0]); // Close stdin
+        $result = \Illuminate\Support\Facades\Process::timeout(120)
+            ->env([
+                'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
+                'HOME' => '/tmp',
+            ])
+            ->run($cmd);
 
-        // Set stdout to non-blocking so we can poll
-        stream_set_blocking($pipes[1], false);
-        stream_set_blocking($pipes[2], false);
+        $this->stopProgressTimer($progressPid);
 
-        // Poll for completion with progress updates
-        $phases = [
-            3 => "Analyse de la requete...",
-            6 => "Preparation des outils...",
-            10 => "Execution en cours...",
-            15 => "Appel API / commande...",
-            20 => "Traitement des resultats...",
-            30 => "Formatage de la reponse...",
-            45 => "Presque termine...",
-            60 => "Requete longue, patience...",
-        ];
-
-        $output = '';
-        $startTime = time();
-        $timeout = 120;
-
-        while (true) {
-            $status = proc_get_status($proc);
-            if (!$status['running']) break;
-
-            $chunk = stream_get_contents($pipes[1]);
-            if ($chunk) $output .= $chunk;
-
-            $elapsed = time() - $startTime;
-            if ($elapsed > $timeout) {
-                proc_terminate($proc);
-                break;
-            }
-
-            // Update progress based on elapsed time
-            $phase = "En cours...";
-            foreach ($phases as $sec => $label) {
-                if ($elapsed >= $sec) $phase = $label;
-            }
-            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "{$phase} ({$elapsed}s)");
-
-            usleep(500000); // 0.5s
-        }
-
-        // Read remaining output
-        $output .= stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        proc_close($proc);
+        $output = $result->output();
 
         $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Reponse recue, traitement...");
         @unlink($tmpFile);
@@ -849,6 +799,8 @@ class CustomAgentRunner extends BaseAgent
         if ($reply) {
             return $reply;
         }
+
+        \Illuminate\Support\Facades\Log::warning("executeStepWithTools: no result, trying fallback");
 
         // Fallback: simple chat
         $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Fallback chat...");
@@ -980,16 +932,62 @@ class CustomAgentRunner extends BaseAgent
     }
 
     /**
+     * Start a background timer that updates progress every 3s.
+     */
+    private function startProgressTimer(AgentContext $context, string $stepLabel): ?int
+    {
+        if (!$this->isWebChat($context)) return null;
+
+        $cacheKey = "agent_progress:{$context->from}";
+        $phases = [
+            0 => "Connexion au modele IA...",
+            3 => "Analyse de la requete...",
+            6 => "Preparation des outils...",
+            10 => "Execution en cours...",
+            15 => "Appel API / commande...",
+            20 => "Traitement des resultats...",
+            30 => "Formatage de la reponse...",
+            45 => "Presque termine...",
+            60 => "Requete longue, patience...",
+            90 => "Encore un peu...",
+        ];
+
+        // Write phases to a temp file for a background process
+        $startTime = time();
+        // Just update cache with phases based on elapsed time in a loop
+        // Use a simple approach: pre-fill the cache with increasing timestamps
+        foreach ($phases as $sec => $label) {
+            \Illuminate\Support\Facades\Cache::put($cacheKey . ":phase:{$sec}", $label, 180);
+        }
+        \Illuminate\Support\Facades\Cache::put($cacheKey . ":start", $startTime, 180);
+        \Illuminate\Support\Facades\Cache::put($cacheKey . ":label", $stepLabel, 180);
+
+        return $startTime;
+    }
+
+    private function stopProgressTimer(?int $pid): void
+    {
+        // Nothing to stop — cleanup happens naturally
+    }
+
+    /**
      * Update processing progress for polling (partner portal).
      */
     private function updateProgress(AgentContext $context, string $status, string $step, string $detail): void
     {
         if (!$this->isWebChat($context)) return;
-        \Illuminate\Support\Facades\Cache::put("agent_progress:{$context->from}", [
+        $key = "agent_progress:{$context->from}";
+        \Illuminate\Support\Facades\Cache::put($key, [
             'status' => $status,
             'step' => $step,
             'detail' => $detail,
         ], 120);
+
+        // Clean up timer when idle
+        if ($status === 'idle') {
+            \Illuminate\Support\Facades\Cache::forget("{$key}:start");
+            \Illuminate\Support\Facades\Cache::forget("{$key}:label");
+        }
     }
 
     /**
