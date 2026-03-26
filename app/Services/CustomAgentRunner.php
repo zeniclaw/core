@@ -31,6 +31,7 @@ class CustomAgentRunner extends BaseAgent
 {
     private CustomAgent $customAgent;
     private KnowledgeChunker $chunker;
+    private string $currentStepLabel = '';
 
     /**
      * Available tool groups that can be enabled on custom agents.
@@ -620,7 +621,8 @@ class CustomAgentRunner extends BaseAgent
         $stepType = $step['type'] ?? 'prompt';
         $stepContent = $step['content'] ?? '';
 
-        $this->updateProgress($context, 'skill', "Routine \"{$skill->name}\" — etape " . ($currentStep + 1) . "/" . count($routine), mb_substr($stepContent, 0, 100));
+        $this->currentStepLabel = "Routine \"{$skill->name}\" — etape " . ($currentStep + 1) . "/" . count($routine);
+        $this->updateProgress($context, 'skill', $this->currentStepLabel, "Preparation...");
 
         // Build system prompt for this step
         $tier = $this->classifyModel($model);
@@ -741,46 +743,112 @@ class CustomAgentRunner extends BaseAgent
      */
     private function executeStepWithTools(AgentContext $context, string $systemPrompt, string $model, array $enabledGroups, string $stepInstruction): string
     {
-        $allowedToolNames = $this->getEnabledToolNames($enabledGroups);
-
-        $allTools = $context->toolRegistry
-            ? $context->toolRegistry->definitions()
-            : AgentTools::definitions();
-
-        $filteredTools = array_values(array_filter($allTools, function ($tool) use ($allowedToolNames) {
-            return in_array($tool['name'] ?? '', $allowedToolNames);
-        }));
-
-        // The user message is the step instruction + the actual user input
-        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
-
-        $loop = new AgenticLoop(maxIterations: 10, debug: false);
-
-        try {
-            $loopResult = $loop->run(
-                userMessage: $userMessage,
-                systemPrompt: $systemPrompt,
-                model: $model,
-                context: $context,
-                tools: $filteredTools,
-            );
-            $reply = $loopResult->reply ?: '';
-            if ($reply && !str_contains($reply, 'trop volumineux')) {
-                return $reply;
-            }
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning("Skill agentic loop failed: " . $e->getMessage());
+        // Use CLI Claude directly with async progress tracking
+        $apiKey = \App\Models\AppSetting::get('anthropic_api_key');
+        if (!$apiKey) {
+            return '';
         }
 
-        // Fallback: try simple chat with same model
+        $slug = match (true) {
+            str_contains($model, 'opus') => 'opus',
+            str_contains($model, 'haiku') => 'haiku',
+            default => 'sonnet',
+        };
+
+        $fullPrompt = "{$systemPrompt}\n\n---\n\nEXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
+
+        // Phase 1: Preparation
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Connexion au modele {$slug}...");
+
+        $cmd = sprintf(
+            'claude -p %s --model %s --output-format json --max-turns 8 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
+            escapeshellarg($fullPrompt),
+            escapeshellarg($slug)
+        );
+
+        // Launch async process
+        $proc = proc_open($cmd, [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ], $pipes, null, [
+            'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
+            'HOME' => '/tmp',
+        ]);
+
+        if (!is_resource($proc)) {
+            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Erreur: impossible de lancer la CLI");
+            return '';
+        }
+
+        fclose($pipes[0]); // Close stdin
+
+        // Set stdout to non-blocking so we can poll
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        // Poll for completion with progress updates
+        $phases = [
+            3 => "Analyse de la requete...",
+            6 => "Preparation des outils...",
+            10 => "Execution en cours...",
+            15 => "Appel API / commande...",
+            20 => "Traitement des resultats...",
+            30 => "Formatage de la reponse...",
+            45 => "Presque termine...",
+            60 => "Requete longue, patience...",
+        ];
+
+        $output = '';
+        $startTime = time();
+        $timeout = 120;
+
+        while (true) {
+            $status = proc_get_status($proc);
+            if (!$status['running']) break;
+
+            $chunk = stream_get_contents($pipes[1]);
+            if ($chunk) $output .= $chunk;
+
+            $elapsed = time() - $startTime;
+            if ($elapsed > $timeout) {
+                proc_terminate($proc);
+                break;
+            }
+
+            // Update progress based on elapsed time
+            $phase = "En cours...";
+            foreach ($phases as $sec => $label) {
+                if ($elapsed >= $sec) $phase = $label;
+            }
+            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "{$phase} ({$elapsed}s)");
+
+            usleep(500000); // 0.5s
+        }
+
+        // Read remaining output
+        $output .= stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Reponse recue, traitement...");
+
+        // Parse JSON result
+        $data = json_decode($output, true);
+        $reply = $data['result'] ?? '';
+
+        if ($reply) {
+            return $reply;
+        }
+
+        // Fallback: simple chat
+        $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Fallback chat...");
+        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
         $reply = $this->claude->chat($userMessage, $model, $systemPrompt, 800);
         if ($reply) return $reply;
 
-        // Fallback: try on-prem model
-        $onpremModel = 'qwen2.5:7b';
-        \Illuminate\Support\Facades\Log::info("Skill step: falling back to on-prem ({$onpremModel})");
-        $compactPrompt = mb_substr($systemPrompt, 0, 1500) . "\n\n" . $userMessage;
-        return $this->claude->chat($compactPrompt, $onpremModel, '', 500) ?: '';
+        return '';
     }
 
     /**
