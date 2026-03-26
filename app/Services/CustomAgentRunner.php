@@ -172,6 +172,12 @@ class CustomAgentRunner extends BaseAgent
             'rag_chunks' => count($ragContext),
         ]);
 
+        // Inject model info into metadata
+        $result->metadata = array_merge($result->metadata ?? [], [
+            'model' => $model,
+            'tier' => $tier->value,
+        ]);
+
         return $result;
     }
 
@@ -660,6 +666,7 @@ class CustomAgentRunner extends BaseAgent
 
         return AgentResult::reply($reply, [
             'custom_agent_id' => $this->customAgent->id,
+            'model' => $model,
             'skill_triggered' => $skill->name,
             'step' => $currentStep + 1,
             'total_steps' => count($routine),

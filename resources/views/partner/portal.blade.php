@@ -76,8 +76,16 @@
         </div>
         <template x-for="msg in messages" :key="msg.id">
           <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-            <div :class="msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-100'"
-                 class="max-w-[75%] rounded-2xl px-5 py-3 text-sm leading-relaxed whitespace-pre-wrap" x-text="msg.content"></div>
+            <div>
+              <div :class="msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-100'"
+                   class="max-w-[75%] rounded-2xl px-5 py-3 text-sm leading-relaxed whitespace-pre-wrap" x-text="msg.content"></div>
+              <template x-if="msg.role === 'assistant' && msg.model">
+                <div class="mt-1 text-xs text-gray-600 flex items-center gap-1.5">
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-gray-600"></span>
+                  <span x-text="msg.model"></span>
+                </div>
+              </template>
+            </div>
           </div>
         </template>
         <div x-show="loading" class="flex justify-start">
@@ -530,7 +538,7 @@ function partnerPortal() {
           body: JSON.stringify({ message: msg }),
         });
         const data = await res.json();
-        this.messages.push({ id: ++this.msgId, role: 'assistant', content: data.reply || 'Pas de reponse.' });
+        this.messages.push({ id: ++this.msgId, role: 'assistant', content: data.reply || 'Pas de reponse.', model: data.metadata?.model || null });
       } catch (e) {
         this.messages.push({ id: ++this.msgId, role: 'assistant', content: 'Erreur de communication.' });
       }
