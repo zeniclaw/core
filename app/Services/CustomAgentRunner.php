@@ -650,7 +650,15 @@ class CustomAgentRunner extends BaseAgent
         }
 
         if (!$reply) {
-            $reply = "Je continue...";
+            $reply = "❌ Erreur : le modèle LLM ({$model}) n'a pas répondu pour l'étape " . ($currentStep + 1) . "/" . count($routine) . " de la routine \"{$skill->name}\".\n\nInstruction de l'étape : {$stepContent}\n\nTapez **stop** pour quitter la routine ou réessayez.";
+            \Illuminate\Support\Facades\Log::warning("Skill routine step failed", [
+                'skill' => $skill->name,
+                'step' => $currentStep + 1,
+                'model' => $model,
+                'instruction' => $stepContent,
+            ]);
+            // Don't advance step — let user retry
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $currentStep, 3600);
         }
 
         // Advance to next step for next message
