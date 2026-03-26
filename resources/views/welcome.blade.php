@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 {{-- SEO --}}
-<title>ZeniClaw — Plateforme IA Multi-Canal Self-Hosted | 36 Agents Autonomes | On-Prem &amp; Cloud</title>
-<meta name="description" content="ZeniClaw est une plateforme IA open source et self-hosted avec 36 agents specialises. Multi-canal (WhatsApp, Web Chat, bientot plus), On-Prem avec Ollama ou Cloud avec Claude/GPT-4. Routing intelligent, classification par intent, API agent autonome.">
-<meta name="keywords" content="zeniclaw, ia multi-canal, ai agents, self-hosted, open source, claude, gpt-4, ollama, on-prem, llm local, assistant ia, automatisation, crm, intent classifier, agentic loop">
+<title>ZeniClaw — Plateforme IA d'Entreprise On-Prem | 36+ Agents IA | Souverainete des Donnees</title>
+<meta name="description" content="ZeniClaw est la plateforme IA d'entreprise deployable sur vos serveurs. 36+ agents IA pre-construits, agents personnalises RAG, LLMs on-prem via Ollama. Souverainete totale des donnees.">
+<meta name="keywords" content="zeniclaw, ia entreprise, on-prem ai, agents ia, self-hosted, rag, ollama, llm local, souverainete donnees, claude, gpt-4, automatisation entreprise">
 <meta name="author" content="ZeniBiz">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="{{ url('/') }}">
 
-{{-- Open Graph (Facebook, Instagram, WhatsApp, LinkedIn) --}}
+{{-- Open Graph --}}
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ url('/') }}">
-<meta property="og:title" content="ZeniClaw — Your AI Army, Any Channel">
-<meta property="og:description" content="Plateforme IA self-hosted avec 36 agents autonomes. Multi-canal, On-Prem ou Cloud, intent classifier, API agent autonome. Open source et gratuit.">
+<meta property="og:title" content="ZeniClaw — Enterprise AI Platform, On Your Servers">
+<meta property="og:description" content="Plateforme IA d'entreprise on-prem avec 36+ agents IA, agents personnalises RAG, LLMs locaux via Ollama. Souverainete totale des donnees.">
 <meta property="og:image" content="{{ url('/og-image.php') }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -26,8 +26,8 @@
 
 {{-- Twitter Card --}}
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="ZeniClaw — Your AI Army, Any Channel">
-<meta name="twitter:description" content="Plateforme IA self-hosted avec 36 agents autonomes. Multi-canal, On-Prem ou Cloud. Intent classifier, API agent autonome.">
+<meta name="twitter:title" content="ZeniClaw — Enterprise AI Platform, On Your Servers">
+<meta name="twitter:description" content="Plateforme IA d'entreprise on-prem. 36+ agents IA, agents personnalises RAG, LLMs locaux. Souverainete des donnees.">
 <meta name="twitter:image" content="{{ url('/og-image.php') }}">
 
 {{-- Favicon --}}
@@ -39,7 +39,7 @@
   "@@context": "https://schema.org",
   "@@type": "SoftwareApplication",
   "name": "ZeniClaw",
-  "description": "Plateforme IA open source et self-hosted avec 36 agents specialises. Multi-canal (WhatsApp, Web Chat, et plus). On-prem avec Ollama ou Cloud avec Claude/GPT-4.",
+  "description": "Plateforme IA d'entreprise deployable on-prem avec 36+ agents IA specialises, agents personnalises RAG, et LLMs locaux via Ollama. Souverainete totale des donnees.",
   "url": "{{ url('/') }}",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Linux",
@@ -54,7 +54,7 @@
     "url": "https://www.zenibiz.com"
   },
   "screenshot": "{{ url('/og-image.php') }}",
-  "featureList": "36 AI Agents, Multi-Channel (WhatsApp, Web Chat, Telegram), Self-Hosted, Open Source, On-Prem LLM, Ollama, Intent Classifier, Agentic Loop, Autonomous API Agent, Web Search, Configurable Model Roles, Parallel Sub-Agents, Project Management, Finance Tracking, Code Reviews, Meeting Notes, Document Generation, Persistent Memory, Plugin System, Flashcards, Habit Tracking, Interactive Quizzes, Reading Challenges"
+  "featureList": "36+ AI Agents, On-Prem Deployment, Custom RAG Agents, Local LLMs via Ollama, Data Sovereignty, Multi-Channel (WhatsApp, Web Chat, API), RBAC, Audit Logs, AES-256 Encryption, Enterprise Security"
 }
 </script>
 
@@ -119,7 +119,7 @@ nav {
   width: 32px; height: 32px; background: var(--gradient);
   border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px;
 }
-.nav-links { display: flex; gap: 2rem; list-style: none; align-items: center; }
+.nav-links { display: flex; gap: 1.5rem; list-style: none; align-items: center; }
 .nav-links a {
   color: var(--text-secondary); text-decoration: none;
   font-size: 0.9rem; font-weight: 500; transition: color 0.2s;
@@ -131,6 +131,14 @@ nav {
   font-weight: 600 !important; font-size: 0.85rem !important; transition: opacity 0.2s;
 }
 .nav-cta:hover { opacity: 0.9; }
+.lang-toggle {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-left: 0.5rem;
+}
+.lang-btn {
+  padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--text-muted); border: none; font-family: var(--font); transition: all 0.2s;
+}
+.lang-btn.active { background: var(--accent-blue); color: #fff; }
 
 .hero {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
@@ -185,20 +193,6 @@ nav {
 .btn-secondary:hover { background: var(--bg-card-hover); border-color: var(--accent-blue); }
 .btn-outline { background: transparent; color: var(--text-primary); border: 1px solid var(--border); }
 .btn-outline:hover { border-color: var(--accent-purple); background: rgba(139,92,246,0.05); }
-.btn-whatsapp { background: #25D366; color: #fff; }
-.btn-whatsapp:hover { background: #1ebe5d; transform: translateY(-1px); }
-
-.community-banner {
-  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-  padding: 1.25rem 2rem; text-align: center;
-}
-.community-banner a {
-  color: #fff; text-decoration: none; font-weight: 600; font-size: 1rem;
-  display: inline-flex; align-items: center; gap: 10px;
-}
-.community-banner a:hover { text-decoration: underline; }
-.community-banner .arrow { transition: transform 0.2s; }
-.community-banner a:hover .arrow { transform: translateX(4px); }
 
 .hero-terminal {
   margin-top: 3rem; background: var(--bg-card); border: 1px solid var(--border);
@@ -254,11 +248,6 @@ section { padding: 100px 2rem; }
 .feature-icon.cyan   { background: rgba(6,182,212,0.15); }
 .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
 .feature-card p { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.6; }
-.feature-new {
-  position: absolute; top: 12px; right: 12px;
-  font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 3px 8px; border-radius: 4px; background: var(--accent-green); color: #fff;
-}
 
 .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
 .agent-chip {
@@ -281,6 +270,17 @@ section { padding: 100px 2rem; }
 }
 .stat-label { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; }
 
+.use-cases-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+.use-case-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.75rem; transition: all 0.3s;
+}
+.use-case-card:hover { border-color: rgba(59,130,246,0.3); transform: translateY(-2px); }
+.use-case-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 10px; }
+.use-case-card ul { list-style: none; }
+.use-case-card li { font-size: 0.85rem; color: var(--text-secondary); padding: 4px 0; padding-left: 18px; position: relative; }
+.use-case-card li::before { content: ''; position: absolute; left: 0; top: 12px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-blue); }
+
 .arch-diagram {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 2.5rem;
@@ -293,6 +293,16 @@ section { padding: 100px 2rem; }
 .arch-diagram .hl-pink { color: var(--accent-pink); }
 .arch-diagram .hl-amber { color: var(--accent-amber); }
 .arch-diagram .hl-cyan { color: var(--accent-cyan); }
+
+.tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
+.tech-item {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px; transition: all 0.2s;
+}
+.tech-item:hover { border-color: rgba(59,130,246,0.3); }
+.tech-icon { font-size: 1.5rem; width: 40px; text-align: center; }
+.tech-item span { font-size: 0.9rem; font-weight: 500; }
 
 .install-steps { display: grid; gap: 2rem; counter-reset: step; }
 .install-step { display: grid; grid-template-columns: 48px 1fr; gap: 1.5rem; align-items: start; }
@@ -318,41 +328,22 @@ section { padding: 100px 2rem; }
 }
 .code-block-copy:hover { color: var(--text-primary); border-color: var(--accent-blue); }
 
-.tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
-.tech-item {
-  display: flex; align-items: center; gap: 12px;
+.security-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.25rem; }
+.security-item {
+  display: flex; align-items: start; gap: 14px;
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 10px; padding: 16px; transition: all 0.2s;
+  border-radius: 10px; padding: 1.25rem; transition: all 0.2s;
 }
-.tech-item:hover { border-color: rgba(59,130,246,0.3); }
-.tech-icon { font-size: 1.5rem; width: 40px; text-align: center; }
-.tech-item span { font-size: 0.9rem; font-weight: 500; }
-
-.changelog { max-width: 700px; }
-.changelog-item {
-  display: flex; gap: 1.25rem; padding: 1.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-.changelog-item:last-child { border-bottom: none; }
-.changelog-version {
-  flex-shrink: 0; width: 72px;
-  font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
-  color: var(--accent-blue); padding-top: 2px;
-}
-.changelog-content h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; }
-.changelog-content p { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; }
-.changelog-tag {
-  display: inline-block; font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
-  padding: 2px 6px; border-radius: 3px; margin-right: 6px; letter-spacing: 0.03em;
-}
-.tag-feat { background: rgba(16,185,129,0.15); color: var(--accent-green); }
-.tag-fix { background: rgba(245,158,11,0.15); color: var(--accent-amber); }
+.security-item:hover { border-color: rgba(16,185,129,0.3); }
+.security-icon { font-size: 1.3rem; flex-shrink: 0; margin-top: 2px; }
+.security-item h4 { font-size: 0.9rem; font-weight: 600; margin-bottom: 4px; }
+.security-item p { font-size: 0.8rem; color: var(--text-secondary); }
 
 footer {
   border-top: 1px solid var(--border); padding: 3rem 2rem; text-align: center;
 }
 .footer-inner { max-width: 1200px; margin: 0 auto; }
-.footer-links { display: flex; justify-content: center; gap: 2rem; margin-bottom: 1.5rem; list-style: none; }
+.footer-links { display: flex; justify-content: center; gap: 2rem; margin-bottom: 1.5rem; list-style: none; flex-wrap: wrap; }
 .footer-links a { color: var(--text-muted); text-decoration: none; font-size: 0.85rem; transition: color 0.2s; }
 .footer-links a:hover { color: var(--text-primary); }
 .footer-copy { color: var(--text-muted); font-size: 0.8rem; }
@@ -371,8 +362,9 @@ footer {
 .fade-up.d3 { animation-delay: 0.3s; } .fade-up.d4 { animation-delay: 0.4s; }
 </style>
 </head>
-<body>
+<body x-data="{ lang: navigator.language.startsWith('fr') ? 'fr' : 'en' }">
 
+{{-- ========== NAV ========== --}}
 <nav>
   <div class="nav-inner">
     <a href="/" class="nav-logo">
@@ -380,11 +372,16 @@ footer {
       ZeniClaw
     </a>
     <ul class="nav-links">
-      <li><a href="#features">Features</a></li>
-      <li><a href="#agents">Agents</a></li>
-      <li><a href="#architecture">Architecture</a></li>
-      <li><a href="#changelog">Changelog</a></li>
-      <li><a href="#install">Install</a></li>
+      <li><a href="#solutions" x-show="lang==='fr'">Solutions</a><a href="#solutions" x-show="lang==='en'">Solutions</a></li>
+      <li><a href="#agents" x-show="lang==='fr'">Agents</a><a href="#agents" x-show="lang==='en'">Agents</a></li>
+      <li><a href="#technology" x-show="lang==='fr'">Technologie</a><a href="#technology" x-show="lang==='en'">Technology</a></li>
+      <li><a href="#contact" x-show="lang==='fr'">Contact</a><a href="#contact" x-show="lang==='en'">Contact</a></li>
+      <li>
+        <div class="lang-toggle">
+          <button class="lang-btn" :class="{ 'active': lang==='fr' }" @click="lang='fr'">FR</button>
+          <button class="lang-btn" :class="{ 'active': lang==='en' }" @click="lang='en'">EN</button>
+        </div>
+      </li>
       @auth
         <li><a href="{{ route('dashboard') }}" class="nav-cta">Dashboard</a></li>
       @else
@@ -394,37 +391,48 @@ footer {
   </div>
 </nav>
 
-<div class="community-banner" style="margin-top: 64px;">
-  <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" target="_blank" rel="noopener">
-    &#x1F4AC; Join the ZeniClaw WhatsApp Community &mdash; Get help, share ideas, stay updated
-    <span class="arrow">&rarr;</span>
-  </a>
-</div>
-
-<section class="hero" style="padding-top: 80px;">
+{{-- ========== HERO ========== --}}
+<section class="hero">
   <div class="hero-content">
     <div class="hero-badge fade-up">
       <span class="dot"></span>
-      <span>v2.27 &middot; Open Source &middot; Self-Hosted &middot; On-Prem Ready</span>
+      <span x-show="lang==='fr'">On-Prem &middot; 36+ Agents IA &middot; Souverainete des donnees</span>
+      <span x-show="lang==='en'">On-Prem &middot; 36+ AI Agents &middot; Data Sovereignty</span>
     </div>
     <h1 class="fade-up d1">
-      Your AI Army,<br>
-      <span class="gradient-text">Any Channel, Any Model</span>
+      <span x-show="lang==='fr'">L'IA d'entreprise,<br><span class="gradient-text">sur vos serveurs</span></span>
+      <span x-show="lang==='en'">Enterprise AI,<br><span class="gradient-text">on your servers</span></span>
     </h1>
     <p class="fade-up d2">
-      ZeniClaw is a self-hosted AI platform with 23 specialized agents. Multi-channel (WhatsApp, Web Chat, more coming), Cloud or fully On-Prem with Ollama &mdash; intent classification, autonomous API agents, parallel execution, and persistent memory.
+      <span x-show="lang==='fr'">Deployez des agents IA pre-construits et personnalises directement sur votre infrastructure. LLMs locaux via Ollama, zero cout API, souverainete totale des donnees.</span>
+      <span x-show="lang==='en'">Deploy pre-built and custom AI agents directly on your infrastructure. Local LLMs via Ollama, zero API costs, full data sovereignty.</span>
     </p>
     <div class="hero-actions fade-up d3">
       @auth
-        <a href="{{ route('dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
+        <a href="{{ route('dashboard') }}" class="btn btn-primary">
+          <span x-show="lang==='fr'">Tableau de bord</span>
+          <span x-show="lang==='en'">Go to Dashboard</span>
+        </a>
       @else
-        <a href="{{ route('login') }}" class="btn btn-primary">Sign In</a>
+        <a href="{{ route('login') }}" class="btn btn-primary">
+          <span x-show="lang==='fr'">Demander une demo</span>
+          <span x-show="lang==='en'">Request a Demo</span>
+        </a>
         @if (Route::has('register'))
-          <a href="{{ route('register') }}" class="btn btn-secondary">Create Account</a>
+          <a href="{{ route('register') }}" class="btn btn-secondary">
+            <span x-show="lang==='fr'">Creer un compte</span>
+            <span x-show="lang==='en'">Create Account</span>
+          </a>
         @endif
       @endauth
-      <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" class="btn btn-whatsapp" target="_blank" rel="noopener">&#x1F4AC; Join Community</a>
-      <a href="#install" class="btn btn-outline">&lt;/&gt; Install Guide</a>
+      <a href="#agents" class="btn btn-secondary">
+        <span x-show="lang==='fr'">Explorer les agents</span>
+        <span x-show="lang==='en'">Explore Agents</span>
+      </a>
+      <a href="#deploy" class="btn btn-outline">&lt;/&gt;
+        <span x-show="lang==='fr'">Guide d'installation</span>
+        <span x-show="lang==='en'">Install Guide</span>
+      </a>
     </div>
     <div class="hero-terminal fade-up d4">
       <div class="terminal-bar">
@@ -434,51 +442,172 @@ footer {
       </div>
       <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">git clone https://github.com/zeniclaw/core.git</span></div>
       <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">cd zeniclaw && bash install.sh</span></div>
-      <div class="terminal-line"><span class="comment"># 5 containers: app, db, redis, waha, ollama</span></div>
+      <div class="terminal-line"><span class="comment"># 5 containers: app, db, redis, gateway, ollama</span></div>
       <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">open</span> <span class="url">http://localhost:8080</span></div>
     </div>
   </div>
 </section>
 
+{{-- ========== KEY METRICS ========== --}}
 <section style="padding-top: 0;">
   <div class="section-inner">
     <div class="stats-row">
-      <div class="stat-box fade-up"><div class="stat-number">23</div><div class="stat-label">AI Agents</div></div>
-      <div class="stat-box fade-up d1"><div class="stat-number">3+</div><div class="stat-label">LLM Providers</div></div>
-      <div class="stat-box fade-up d2"><div class="stat-number">5</div><div class="stat-label">Containers</div></div>
-      <div class="stat-box fade-up d3"><div class="stat-number">100%</div><div class="stat-label">Self-Hosted</div></div>
+      <div class="stat-box fade-up">
+        <div class="stat-number">36+</div>
+        <div class="stat-label" x-show="lang==='fr'">Agents IA</div>
+        <div class="stat-label" x-show="lang==='en'">AI Agents</div>
+      </div>
+      <div class="stat-box fade-up d1">
+        <div class="stat-number">100%</div>
+        <div class="stat-label">On-Prem</div>
+      </div>
+      <div class="stat-box fade-up d2">
+        <div class="stat-number">13+</div>
+        <div class="stat-label" x-show="lang==='fr'">Modeles LLM</div>
+        <div class="stat-label" x-show="lang==='en'">LLM Models</div>
+      </div>
+      <div class="stat-box fade-up d3">
+        <div class="stat-number">5 min</div>
+        <div class="stat-label" x-show="lang==='fr'">Deploiement</div>
+        <div class="stat-label" x-show="lang==='en'">Deploy Time</div>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="features">
+{{-- ========== SOLUTIONS ========== --}}
+<section id="solutions">
   <div class="section-inner">
-    <span class="section-label">// features</span>
-    <h2 class="section-title">Everything you need, <span class="gradient-text">built in</span></h2>
-    <p class="section-desc">A full-stack AI platform that goes way beyond chatbots. Every feature runs on your own infrastructure, your data never leaves your server.</p>
+    <span class="section-label">// solutions</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">Trois piliers pour <span class="gradient-text">votre IA</span></span>
+      <span x-show="lang==='en'">Three pillars for <span class="gradient-text">your AI</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Une plateforme complete qui s'adapte a vos besoins : agents pre-construits, agents personnalises, et LLMs locaux.</span>
+      <span x-show="lang==='en'">A complete platform that adapts to your needs: pre-built agents, custom agents, and local LLMs.</span>
+    </p>
     <div class="features-grid">
-      <div class="feature-card"><div class="feature-icon blue">&#x1F916;</div><h3>36 Autonomous Agents</h3><p>Specialized AI agents that handle tasks end-to-end: code reviews, project management, finance tracking, web search, document generation, meeting notes, habits, quizzes, reading challenges, recipes, games, and more. Each agent has its own memory, tools, and plugin hooks.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x1F500;</div><h3>Agentic Loop</h3><p>LLM-driven decision loop with tool usage. Agents autonomously decide which tools to call, chain API operations, and iterate up to 10 times to complete complex tasks without human intervention.</p></div>
-      <div class="feature-card" style="border-color: rgba(6,182,212,0.4); background: linear-gradient(135deg, rgba(6,182,212,0.08), var(--bg-card));"><span class="feature-new" style="background: var(--accent-cyan);">Highlight</span><div class="feature-icon cyan">&#x1F5A5;</div><h3>On-Prem LLMs (Ollama)</h3><p>Run models 100% locally with the built-in Ollama container. Download Qwen 2.5, CodeLlama, DeepSeek, or any model from the UI. <strong>Zero API costs, full privacy, no data leaves your server.</strong> Configure model roles (fast/balanced/powerful) per use-case.</p></div>
-      <div class="feature-card"><div class="feature-icon green">&#x1F4AC;</div><h3>Multi-Channel</h3><p>WhatsApp (Baileys, no paid API), Web Chat dashboard, and more channels coming soon. Full multimodal support: text, images, voice, PDFs. Same agents, any channel.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon pink">&#x1F9E0;</div><h3>Intent Classifier</h3><p>LLM-based intent classification in every agent. Conversation history injected for context-aware routing. Anti-hallucination rules prevent agents from claiming actions they didn't perform.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon amber">&#x1F3AF;</div><h3>Configurable Model Roles</h3><p>3 roles (Fast, Balanced, Powerful) configurable from the UI. Assign Claude Opus for complex tasks, Haiku for routing, Ollama for privacy. All agents use roles automatically.</p></div>
-      <div class="feature-card"><div class="feature-icon red">&#x1F6E0;</div><h3>GitHub DevOps</h3><p>SubAgents clone repos, create branches, write code with Claude Code CLI, auto-commit, push, and open merge requests. Full CI/CD pipeline from a WhatsApp message.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon blue">&#x1F310;</div><h3>Autonomous API Agent</h3><p>Claude chains multi-step API calls, fetches web pages for analysis, stores credentials, and self-heals broken JSON. Up to 10 iterations with auto-continuation for large responses.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon purple">&#x26A1;</div><h3>Parallel Sub-Agents</h3><p>Run multiple sub-agents concurrently (configurable 1-10, default 3). Throttle middleware, smart queue workers, and settings UI for full control over parallelism.</p></div>
-      <div class="feature-card"><div class="feature-icon purple">&#x1F512;</div><h3>Self-Hosted & Secure</h3><p>100% on-premise. AES-256 encrypted secrets, role-based access (superadmin/admin/operator/viewer), agent sandboxing, auto-updates, and health monitoring with watchdog.</p></div>
-      <div class="feature-card"><div class="feature-icon green">&#x1F4CA;</div><h3>Finance Tracker</h3><p>Track expenses, manage budgets, get financial analytics and alerts. Categorize spending, set thresholds, and receive WhatsApp notifications when limits are reached.</p></div>
-      <div class="feature-card"><div class="feature-icon pink">&#x1F4DD;</div><h3>Smart Meetings</h3><p>Record meetings, generate transcriptions, produce structured summaries with action items. Never miss a decision or follow-up again.</p></div>
-      <div class="feature-card"><span class="feature-new">New</span><div class="feature-icon amber">&#x1F504;</div><h3>Self-Improving Agents</h3><p>Agents analyze conversations, detect missing capabilities, generate improvement proposals, and auto-implement them via SubAgents. Your platform gets smarter over time.</p></div>
+      <div class="feature-card" style="border-color: rgba(59,130,246,0.4); background: linear-gradient(135deg, rgba(59,130,246,0.08), var(--bg-card));">
+        <div class="feature-icon blue">&#x1F916;</div>
+        <h3 x-show="lang==='fr'">Agents pre-construits</h3>
+        <h3 x-show="lang==='en'">Pre-built Agents</h3>
+        <p x-show="lang==='fr'">36+ agents IA specialises prets a l'emploi : revue de code, gestion de projet, finance, reunions, support RH, analyse de documents. Deployes en un clic, operationnels immediatement.</p>
+        <p x-show="lang==='en'">36+ specialized AI agents ready to use: code review, project management, finance, meetings, HR support, document analysis. Deployed in one click, operational immediately.</p>
+      </div>
+      <div class="feature-card" style="border-color: rgba(139,92,246,0.4); background: linear-gradient(135deg, rgba(139,92,246,0.08), var(--bg-card));">
+        <div class="feature-icon purple">&#x1F9E0;</div>
+        <h3 x-show="lang==='fr'">Agents personnalises (RAG)</h3>
+        <h3 x-show="lang==='en'">Custom Agents (RAG)</h3>
+        <p x-show="lang==='fr'">Creez vos propres agents entraines sur vos documents internes. Retrieval-Augmented Generation pour des reponses precises basees sur vos donnees d'entreprise. Base de connaissances privee.</p>
+        <p x-show="lang==='en'">Create your own agents trained on your internal documents. Retrieval-Augmented Generation for precise answers based on your company data. Private knowledge base.</p>
+      </div>
+      <div class="feature-card" style="border-color: rgba(6,182,212,0.4); background: linear-gradient(135deg, rgba(6,182,212,0.08), var(--bg-card));">
+        <div class="feature-icon cyan">&#x1F5A5;</div>
+        <h3 x-show="lang==='fr'">LLMs On-Prem (Ollama)</h3>
+        <h3 x-show="lang==='en'">On-Prem LLMs (Ollama)</h3>
+        <p x-show="lang==='fr'">Executez Qwen, Mistral, Llama localement via Ollama. Zero cout API, aucune donnee ne quitte vos serveurs. Mode hybride disponible : Claude et GPT-4 quand necessaire.</p>
+        <p x-show="lang==='en'">Run Qwen, Mistral, Llama locally via Ollama. Zero API costs, no data leaves your servers. Hybrid mode available: Claude and GPT-4 when needed.</p>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="agents" style="background: var(--bg-secondary);">
+{{-- ========== USE CASES ========== --}}
+<section style="background: var(--bg-secondary);">
+  <div class="section-inner">
+    <span class="section-label">// use cases</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">L'IA dans chaque <span class="gradient-text">departement</span></span>
+      <span x-show="lang==='en'">AI across every <span class="gradient-text">department</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Des agents IA specialises pour chaque equipe de votre organisation.</span>
+      <span x-show="lang==='en'">Specialized AI agents for every team in your organization.</span>
+    </p>
+    <div class="use-cases-grid">
+      <div class="use-case-card">
+        <h3>&#x1F465; <span x-show="lang==='fr'">Ressources Humaines</span><span x-show="lang==='en'">Human Resources</span></h3>
+        <ul>
+          <li x-show="lang==='fr'">Assistant d'onboarding pour les nouveaux employes</li>
+          <li x-show="lang==='en'">Onboarding assistant for new employees</li>
+          <li x-show="lang==='fr'">Agent FAQ interne (politiques, avantages, conges)</li>
+          <li x-show="lang==='en'">Internal FAQ agent (policies, benefits, leave)</li>
+          <li x-show="lang==='fr'">Suivi du bien-etre et de l'engagement</li>
+          <li x-show="lang==='en'">Wellness and engagement tracking</li>
+        </ul>
+      </div>
+      <div class="use-case-card">
+        <h3>&#x1F4B0; Finance</h3>
+        <ul>
+          <li x-show="lang==='fr'">Suivi des depenses et rapports automatises</li>
+          <li x-show="lang==='en'">Expense tracking and automated reports</li>
+          <li x-show="lang==='fr'">Alertes budgetaires en temps reel</li>
+          <li x-show="lang==='en'">Real-time budget alerts</li>
+          <li x-show="lang==='fr'">Analyse financiere et tableaux de bord</li>
+          <li x-show="lang==='en'">Financial analysis and dashboards</li>
+        </ul>
+      </div>
+      <div class="use-case-card">
+        <h3>&#x2699; IT / DevOps</h3>
+        <ul>
+          <li x-show="lang==='fr'">Revue de code automatisee et suggestions</li>
+          <li x-show="lang==='en'">Automated code review and suggestions</li>
+          <li x-show="lang==='fr'">Reponse aux incidents et diagnostic</li>
+          <li x-show="lang==='en'">Incident response and diagnostics</li>
+          <li x-show="lang==='fr'">Documentation technique automatique</li>
+          <li x-show="lang==='en'">Automatic technical documentation</li>
+        </ul>
+      </div>
+      <div class="use-case-card">
+        <h3>&#x2696; <span x-show="lang==='fr'">Juridique</span><span x-show="lang==='en'">Legal</span></h3>
+        <ul>
+          <li x-show="lang==='fr'">Analyse de documents et contrats</li>
+          <li x-show="lang==='en'">Document and contract analysis</li>
+          <li x-show="lang==='fr'">Verification de conformite reglementaire</li>
+          <li x-show="lang==='en'">Regulatory compliance checks</li>
+          <li x-show="lang==='fr'">Recherche juridique assistee par IA</li>
+          <li x-show="lang==='en'">AI-assisted legal research</li>
+        </ul>
+      </div>
+      <div class="use-case-card">
+        <h3>&#x1F4C8; <span x-show="lang==='fr'">Commercial</span><span x-show="lang==='en'">Sales</span></h3>
+        <ul>
+          <li x-show="lang==='fr'">Assistant CRM et suivi des opportunites</li>
+          <li x-show="lang==='en'">CRM assistant and opportunity tracking</li>
+          <li x-show="lang==='fr'">Qualification automatique des leads</li>
+          <li x-show="lang==='en'">Automated lead qualification</li>
+          <li x-show="lang==='fr'">Preparation de propositions commerciales</li>
+          <li x-show="lang==='en'">Sales proposal preparation</li>
+        </ul>
+      </div>
+      <div class="use-case-card">
+        <h3>&#x1F4CB; <span x-show="lang==='fr'">Operations</span><span x-show="lang==='en'">Operations</span></h3>
+        <ul>
+          <li x-show="lang==='fr'">Comptes rendus de reunion automatiques</li>
+          <li x-show="lang==='en'">Automatic meeting notes and summaries</li>
+          <li x-show="lang==='fr'">Gestion de projet et suivi des taches</li>
+          <li x-show="lang==='en'">Project management and task tracking</li>
+          <li x-show="lang==='fr'">Automatisation des processus metier</li>
+          <li x-show="lang==='en'">Business process automation</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+{{-- ========== PRE-BUILT AGENTS GRID ========== --}}
+<section id="agents">
   <div class="section-inner">
     <span class="section-label">// agents</span>
-    <h2 class="section-title">36 Specialized <span class="gradient-text">AI Agents</span></h2>
-    <p class="section-desc">Each agent is purpose-built with its own system prompt, tool access, and isolated memory. The Router Agent uses confidence scoring and conversation history for intelligent contextual dispatch. Plugin system with 14 lifecycle events for extensibility.</p>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">36+ agents IA <span class="gradient-text">specialises</span></span>
+      <span x-show="lang==='en'">36+ specialized <span class="gradient-text">AI agents</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Chaque agent dispose de son propre systeme de prompt, acces aux outils, et memoire isolee. Le RouterAgent dispatch intelligemment chaque requete.</span>
+      <span x-show="lang==='en'">Each agent has its own system prompt, tool access, and isolated memory. The RouterAgent intelligently dispatches every request.</span>
+    </p>
     <div class="agents-grid">
       <div class="agent-chip"><div class="agent-emoji">&#x1F4AC;</div><div class="agent-info"><h4>ChatAgent</h4><p>General conversation & multimodal</p></div></div>
       <div class="agent-chip"><div class="agent-emoji">&#x1F4BB;</div><div class="agent-info"><h4>DevAgent</h4><p>Code, GitHub & API automation</p></div></div>
@@ -520,11 +649,56 @@ footer {
   </div>
 </section>
 
-<section id="architecture">
+{{-- ========== CUSTOM AGENTS / RAG ========== --}}
+<section style="background: var(--bg-secondary);">
   <div class="section-inner">
-    <span class="section-label">// architecture</span>
-    <h2 class="section-title">How it <span class="gradient-text">works</span></h2>
-    <p class="section-desc">Five containers (Podman or Docker), zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</p>
+    <span class="section-label">// custom agents</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">Creez vos propres <span class="gradient-text">agents metier</span></span>
+      <span x-show="lang==='en'">Build your own <span class="gradient-text">business agents</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Entrainez des agents IA sur vos documents internes grace au RAG. Vos employes obtiennent des reponses precises basees sur votre base de connaissances.</span>
+      <span x-show="lang==='en'">Train AI agents on your internal documents using RAG. Your employees get precise answers based on your knowledge base.</span>
+    </p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon purple">&#x1F4C2;</div>
+        <h3 x-show="lang==='fr'">Importez vos documents</h3>
+        <h3 x-show="lang==='en'">Import your documents</h3>
+        <p x-show="lang==='fr'">PDF, Word, Excel, pages web. Indexation automatique et vectorisation pour une recherche semantique rapide.</p>
+        <p x-show="lang==='en'">PDF, Word, Excel, web pages. Automatic indexing and vectorization for fast semantic search.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon blue">&#x1F3AF;</div>
+        <h3 x-show="lang==='fr'">Reponses contextuelles</h3>
+        <h3 x-show="lang==='en'">Contextual answers</h3>
+        <p x-show="lang==='fr'">Retrieval-Augmented Generation : l'agent cite ses sources et ne fabrique jamais de reponses. Regles anti-hallucination integrees.</p>
+        <p x-show="lang==='en'">Retrieval-Augmented Generation: the agent cites its sources and never fabricates answers. Built-in anti-hallucination rules.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon green">&#x1F512;</div>
+        <h3 x-show="lang==='fr'">100% prive</h3>
+        <h3 x-show="lang==='en'">100% private</h3>
+        <p x-show="lang==='fr'">Vos documents restent sur vos serveurs. Combinez avec les LLMs on-prem pour une souverainete totale, sans aucun appel API externe.</p>
+        <p x-show="lang==='en'">Your documents stay on your servers. Combine with on-prem LLMs for full sovereignty, with zero external API calls.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{{-- ========== TECHNOLOGY ========== --}}
+<section id="technology">
+  <div class="section-inner">
+    <span class="section-label">// technology</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">Architecture <span class="gradient-text">enterprise-grade</span></span>
+      <span x-show="lang==='en'">Enterprise-grade <span class="gradient-text">architecture</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Cinq conteneurs, zero dependance externe. LLMs cloud ou 100% on-prem avec Ollama &mdash; a vous de choisir.</span>
+      <span x-show="lang==='en'">Five containers, zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</span>
+    </p>
     <div class="arch-diagram">
 <pre>
   <span class="hl-green">Channels</span>                 <span class="hl-blue">ZeniClaw Stack</span>                    <span class="hl-purple">AI Providers</span>
@@ -540,20 +714,20 @@ footer {
   +-----------+       |  Laravel 12 + PHP 8.4            |------&gt;|  GPT-4o     |
                       |                                  |       +-------------+
   +-----------+       |  <span class="hl-amber">RouterAgent</span> (fast-path + LLM)   |
-  |  <span class="hl-green">More...</span>  |       |  <span class="hl-amber">Intent Classifier</span> (per agent)  |       +-------------+
-  |  (coming) |------&gt;|  <span class="hl-amber">36 Agents</span> (parallel execution) |       | <span class="hl-cyan">Ollama</span> &#x2B50; |
-  +-----------+       |  <span class="hl-amber">Agentic Loop</span> + API Agent       |&lt;-----&gt;| Qwen 2.5   |
-                      |  <span class="hl-amber">SubAgents</span> (x3 parallel)        |       | DeepSeek   |
-                      |  <span class="hl-amber">Model Roles</span> (fast/balanced/pow)|       | CodeLlama  |
-                      +-----------|----------------------+       +-------------+
-                                  |                                <span class="hl-cyan">100% Private</span>
-                      +-----------|-----------+          +-------------+
-                      |           v           |          |  <span class="hl-pink">GitHub</span>    |
-                +----------+  +---------+                |  Repos, MRs |
-                | <span class="hl-blue">Postgres</span> |  |  <span class="hl-green">Redis</span>  |                +-------------+
+  |  <span class="hl-green">API</span>      |       |  <span class="hl-amber">Intent Classifier</span> (per agent)  |       +-------------+
+  |  REST     |------&gt;|  <span class="hl-amber">36+ Agents</span> (parallel execution)|       | <span class="hl-cyan">Ollama</span>     |
+  +-----------+       |  <span class="hl-amber">Agentic Loop</span> + RAG Engine      |&lt;-----&gt;| Qwen/Mistral|
+                      |  <span class="hl-amber">Custom Agents</span> (document-trained)|       | Llama      |
+                      |  <span class="hl-amber">Model Roles</span> (fast/balanced/pow)|       +-------------+
+                      +-----------|----------------------+       <span class="hl-cyan">100% Private</span>
+                                  |
+                      +-----------|-----------+
+                      |           v           |
+                +----------+  +---------+
+                | <span class="hl-blue">Postgres</span> |  |  <span class="hl-green">Redis</span>  |
                 |  16      |  |  7      |
-                |  30 models|  |  Queue  |
-                |  Memory   |  |  Cache  |
+                |  Vectors |  |  Queue  |
+                |  Memory  |  |  Cache  |
                 +----------+  +---------+
 </pre>
     </div>
@@ -565,220 +739,174 @@ footer {
       <div class="tech-item"><div class="tech-icon">&#x1F5C3;</div><span>PostgreSQL 16</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F534;</div><span>Redis 7</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F433;</div><span>Podman / Docker</span></div>
-      <div class="tech-item"><div class="tech-icon">&#x1F4F1;</div><span>Baileys (WAHA)</span></div>
-      <div class="tech-item"><div class="tech-icon">&#x1F9E0;</div><span>Claude API</span></div>
+      <div class="tech-item"><div class="tech-icon">&#x1F4F1;</div><span>Baileys Gateway</span></div>
+      <div class="tech-item"><div class="tech-icon">&#x1F9E0;</div><span>Claude / GPT-4</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F5A5;</div><span>Ollama</span></div>
     </div>
   </div>
 </section>
 
-<section id="changelog" style="background: var(--bg-secondary);">
+{{-- ========== DEPLOYMENT ========== --}}
+<section id="deploy" style="background: var(--bg-secondary);">
   <div class="section-inner">
-    <span class="section-label">// changelog</span>
-    <h2 class="section-title">What's <span class="gradient-text">new</span></h2>
-    <p class="section-desc">Recent updates and improvements to the platform.</p>
-    <div class="changelog">
-      <div class="changelog-item">
-        <div class="changelog-version">v2.39</div>
-        <div class="changelog-content">
-          <h4>GitHub Migration, Plugin System, 36 Agents & Multi-Channel</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span><strong>GitHub migration</strong> &mdash; moved from GitLab to GitHub organization (<code>zeniclaw/core</code>, <code>zeniclaw/agents</code>, <code>zeniclaw/gateway</code>).<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Plugin system</strong> &mdash; 14 lifecycle events, <code>PluginInterface</code> with tools, hooks, and isolated execution.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>36 agents</strong> &mdash; added ContentCuratorAgent (reading challenges), InteractiveQuizAgent, BudgetTrackerAgent, AIAssistantAgent, and more.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Multi-channel</strong> &mdash; Telegram channel driver, Web Chat with WebSocket, channel abstraction layer.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Custom WhatsApp Gateway</strong> &mdash; replaced WAHA with lightweight Baileys-based gateway, media download with fallback, sticker support.<br>
-            <span class="changelog-tag tag-fix">fix</span>Media download in WhatsApp groups (proper <code>reuploadRequest</code> + <code>downloadContentFromMessage</code> fallback).
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.27</div>
-        <div class="changelog-content">
-          <h4>Intent Classifier, Parallel Sub-Agents, Model Roles & API Agent v2</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span><strong>Intent Classifier</strong> in BaseAgent &mdash; LLM-based intent classification with conversation history, available to all 36 agents.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Configurable Model Roles</strong> &mdash; 3 roles (fast/balanced/powerful) configurable from Settings UI, replacing 50+ hardcoded model strings.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Parallel Sub-Agents</strong> &mdash; up to 10 concurrent sub-agents with throttle middleware, configurable from Settings (default: 3).<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>API Agent v2</strong> &mdash; web page fetching, self-healing JSON, auto-continuation for truncated responses, context-aware credential storage.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Anti-hallucination rules</strong> &mdash; agents never claim actions they didn't perform via tools.<br>
-            <span class="changelog-tag tag-feat">feat</span>Context-aware fast-path routing &mdash; bypasses fast-path when user has active API project.<br>
-            <span class="changelog-tag tag-fix">fix</span>Dynamic HTTP timeouts (120s for large token requests), truncated JSON salvage, conversation history in all agent prompts.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.26</div>
-        <div class="changelog-content">
-          <h4>Agent Auto-Improvements, DocumentAgent & HangmanGameAgent</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span><strong>36 agents</strong> &mdash; added <strong>DocumentAgent</strong> (PDF, Excel generation) and <strong>HangmanGameAgent</strong> (word games) to the roster.<br>
-            <span class="changelog-tag tag-feat">feat</span>Auto-improved <strong>MoodCheckAgent</strong>, <strong>ReminderAgent</strong>, <strong>SmartMeetingAgent</strong>, <strong>TodoAgent</strong> and <strong>WebSearchAgent</strong> with richer prompts and expanded capabilities.<br>
-            <span class="changelog-tag tag-feat">feat</span>Updated homepage with all 36 agents, refreshed SEO metadata and architecture diagram.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.25</div>
-        <div class="changelog-content">
-          <h4>WebSearchAgent, Smart Routing & Agent Visibility</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>New <strong>WebSearchAgent</strong> &mdash; real-time web search via Brave Search API with full API usage tracking, stats dashboard, and cross-agent integration.<br>
-            <span class="changelog-tag tag-feat">feat</span>ChatAgent can now autonomously search the web via the <code>web_search</code> tool in the agentic loop.<br>
-            <span class="changelog-tag tag-feat">feat</span><strong>Confidence-scored routing</strong> &mdash; Router now returns 0-100 confidence, auto-fallbacks to chat below 50%, with deterministic fast-paths for 8+ common patterns (no LLM call needed).<br>
-            <span class="changelog-tag tag-feat">feat</span>Disambiguation rules for commonly confused agents (code_review vs analysis, reminder vs event_reminder, etc.).<br>
-            <span class="changelog-tag tag-feat">feat</span>Agent badge on each message in conversation view &mdash; see which sub-agent handled every response.<br>
-            <span class="changelog-tag tag-feat">feat</span>Brave Search API key configurable from Settings page.<br>
-            <span class="changelog-tag tag-feat">feat</span>Auto-improve test reports now include user prompt examples for each capability.<br>
-            <span class="changelog-tag tag-fix">fix</span>Document agent responses (XLS/PDF creation) now visible in conversation history.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.24</div>
-        <div class="changelog-content">
-          <h4>Cross-Agent Data Sharing & Full On-Prem Ollama Support</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>Cross-agent data sharing &mdash; agents can exchange context and delegate tasks.<br>
-            <span class="changelog-tag tag-feat">feat</span>Full on-prem support with Ollama integration, no external API required.<br>
-            <span class="changelog-tag tag-feat">feat</span>Auto-improve agent system &mdash; continuous background self-improvement of all sub-agents.<br>
-            <span class="changelog-tag tag-feat">feat</span>Debug tab in conversation view with routing decisions and agent logs.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.22</div>
-        <div class="changelog-content">
-          <h4>On-Prem LLMs, Persistent Knowledge & Model Selection</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>Built-in Ollama container for on-prem LLMs (Qwen 2.5, Coder models) with one-click download from the UI.<br>
-            <span class="changelog-tag tag-feat">feat</span>Per-user persistent knowledge store &mdash; agents remember facts across sessions and check before asking.<br>
-            <span class="changelog-tag tag-feat">feat</span>Model selection per sub-agent: assign Claude, GPT-4, or on-prem models to individual agents.<br>
-            <span class="changelog-tag tag-feat">feat</span>AnthropicClient auto-routes non-Claude models to Ollama/vLLM OpenAI-compatible API.<br>
-            <span class="changelog-tag tag-fix">fix</span>Self-improvement "bonne idee" spam &mdash; only notifies on genuine new capabilities.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.21</div>
-        <div class="changelog-content">
-          <h4>Agentic API Loop</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>Claude autonomously chains multiple API calls in a loop, analyzing results and deciding next steps without human intervention.<br>
-            <span class="changelog-tag tag-feat">feat</span>Multi-call analysis: the LLM reviews combined API data and produces a synthesized answer.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.20</div>
-        <div class="changelog-content">
-          <h4>Smart Project Switching & Claude-Driven API Agent</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>Smart project switching via natural language &mdash; Claude understands "switch to project X".<br>
-            <span class="changelog-tag tag-feat">feat</span>Web chat SubAgent feedback with real-time status polling.<br>
-            <span class="changelog-tag tag-feat">feat</span>100% Claude-driven API agent &mdash; zero hardcoded fields, pure LLM interaction.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.19</div>
-        <div class="changelog-content">
-          <h4>Intelligent Contextual Routing</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>Conversation history injected into the router for contextual multi-turn intelligence.<br>
-            <span class="changelog-tag tag-feat">feat</span>Generic API interaction for DevAgent &mdash; any REST API, zero config.<br>
-            <span class="changelog-tag tag-fix">fix</span>Web chat "no response" bug fixed &mdash; dispatched results now carry the reply.
-          </p>
-        </div>
-      </div>
-      <div class="changelog-item">
-        <div class="changelog-version">v2.18</div>
-        <div class="changelog-content">
-          <h4>Full LLM Router & Smart DevAgent</h4>
-          <p>
-            <span class="changelog-tag tag-feat">feat</span>DevAgent upgraded with GitHub integration and smart commands.<br>
-            <span class="changelog-tag tag-feat">feat</span>Manager heartbeat for instance monitoring.<br>
-            <span class="changelog-tag tag-feat">feat</span>Integrated web chat panel on the dashboard.<br>
-            <span class="changelog-tag tag-fix">fix</span>Supervisor auto-restart for queue workers, container build failure protection.
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="install">
-  <div class="section-inner">
-    <span class="section-label">// install</span>
-    <h2 class="section-title">Up and running in <span class="gradient-text">5 minutes</span></h2>
-    <p class="section-desc">All you need is a Linux server with Podman or Docker. The install script handles everything else.</p>
+    <span class="section-label">// deploy</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">Operationnel en <span class="gradient-text">5 minutes</span></span>
+      <span x-show="lang==='en'">Up and running in <span class="gradient-text">5 minutes</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Un serveur Linux avec Podman ou Docker. Le script d'installation gere tout le reste.</span>
+      <span x-show="lang==='en'">A Linux server with Podman or Docker. The install script handles everything else.</span>
+    </p>
     <div class="install-steps">
       <div class="install-step">
         <div class="step-number">1</div>
         <div class="step-content">
-          <h3>Prerequisites</h3>
-          <p>You need a Linux server (Ubuntu 20.04+ recommended) with at least 2GB RAM and Podman or Docker installed. For on-prem LLMs, 8GB+ RAM is recommended.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button><span class="comment"># Install Podman (recommended) or Docker</span><br>sudo apt install -y podman podman-compose</div>
+          <h3 x-show="lang==='fr'">Clonez le depot</h3>
+          <h3 x-show="lang==='en'">Clone the repository</h3>
+          <p x-show="lang==='fr'">Recuperez le code source et lancez l'installateur interactif.</p>
+          <p x-show="lang==='en'">Fetch the source code and run the interactive installer.</p>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw</div>
         </div>
       </div>
       <div class="install-step">
         <div class="step-number">2</div>
         <div class="step-content">
-          <h3>Clone & Install</h3>
-          <p>Clone the repository and run the interactive installer. It sets up all 5 containers automatically.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw<br>bash install.sh</div>
+          <h3 x-show="lang==='fr'">Lancez l'installation</h3>
+          <h3 x-show="lang==='en'">Run the installer</h3>
+          <p x-show="lang==='fr'">Le script configure automatiquement les 5 conteneurs (app, base de donnees, cache, gateway, LLM).</p>
+          <p x-show="lang==='en'">The script automatically configures all 5 containers (app, database, cache, gateway, LLM).</p>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>bash install.sh<br><span class="comment"># 5 containers: app, postgres, redis, gateway, ollama</span></div>
         </div>
       </div>
       <div class="install-step">
         <div class="step-number">3</div>
         <div class="step-content">
-          <h3>Connect a Channel</h3>
-          <p>Open the dashboard. For WhatsApp: go to Settings and scan the QR code. Or use the built-in Web Chat directly from the dashboard. More channels coming soon.</p>
-        </div>
-      </div>
-      <div class="install-step">
-        <div class="step-number">4</div>
-        <div class="step-content">
-          <h3>Configure LLMs</h3>
-          <p>In Settings, add your Anthropic API key (or Claude Max token) for cloud models. On-prem models can be downloaded directly from the UI &mdash; no CLI needed.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button><span class="comment"># Default credentials</span><br>Email: admin@zeniclaw.io<br>Password: password</div>
-        </div>
-      </div>
-      <div class="install-step">
-        <div class="step-number">5</div>
-        <div class="step-content">
-          <h3>Start Chatting</h3>
-          <p>Send a message from any connected channel. The RouterAgent with intent classifier auto-dispatches to the right agent.</p>
+          <h3 x-show="lang==='fr'">Ouvrez votre navigateur</h3>
+          <h3 x-show="lang==='en'">Open your browser</h3>
+          <p x-show="lang==='fr'">Accedez au tableau de bord, configurez vos agents et connectez vos canaux (WhatsApp, Web Chat, API).</p>
+          <p x-show="lang==='en'">Access the dashboard, configure your agents and connect your channels (WhatsApp, Web Chat, API).</p>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>open <span style="color: var(--accent-blue);">http://localhost:8080</span><br><span class="comment"># Default: admin@zeniclaw.io / password</span></div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+{{-- ========== SECURITY & COMPLIANCE ========== --}}
 <section>
+  <div class="section-inner">
+    <span class="section-label">// security</span>
+    <h2 class="section-title">
+      <span x-show="lang==='fr'">Securite et <span class="gradient-text">conformite</span></span>
+      <span x-show="lang==='en'">Security & <span class="gradient-text">compliance</span></span>
+    </h2>
+    <p class="section-desc">
+      <span x-show="lang==='fr'">Concu pour les exigences de securite des entreprises. Vos donnees ne quittent jamais vos serveurs.</span>
+      <span x-show="lang==='en'">Built for enterprise security requirements. Your data never leaves your servers.</span>
+    </p>
+    <div class="security-grid">
+      <div class="security-item">
+        <div class="security-icon">&#x1F512;</div>
+        <div>
+          <h4 x-show="lang==='fr'">Souverainete des donnees</h4>
+          <h4 x-show="lang==='en'">Data sovereignty</h4>
+          <p x-show="lang==='fr'">Deploiement 100% on-prem. Aucune donnee ne transite par des serveurs tiers. Compatible air-gap avec LLMs locaux.</p>
+          <p x-show="lang==='en'">100% on-prem deployment. No data passes through third-party servers. Air-gap compatible with local LLMs.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <div class="security-icon">&#x1F510;</div>
+        <div>
+          <h4 x-show="lang==='fr'">Chiffrement AES-256</h4>
+          <h4 x-show="lang==='en'">AES-256 Encryption</h4>
+          <p x-show="lang==='fr'">Tous les secrets et donnees sensibles sont chiffres au repos. Communications HTTPS/TLS en transit.</p>
+          <p x-show="lang==='en'">All secrets and sensitive data encrypted at rest. HTTPS/TLS communications in transit.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <div class="security-icon">&#x1F465;</div>
+        <div>
+          <h4>RBAC</h4>
+          <p x-show="lang==='fr'">Controle d'acces base sur les roles : superadmin, admin, operateur, lecteur. Permissions granulaires par agent.</p>
+          <p x-show="lang==='en'">Role-based access control: superadmin, admin, operator, viewer. Granular permissions per agent.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <div class="security-icon">&#x1F4DD;</div>
+        <div>
+          <h4 x-show="lang==='fr'">Journaux d'audit</h4>
+          <h4 x-show="lang==='en'">Audit logs</h4>
+          <p x-show="lang==='fr'">Tracabilite complete de chaque action, decision d'agent, et acces utilisateur. Export pour conformite.</p>
+          <p x-show="lang==='en'">Complete traceability of every action, agent decision, and user access. Export for compliance.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <div class="security-icon">&#x1F6E1;</div>
+        <div>
+          <h4 x-show="lang==='fr'">Sandboxing des agents</h4>
+          <h4 x-show="lang==='en'">Agent sandboxing</h4>
+          <p x-show="lang==='fr'">Chaque agent s'execute dans un environnement isole avec memoire et outils dedies. Aucun acces croise non autorise.</p>
+          <p x-show="lang==='en'">Each agent runs in an isolated environment with dedicated memory and tools. No unauthorized cross-access.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <div class="security-icon">&#x1F504;</div>
+        <div>
+          <h4 x-show="lang==='fr'">Mises a jour et monitoring</h4>
+          <h4 x-show="lang==='en'">Updates & monitoring</h4>
+          <p x-show="lang==='fr'">Mises a jour automatiques, health checks, et watchdog integre pour une disponibilite maximale.</p>
+          <p x-show="lang==='en'">Automatic updates, health checks, and built-in watchdog for maximum uptime.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{{-- ========== CTA / CONTACT ========== --}}
+<section id="contact" style="background: var(--bg-secondary);">
   <div class="section-inner" style="text-align: center;">
-    <h2 class="section-title" style="margin-bottom: 1.5rem;">Ready to <span class="gradient-text">get started</span>?</h2>
-    <p class="section-desc" style="margin: 0 auto 2rem;">Deploy your own AI command center in minutes. Cloud or on-prem, open source, self-hosted, completely free.</p>
+    <h2 class="section-title" style="margin-bottom: 1.5rem;">
+      <span x-show="lang==='fr'">Pret a <span class="gradient-text">deployer</span> ?</span>
+      <span x-show="lang==='en'">Ready to <span class="gradient-text">deploy</span>?</span>
+    </h2>
+    <p class="section-desc" style="margin: 0 auto 2rem;">
+      <span x-show="lang==='fr'">Deploiez votre plateforme IA d'entreprise en quelques minutes. On-prem, securise, souverain.</span>
+      <span x-show="lang==='en'">Deploy your enterprise AI platform in minutes. On-prem, secure, sovereign.</span>
+    </p>
     <div class="hero-actions" style="justify-content: center;">
       @auth
-        <a href="{{ route('dashboard') }}" class="btn btn-primary">Go to Dashboard</a>
+        <a href="{{ route('dashboard') }}" class="btn btn-primary">
+          <span x-show="lang==='fr'">Tableau de bord</span>
+          <span x-show="lang==='en'">Go to Dashboard</span>
+        </a>
       @else
-        <a href="{{ route('login') }}" class="btn btn-primary">Sign In</a>
+        <a href="{{ route('login') }}" class="btn btn-primary">
+          <span x-show="lang==='fr'">Demander une demo</span>
+          <span x-show="lang==='en'">Request a Demo</span>
+        </a>
       @endauth
-      <a href="https://github.com/zeniclaw/core" class="btn btn-secondary" target="_blank">View on GitHub</a>
-      <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" class="btn btn-whatsapp" target="_blank" rel="noopener">&#x1F4AC; Join Community</a>
+      <a href="https://github.com/zeniclaw/core" class="btn btn-secondary" target="_blank">
+        <span x-show="lang==='fr'">Voir sur GitHub</span>
+        <span x-show="lang==='en'">View on GitHub</span>
+      </a>
+      <a href="#deploy" class="btn btn-outline">
+        <span x-show="lang==='fr'">Guide d'installation</span>
+        <span x-show="lang==='en'">Install Guide</span>
+      </a>
     </div>
   </div>
 </section>
 
+{{-- ========== FOOTER ========== --}}
 <footer>
   <div class="footer-inner">
     <ul class="footer-links">
+      <li><a href="#solutions">Solutions</a></li>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#technology" x-show="lang==='fr'">Technologie</a><a href="#technology" x-show="lang==='en'">Technology</a></li>
+      <li><a href="#deploy" x-show="lang==='fr'">Installation</a><a href="#deploy" x-show="lang==='en'">Install</a></li>
       <li><a href="https://github.com/zeniclaw/core" target="_blank">GitHub</a></li>
-      <li><a href="#features">Features</a></li>
-      <li><a href="#changelog">Changelog</a></li>
-      <li><a href="#install">Install</a></li>
-      <li><a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" target="_blank">Community</a></li>
       <li><a href="https://www.zenibiz.com" target="_blank">ZeniBiz</a></li>
       @auth
         <li><a href="{{ route('dashboard') }}">Dashboard</a></li>
@@ -786,10 +914,14 @@ footer {
         <li><a href="{{ route('login') }}">Sign In</a></li>
       @endauth
     </ul>
-    <p class="footer-copy">&copy; {{ date('Y') }} ZeniClaw v2.27 by ZeniBiz &mdash; Self-hosted Multi-Channel AI Platform</p>
+    <p class="footer-copy">&copy; 2026 ZeniClaw by ZeniBiz &mdash;
+      <span x-show="lang==='fr'">Plateforme IA d'entreprise on-prem</span>
+      <span x-show="lang==='en'">Enterprise AI platform, on your servers</span>
+    </p>
   </div>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 <script>
 function copyCode(btn) {
   const block = btn.parentElement;
