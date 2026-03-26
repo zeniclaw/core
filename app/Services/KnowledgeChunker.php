@@ -329,10 +329,18 @@ class KnowledgeChunker
 
     private function extractPdf(string $filePath): string
     {
-        Log::info("extractPdf: starting", ['file' => $filePath, 'exists' => file_exists($filePath)]);
+        $fileSize = file_exists($filePath) ? filesize($filePath) : 0;
+        Log::info("extractPdf: starting", ['file' => basename($filePath), 'size_mb' => round($fileSize / 1048576, 1)]);
 
-        // Try smalot/pdfparser if available
-        if (class_exists(\Smalot\PdfParser\Parser::class)) {
+        // 1. Always try pdftotext CLI first (streams, low memory, handles large files)
+        $text = $this->extractPdfViaCli($filePath);
+        if ($text && mb_strlen(trim($text)) >= 20) {
+            Log::info("extractPdf: pdftotext OK", ['chars' => mb_strlen($text)]);
+            return $text;
+        }
+
+        // 2. Fallback to smalot/pdfparser for small files only (< 5MB to avoid OOM)
+        if ($fileSize < 5 * 1048576 && class_exists(\Smalot\PdfParser\Parser::class)) {
             try {
                 $parser = new \Smalot\PdfParser\Parser();
                 $pdf = $parser->parseFile($filePath);
@@ -341,22 +349,31 @@ class KnowledgeChunker
                 if (mb_strlen(trim($text)) >= 20) {
                     return $text;
                 }
-                Log::warning("extractPdf: smalot returned too little text, trying pdftotext");
             } catch (\Throwable $e) {
-                Log::warning("extractPdf: smalot failed: " . $e->getMessage());
+                Log::warning("extractPdf: smalot failed: " . mb_substr($e->getMessage(), 0, 200));
             }
+        } elseif ($fileSize >= 5 * 1048576) {
+            Log::info("extractPdf: skipping smalot (file too large: {$fileSize} bytes)");
         }
 
-        // Fallback: pdftotext CLI
+        Log::warning("extractPdf: all methods failed", ['file' => basename($filePath)]);
+        return '';
+    }
+
+    private function extractPdfViaCli(string $filePath): string
+    {
         $output = [];
         $exitCode = 0;
-        exec('pdftotext ' . escapeshellarg($filePath) . ' - 2>&1', $output, $exitCode);
-        Log::info("extractPdf: pdftotext result", ['exit' => $exitCode, 'lines' => count($output), 'chars' => mb_strlen(implode("\n", $output))]);
+        exec('pdftotext -layout ' . escapeshellarg($filePath) . ' - 2>/dev/null', $output, $exitCode);
         if ($exitCode === 0 && !empty($output)) {
             return implode("\n", $output);
         }
-
-        Log::warning("extractPdf: all methods failed", ['file' => $filePath]);
+        // Retry without -layout
+        exec('pdftotext ' . escapeshellarg($filePath) . ' - 2>/dev/null', $output, $exitCode);
+        if ($exitCode === 0 && !empty($output)) {
+            return implode("\n", $output);
+        }
+        Log::info("extractPdf: pdftotext failed", ['exit' => $exitCode]);
         return '';
     }
 
