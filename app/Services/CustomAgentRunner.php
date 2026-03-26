@@ -760,9 +760,16 @@ class CustomAgentRunner extends BaseAgent
         // Phase 1: Preparation
         $this->updateProgress($context, 'skill', $this->currentStepLabel ?? 'Execution...', "Connexion au modele {$slug}...");
 
+        // Write system prompt to temp file (avoids shell argument length limits)
+        $tmpFile = tempnam('/tmp', 'zc_sys_');
+        file_put_contents($tmpFile, $systemPrompt);
+
+        $userMessage = "EXECUTE CETTE INSTRUCTION: {$stepInstruction}\n\nContexte utilisateur: " . ($context->body ?? '');
+
         $cmd = sprintf(
-            'claude -p %s --model %s --output-format json --max-turns 8 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
-            escapeshellarg($fullPrompt),
+            'claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 8 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
+            escapeshellarg($userMessage),
+            escapeshellarg($tmpFile),
             escapeshellarg($slug)
         );
 
@@ -833,6 +840,7 @@ class CustomAgentRunner extends BaseAgent
         proc_close($proc);
 
         $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Reponse recue, traitement...");
+        @unlink($tmpFile);
 
         // Parse JSON result
         $data = json_decode($output, true);
