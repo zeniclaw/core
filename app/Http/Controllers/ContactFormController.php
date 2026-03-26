@@ -28,7 +28,7 @@ class ContactFormController extends Controller
 
         try {
             Mail::raw($this->buildEmailBody($validated), function ($mail) use ($validated) {
-                $mail->to('guillaume@zenibiz.com')
+                $mail->to('gti@zenibiz.com')
                      ->replyTo($validated['email'], $validated['name'])
                      ->subject('ZeniClaw Contact: ' . $validated['name'] . ($validated['company'] ? ' (' . $validated['company'] . ')' : ''));
             });

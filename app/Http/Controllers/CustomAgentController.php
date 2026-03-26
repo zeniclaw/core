@@ -12,6 +12,7 @@ use App\Services\CustomAgentRunner;
 use App\Services\KnowledgeChunker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class CustomAgentController extends Controller
 {
@@ -200,11 +201,12 @@ class CustomAgentController extends Controller
                 'type' => 'text',
                 'source' => 'saisie manuelle',
                 'raw_content' => $request->input('content'),
+                'status' => 'pending',
             ]);
 
-            (new KnowledgeChunker())->processDocument($document);
+            $this->processDocumentAsync($document);
 
-            return back()->with('success', "Document texte ajouté, traitement en cours...");
+            return back()->with('success', "Document texte ajouté, traitement lancé en arrière-plan...");
         }
 
         if ($type === 'url') {
@@ -227,11 +229,12 @@ class CustomAgentController extends Controller
                 'type' => 'url',
                 'source' => $url,
                 'raw_content' => $text,
+                'status' => 'pending',
             ]);
 
-            (new KnowledgeChunker())->processDocument($document);
+            $this->processDocumentAsync($document);
 
-            return back()->with('success', "Contenu URL importé, traitement en cours...");
+            return back()->with('success', "Contenu URL importé, traitement lancé en arrière-plan...");
         }
 
         // File upload
@@ -259,14 +262,15 @@ class CustomAgentController extends Controller
             'type' => 'file',
             'source' => $file->getClientOriginalName(),
             'raw_content' => $text,
+            'status' => 'pending',
         ]);
 
         // Clean up uploaded file (text is now in DB)
         @unlink($fullPath);
 
-        (new KnowledgeChunker())->processDocument($document);
+        $this->processDocumentAsync($document);
 
-        return back()->with('success', "Fichier importé, traitement en cours...");
+        return back()->with('success', "Fichier importé, traitement lancé en arrière-plan...");
     }
 
     /**
@@ -298,9 +302,9 @@ class CustomAgentController extends Controller
             abort(403);
         }
 
-        (new KnowledgeChunker())->processDocument($document);
+        $this->processDocumentAsync($document);
 
-        return back()->with('success', 'Retraitement lancé...');
+        return back()->with('success', 'Retraitement lancé en arrière-plan...');
     }
 
     // ── Test Chat ──────────────────────────────────────────────────
@@ -343,6 +347,25 @@ class CustomAgentController extends Controller
     }
 
     // ── Helpers ────────────────────────────────────────────────────
+
+    /**
+     * Process document: try async (queue), fallback to sync if queue unavailable.
+     */
+    private function processDocumentAsync(CustomAgentDocument $document): void
+    {
+        try {
+            ProcessCustomAgentDocumentJob::dispatch($document->id);
+        } catch (\Throwable $e) {
+            // Queue unavailable — process synchronously
+            Log::warning("Queue unavailable, processing document sync: " . $e->getMessage());
+            try {
+                (new KnowledgeChunker())->processDocument($document);
+            } catch (\Throwable $e2) {
+                Log::error("Document processing failed: " . $e2->getMessage());
+                $document->update(['status' => 'failed', 'error_message' => mb_substr($e2->getMessage(), 0, 500)]);
+            }
+        }
+    }
 
     private function authorizeAgent(Agent $agent): void
     {

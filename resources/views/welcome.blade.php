@@ -898,8 +898,8 @@ footer {
             </div>
           </div>
           <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-            <a href="mailto:guillaume@zenibiz.com" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              &#x2709; guillaume@zenibiz.com
+            <a href="mailto:gti@zenibiz.com" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
+              &#x2709; gti@zenibiz.com
             </a>
             <a href="tel:+32484885871" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
               &#x1F4F1; +32 484 88 58 71

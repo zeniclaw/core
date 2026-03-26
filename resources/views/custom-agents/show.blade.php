@@ -132,13 +132,21 @@
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
                             <span class="px-2 py-1 rounded-full text-xs font-medium
-                                {{ $doc->status === 'ready' ? 'bg-green-100 text-green-700' : ($doc->status === 'failed' ? 'bg-red-100 text-red-700' : ($doc->status === 'processing' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500')) }}">
-                                {{ $doc->status }}
+                                {{ $doc->status === 'ready' ? 'bg-green-100 text-green-700' : ($doc->status === 'failed' ? 'bg-red-100 text-red-700' : (in_array($doc->status, ['processing', 'pending']) ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500')) }}">
+                                @if($doc->status === 'pending') &#x23F3; en attente
+                                @elseif($doc->status === 'processing') &#x2699; traitement...
+                                @elseif($doc->status === 'ready') &#x2705; pret
+                                @elseif($doc->status === 'failed') &#x274C; echec
+                                @else {{ $doc->status }}
+                                @endif
                             </span>
-                            @if($doc->status === 'failed')
+                            @if($doc->status === 'failed' && $doc->error_message)
+                            <span class="text-xs text-red-400 max-w-[200px] truncate" title="{{ $doc->error_message }}">{{ $doc->error_message }}</span>
+                            @endif
+                            @if(in_array($doc->status, ['failed', 'pending']))
                             <form method="POST" action="{{ route('custom-agents.documents.reprocess', [$agent, $customAgent, $doc]) }}">
                                 @csrf
-                                <button class="text-xs text-indigo-600 hover:underline">Relancer</button>
+                                <button class="px-2 py-1 text-xs bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium transition-colors">Relancer</button>
                             </form>
                             @endif
                             <form method="POST" action="{{ route('custom-agents.documents.destroy', [$agent, $customAgent, $doc]) }}"
