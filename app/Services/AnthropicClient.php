@@ -613,7 +613,7 @@ class AnthropicClient
         if ($sessionId) {
             // Resume existing session — send new message via --resume
             $cmd = sprintf(
-                'claude --resume %s -p %s --model %s --output-format json --max-turns 6 --allowedTools "WebSearch,WebFetch" 2>/dev/null',
+                'claude --resume %s -p %s --model %s --output-format json --max-turns 6 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
                 escapeshellarg($sessionId),
                 escapeshellarg($textMessage), // Only user message, system prompt already in session
                 escapeshellarg($slug)
@@ -621,7 +621,7 @@ class AnthropicClient
         } else {
             // New session
             $cmd = sprintf(
-                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools "WebSearch,WebFetch" 2>/dev/null',
+                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
                 escapeshellarg($fullPrompt),
                 escapeshellarg($slug)
             );
