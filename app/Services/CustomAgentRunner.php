@@ -132,6 +132,12 @@ class CustomAgentRunner extends BaseAgent
             return $skillResult;
         }
 
+        // 0b. Check if user wants to teach the agent something
+        $teachResult = $this->tryTeachMemory($context);
+        if ($teachResult) {
+            return $teachResult;
+        }
+
         // 1. Resolve model — prefer custom agent's explicit model, otherwise use routing/fast default
         $model = $this->customAgent->model !== 'default'
             ? $this->customAgent->model
@@ -783,6 +789,101 @@ class CustomAgentRunner extends BaseAgent
     }
 
     /**
+     * Detect if user is teaching the agent something and store it.
+     */
+    private function tryTeachMemory(AgentContext $context): ?AgentResult
+    {
+        $body = trim($context->body ?? '');
+        if (!$body || mb_strlen($body) < 10) return null;
+
+        $lower = mb_strtolower($body);
+
+        // Detect teaching patterns
+        $teachPatterns = [
+            'retiens que ', 'retiens: ', 'retiens : ',
+            'apprends que ', 'apprends: ', 'apprends : ',
+            'souviens-toi que ', 'souviens toi que ',
+            'n\'oublie pas que ', 'noublie pas que ', 'n oublie pas que ',
+            'rappelle-toi que ', 'rappelle toi que ',
+            'memorise: ', 'memorise : ', 'memorise que ',
+            'remember that ', 'remember: ',
+            'note que ', 'note: ', 'note : ',
+            'sache que ', 'sache: ',
+            'important: ', 'important : ',
+        ];
+
+        $matchedPattern = null;
+        foreach ($teachPatterns as $pattern) {
+            if (str_starts_with($lower, $pattern)) {
+                $matchedPattern = $pattern;
+                break;
+            }
+        }
+
+        if (!$matchedPattern) return null;
+
+        // Extract the content to remember
+        $content = trim(mb_substr($body, mb_strlen($matchedPattern)));
+        if (mb_strlen($content) < 5) return null;
+
+        // Categorize
+        $category = 'general';
+        if (preg_match('/\b(regle|regl|policy|procedure|process)\b/i', $content)) $category = 'instruction';
+        if (preg_match('/\b(prefere|preference|aime|naime pas|evite)\b/i', $content)) $category = 'preference';
+        if (preg_match('/\b(est|sont|fait|a|possede|mesure|pese|habite|travaille)\b/i', $content)) $category = 'fact';
+
+        // Store
+        \App\Models\CustomAgentMemory::create([
+            'custom_agent_id' => $this->customAgent->id,
+            'category' => $category,
+            'content' => $content,
+            'source' => str_starts_with($context->from, 'partner-') ? 'partner' : 'chat',
+        ]);
+
+        $reply = "✅ C'est noté ! J'ai mémorisé : \"{$content}\"\n\n_Je m'en souviendrai dans toutes nos futures conversations._";
+
+        $this->memory->append($context->agent->id, $context->from, $context->senderName, $body, $reply);
+        $this->sendText($context->from, $reply);
+
+        return AgentResult::reply($reply, [
+            'custom_agent_id' => $this->customAgent->id,
+            'memory_stored' => $category,
+        ]);
+    }
+
+    /**
+     * Build context from learned memories for the system prompt.
+     */
+    private function buildMemoriesContext(): string
+    {
+        $memories = $this->customAgent->memories()->orderBy('category')->orderByDesc('created_at')->limit(50)->get();
+
+        if ($memories->isEmpty()) return '';
+
+        $grouped = $memories->groupBy('category');
+        $parts = ["MEMOIRE DE L'AGENT (informations apprises) :"];
+
+        $labels = [
+            'fact' => 'Faits',
+            'instruction' => 'Instructions/Regles',
+            'preference' => 'Preferences',
+            'general' => 'Notes generales',
+        ];
+
+        foreach ($grouped as $cat => $items) {
+            $label = $labels[$cat] ?? ucfirst($cat);
+            $parts[] = "\n{$label}:";
+            foreach ($items as $m) {
+                $parts[] = "- {$m->content}";
+            }
+        }
+
+        $parts[] = "\nUtilise ces informations pour personnaliser tes reponses.";
+
+        return implode("\n", $parts);
+    }
+
+    /**
      * Build context about available skills and scripts for the system prompt.
      */
     private function buildSkillsContext(): string
@@ -843,6 +944,12 @@ class CustomAgentRunner extends BaseAgent
             if ($memoryContext) {
                 $parts[] = $memoryContext;
             }
+        }
+
+        // Inject learned memories
+        $memoriesContext = $this->buildMemoriesContext();
+        if ($memoriesContext) {
+            $parts[] = $memoriesContext;
         }
 
         // Inject available skills and scripts so the agent knows about them
