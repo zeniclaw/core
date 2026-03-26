@@ -646,8 +646,10 @@ class CustomAgentRunner extends BaseAgent
         } else {
             // ── Simple chat (prompt only) — use CLI with system-prompt-file for long prompts ──
             $userMsg = "Instruction: {$stepContent}\n\nMessage utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+            \Illuminate\Support\Facades\Log::info("Skill step: simple chat", ['type' => $stepType, 'step' => $currentStep + 1, 'userMsg_len' => mb_strlen($userMsg), 'sysPrompt_len' => mb_strlen($systemPrompt)]);
             $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
             $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
+            \Illuminate\Support\Facades\Log::info("Skill step: chatViaCli returned", ['reply_len' => mb_strlen($reply), 'preview' => mb_substr($reply, 0, 100)]);
         }
 
         if (!$reply) {
@@ -932,7 +934,10 @@ class CustomAgentRunner extends BaseAgent
     private function chatViaCli(string $userMessage, string $systemPrompt, string $model): string
     {
         $apiKey = \App\Models\AppSetting::get('anthropic_api_key');
-        if (!$apiKey) return '';
+        if (!$apiKey) {
+            \Illuminate\Support\Facades\Log::error("chatViaCli: no API key");
+            return '';
+        }
 
         $slug = match (true) {
             str_contains($model, 'opus') => 'opus',
@@ -944,7 +949,7 @@ class CustomAgentRunner extends BaseAgent
         file_put_contents($tmpFile, $systemPrompt);
 
         $cmd = sprintf(
-            'CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 2>/dev/null',
+            'CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 3 --allowedTools "" 2>/dev/null',
             escapeshellarg($apiKey),
             escapeshellarg($userMessage),
             escapeshellarg($tmpFile),
@@ -954,9 +959,19 @@ class CustomAgentRunner extends BaseAgent
         $output = shell_exec($cmd);
         @unlink($tmpFile);
 
+        \Illuminate\Support\Facades\Log::info("chatViaCli result", [
+            'output_len' => strlen($output ?? ''),
+            'preview' => mb_substr($output ?? 'NULL', 0, 150),
+        ]);
+
         if ($output) {
             $data = json_decode($output, true);
-            return $data['result'] ?? '';
+            $result = $data['result'] ?? '';
+            // If error_max_turns but has partial result, use it
+            if (!$result && ($data['subtype'] ?? '') === 'error_max_turns') {
+                \Illuminate\Support\Facades\Log::warning("chatViaCli: max_turns hit, no result");
+            }
+            return $result;
         }
 
         return '';
