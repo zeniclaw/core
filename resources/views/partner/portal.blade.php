@@ -89,12 +89,12 @@
           </div>
         </template>
         <div x-show="loading" class="flex justify-start">
-          <div class="bg-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400">
-            <span class="inline-flex gap-1">
-              <span class="animate-bounce" style="animation-delay: 0s">.</span>
-              <span class="animate-bounce" style="animation-delay: 0.2s">.</span>
-              <span class="animate-bounce" style="animation-delay: 0.4s">.</span>
-            </span>
+          <div class="bg-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 max-w-[75%]">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+              <span class="font-medium text-gray-300" x-text="loadingStatus"></span>
+            </div>
+            <div class="text-xs text-gray-500" x-text="loadingDetail"></div>
           </div>
         </div>
       </div>
@@ -518,6 +518,34 @@ function partnerPortal() {
     input: '',
     loading: false,
     msgId: 0,
+    loadingStatus: 'Reflexion en cours...',
+    loadingDetail: '',
+    progressInterval: null,
+
+    startProgressPolling() {
+      this.loadingStatus = 'Connexion au modele IA...';
+      this.loadingDetail = '';
+      this.progressInterval = setInterval(async () => {
+        try {
+          const res = await fetch('{{ route("partner.progress", $share->token) }}');
+          const data = await res.json();
+          if (data.status === 'thinking') {
+            this.loadingStatus = data.step || 'Reflexion en cours...';
+            this.loadingDetail = data.detail || '';
+          } else if (data.status === 'skill') {
+            this.loadingStatus = data.step || 'Execution de la routine...';
+            this.loadingDetail = data.detail || '';
+          }
+        } catch(e) {}
+      }, 2000);
+    },
+
+    stopProgressPolling() {
+      if (this.progressInterval) {
+        clearInterval(this.progressInterval);
+        this.progressInterval = null;
+      }
+    },
 
     async sendMessage() {
       const msg = this.input.trim();
@@ -526,6 +554,7 @@ function partnerPortal() {
       this.messages.push({ id: ++this.msgId, role: 'user', content: msg });
       this.input = '';
       this.loading = true;
+      this.startProgressPolling();
 
       this.$nextTick(() => {
         this.$refs.chatMessages.scrollTop = this.$refs.chatMessages.scrollHeight;
@@ -543,6 +572,7 @@ function partnerPortal() {
         this.messages.push({ id: ++this.msgId, role: 'assistant', content: 'Erreur de communication.' });
       }
 
+      this.stopProgressPolling();
       this.loading = false;
       this.$nextTick(() => {
         this.$refs.chatMessages.scrollTop = this.$refs.chatMessages.scrollHeight;

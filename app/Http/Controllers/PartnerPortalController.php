@@ -161,6 +161,26 @@ class PartnerPortalController extends Controller
         ]);
     }
 
+    /**
+     * Poll progress of current agent processing.
+     */
+    public function progress(string $token)
+    {
+        $share = CustomAgentShare::where('token', $token)->first();
+        if (!$share || !$share->isValid()) {
+            return response()->json(['status' => 'idle']);
+        }
+
+        $sessionKey = 'partner-' . $share->id;
+        $progress = \Illuminate\Support\Facades\Cache::get("agent_progress:{$sessionKey}", [
+            'status' => 'idle',
+            'step' => '',
+            'detail' => '',
+        ]);
+
+        return response()->json($progress);
+    }
+
     public function storeSkill(Request $request, string $token)
     {
         $share = $this->resolveShare($token);

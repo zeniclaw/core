@@ -51,6 +51,7 @@ Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')-
     Route::post('/documents', [\App\Http\Controllers\PartnerPortalController::class, 'uploadDocument'])->name('documents.upload');
     Route::post('/chat', [\App\Http\Controllers\PartnerPortalController::class, 'chat'])->name('chat');
     Route::post('/assist', [\App\Http\Controllers\PartnerPortalController::class, 'assistCreate'])->name('assist');
+    Route::get('/progress', [\App\Http\Controllers\PartnerPortalController::class, 'progress'])->name('progress');
     Route::post('/credentials', [\App\Http\Controllers\PartnerPortalController::class, 'storeCredential'])->name('credentials.store');
     Route::delete('/credentials/{credential}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyCredential'])->name('credentials.destroy');
     Route::post('/skills', [\App\Http\Controllers\PartnerPortalController::class, 'storeSkill'])->name('skills.store');

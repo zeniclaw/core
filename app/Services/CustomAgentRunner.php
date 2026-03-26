@@ -151,8 +151,12 @@ class CustomAgentRunner extends BaseAgent
         $isShortMessage = mb_strlen(trim($body)) < 30;
         $ragContext = $isShortMessage ? [] : $this->retrieveKnowledge($body, $tier);
 
+        // Update progress for polling
+        $this->updateProgress($context, 'thinking', 'Recherche dans les documents...', '');
+
         // 4. Build system prompt with injected knowledge (format adapted to tier)
         $systemPrompt = $this->buildSystemPrompt($ragContext, $context, $tier);
+        $this->updateProgress($context, 'thinking', 'Generation de la reponse...', "Modele: {$model}");
 
         // 5. Check if tools are enabled — use agentic loop or simple chat
         // Small/medium on-prem models can't handle tool_use — fall back to simple chat
@@ -179,6 +183,8 @@ class CustomAgentRunner extends BaseAgent
             'tier' => $tier->value,
             'rag_chunks' => count($ragContext),
         ]);
+
+        $this->updateProgress($context, 'idle', '', '');
 
         // Return with model info in metadata
         return AgentResult::reply($result->reply, array_merge($result->metadata ?? [], [
@@ -614,6 +620,8 @@ class CustomAgentRunner extends BaseAgent
         $stepType = $step['type'] ?? 'prompt';
         $stepContent = $step['content'] ?? '';
 
+        $this->updateProgress($context, 'skill', "Routine \"{$skill->name}\" — etape " . ($currentStep + 1) . "/" . count($routine), mb_substr($stepContent, 0, 100));
+
         // Build system prompt for this step
         $tier = $this->classifyModel($model);
         $systemPrompt = $this->buildSkillStepPrompt($skill, $currentStep, $routine, $context, $tier);
@@ -893,6 +901,19 @@ class CustomAgentRunner extends BaseAgent
         $parts[] = "\nUtilise ces informations pour personnaliser tes reponses.";
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Update processing progress for polling (partner portal).
+     */
+    private function updateProgress(AgentContext $context, string $status, string $step, string $detail): void
+    {
+        if (!$this->isWebChat($context)) return;
+        \Illuminate\Support\Facades\Cache::put("agent_progress:{$context->from}", [
+            'status' => $status,
+            'step' => $step,
+            'detail' => $detail,
+        ], 120);
     }
 
     /**
