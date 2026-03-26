@@ -755,12 +755,23 @@ class CustomAgentRunner extends BaseAgent
                 context: $context,
                 tools: $filteredTools,
             );
-            return $loopResult->reply ?: '';
+            $reply = $loopResult->reply ?: '';
+            if ($reply && !str_contains($reply, 'trop volumineux')) {
+                return $reply;
+            }
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error("Skill agentic loop failed: " . $e->getMessage());
-            // Fallback to simple chat
-            return $this->claude->chat($userMessage, $model, $systemPrompt, 800) ?: '';
+            \Illuminate\Support\Facades\Log::warning("Skill agentic loop failed: " . $e->getMessage());
         }
+
+        // Fallback: try simple chat with same model
+        $reply = $this->claude->chat($userMessage, $model, $systemPrompt, 800);
+        if ($reply) return $reply;
+
+        // Fallback: try on-prem model
+        $onpremModel = 'qwen2.5:7b';
+        \Illuminate\Support\Facades\Log::info("Skill step: falling back to on-prem ({$onpremModel})");
+        $compactPrompt = mb_substr($systemPrompt, 0, 1500) . "\n\n" . $userMessage;
+        return $this->claude->chat($compactPrompt, $onpremModel, '', 500) ?: '';
     }
 
     /**
