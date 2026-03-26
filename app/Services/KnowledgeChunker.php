@@ -138,8 +138,12 @@ class KnowledgeChunker
      */
     public function extractText(string $filePath, string $mimeType): string
     {
+        Log::info("KnowledgeChunker: extractText", ['path' => $filePath, 'mime' => $mimeType, 'size' => filesize($filePath)]);
+
         if (str_contains($mimeType, 'pdf')) {
-            return $this->extractPdf($filePath);
+            $text = $this->extractPdf($filePath);
+            Log::info("KnowledgeChunker: PDF extracted", ['chars' => mb_strlen($text)]);
+            return $text;
         }
 
         if (str_contains($mimeType, 'text/') || str_contains($mimeType, 'csv') || str_contains($mimeType, 'json') || str_contains($mimeType, 'xml')) {
@@ -325,25 +329,34 @@ class KnowledgeChunker
 
     private function extractPdf(string $filePath): string
     {
+        Log::info("extractPdf: starting", ['file' => $filePath, 'exists' => file_exists($filePath)]);
+
         // Try smalot/pdfparser if available
         if (class_exists(\Smalot\PdfParser\Parser::class)) {
             try {
                 $parser = new \Smalot\PdfParser\Parser();
                 $pdf = $parser->parseFile($filePath);
-                return $pdf->getText() ?: '';
+                $text = $pdf->getText() ?: '';
+                Log::info("extractPdf: smalot result", ['chars' => mb_strlen($text)]);
+                if (mb_strlen(trim($text)) >= 20) {
+                    return $text;
+                }
+                Log::warning("extractPdf: smalot returned too little text, trying pdftotext");
             } catch (\Throwable $e) {
-                Log::warning("PDF parser failed: " . $e->getMessage());
+                Log::warning("extractPdf: smalot failed: " . $e->getMessage());
             }
         }
 
         // Fallback: pdftotext CLI
         $output = [];
         $exitCode = 0;
-        exec('pdftotext ' . escapeshellarg($filePath) . ' - 2>/dev/null', $output, $exitCode);
+        exec('pdftotext ' . escapeshellarg($filePath) . ' - 2>&1', $output, $exitCode);
+        Log::info("extractPdf: pdftotext result", ['exit' => $exitCode, 'lines' => count($output), 'chars' => mb_strlen(implode("\n", $output))]);
         if ($exitCode === 0 && !empty($output)) {
             return implode("\n", $output);
         }
 
+        Log::warning("extractPdf: all methods failed", ['file' => $filePath]);
         return '';
     }
 

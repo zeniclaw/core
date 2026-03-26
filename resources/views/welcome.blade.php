@@ -877,141 +877,54 @@ footer {
       <span x-show="lang==='en'">A question, a demo, an integration project? Get in touch.</span>
     </p>
 
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: start;">
+    <div style="max-width: 600px; margin: 0 auto;">
 
-      {{-- Left: Contact info + WhatsApp community --}}
-      <div>
-        {{-- Founder card --}}
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; margin-bottom: 1.5rem;">
-          <div style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem;">
-            <img src="https://www.zenibiz.com/guillaume_tilleul.jpg" alt="Guillaume Tilleul" style="width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--border);">
-            <div>
-              <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 2px;">Guillaume Tilleul</h3>
-              <p style="font-size: 0.85rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">
-                <span x-show="lang==='fr'">Fondateur &mdash; ZeniBiz</span>
-                <span x-show="lang==='en'">Founder &mdash; ZeniBiz</span>
-              </p>
-              <p style="font-size: 0.8rem; color: var(--text-muted);">
-                <span x-show="lang==='fr'">Entrepreneur et architecte de solutions IA pour les entreprises. Passionné par le déploiement on-prem et la souveraineté des données.</span>
-                <span x-show="lang==='en'">Entrepreneur and AI solution architect for businesses. Passionate about on-prem deployment and data sovereignty.</span>
-              </p>
-            </div>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-            <a href="mailto:gti@zenibiz.com" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              &#x2709; gti@zenibiz.com
-            </a>
-            <a href="tel:+32484885871" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              &#x1F4F1; +32 484 88 58 71
-            </a>
-            <a href="https://www.zenibiz.com/nos-porteurs" target="_blank" style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; transition: color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
-              &#x1F310; zenibiz.com
-            </a>
+      {{-- Founder card --}}
+      <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem;">
+          <img src="https://www.zenibiz.com/guillaume_tilleul.jpg" alt="Guillaume Tilleul" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--border);">
+          <div>
+            <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 2px;">Guillaume Tilleul</h3>
+            <p style="font-size: 0.85rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 4px;">
+              <span x-show="lang==='fr'">Fondateur &mdash; ZeniBiz</span>
+              <span x-show="lang==='en'">Founder &mdash; ZeniBiz</span>
+            </p>
+            <p style="font-size: 0.8rem; color: var(--text-muted);">
+              <span x-show="lang==='fr'">Entrepreneur et architecte de solutions IA pour les entreprises. Passionné par le déploiement on-prem et la souveraineté des données.</span>
+              <span x-show="lang==='en'">Entrepreneur and AI solution architect for businesses. Passionate about on-prem deployment and data sovereignty.</span>
+            </p>
           </div>
         </div>
-
-        {{-- WhatsApp Community --}}
-        <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" target="_blank" rel="noopener"
-           style="display: flex; align-items: center; gap: 1rem; background: linear-gradient(135deg, #25D366, #128C7E); border-radius: var(--radius); padding: 1.25rem 1.5rem; text-decoration: none; color: #fff; transition: opacity 0.2s;"
-           onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-          <span style="font-size: 2rem;">&#x1F4AC;</span>
-          <div>
-            <div style="font-weight: 700; font-size: 1rem; margin-bottom: 2px;">
-              <span x-show="lang==='fr'">Communaute WhatsApp ZeniClaw</span>
-              <span x-show="lang==='en'">ZeniClaw WhatsApp Community</span>
-            </div>
-            <div style="font-size: 0.8rem; opacity: 0.9;">
-              <span x-show="lang==='fr'">Rejoignez la communaute &mdash; aide, idees, mises a jour</span>
-              <span x-show="lang==='en'">Join the community &mdash; help, ideas, updates</span>
-            </div>
-          </div>
-          <span style="margin-left: auto; font-size: 1.2rem;">&rarr;</span>
-        </a>
+        <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
+          <a href="mailto:gti@zenibiz.com" class="btn btn-secondary" style="flex: 1; justify-content: center; min-width: 180px;">
+            &#x2709; gti@zenibiz.com
+          </a>
+          <a href="tel:+32484885871" class="btn btn-secondary" style="flex: 1; justify-content: center; min-width: 180px;">
+            &#x1F4F1; +32 484 88 58 71
+          </a>
+          <a href="https://www.zenibiz.com/nos-porteurs" target="_blank" class="btn btn-secondary" style="flex: 1; justify-content: center; min-width: 180px;">
+            &#x1F310; zenibiz.com
+          </a>
+        </div>
       </div>
 
-      {{-- Right: Contact form --}}
-      <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem;">
-
-        @if(session('contact_success'))
-        <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 1.25rem; text-align: center; margin-bottom: 1rem;">
-          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x2705;</div>
-          <p style="color: var(--accent-green); font-weight: 600; font-size: 0.95rem;">
-            <span x-show="lang==='fr'">Message envoye ! Nous vous repondrons rapidement.</span>
-            <span x-show="lang==='en'">Message sent! We'll get back to you shortly.</span>
-          </p>
+      {{-- WhatsApp Community --}}
+      <a href="https://chat.whatsapp.com/G1ENranBGq63FYToMpcnYR" target="_blank" rel="noopener"
+         style="display: flex; align-items: center; gap: 1rem; background: linear-gradient(135deg, #25D366, #128C7E); border-radius: var(--radius); padding: 1.25rem 1.5rem; text-decoration: none; color: #fff; transition: opacity 0.2s;"
+         onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+        <span style="font-size: 2rem;">&#x1F4AC;</span>
+        <div>
+          <div style="font-weight: 700; font-size: 1rem; margin-bottom: 2px;">
+            <span x-show="lang==='fr'">Communaute WhatsApp ZeniClaw</span>
+            <span x-show="lang==='en'">ZeniClaw WhatsApp Community</span>
+          </div>
+          <div style="font-size: 0.8rem; opacity: 0.9;">
+            <span x-show="lang==='fr'">Rejoignez la communaute &mdash; aide, idees, mises a jour</span>
+            <span x-show="lang==='en'">Join the community &mdash; help, ideas, updates</span>
+          </div>
         </div>
-        @endif
-
-        @if(session('error'))
-        <div style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-          <p style="color: var(--accent-red); font-size: 0.85rem;">{{ session('error') }}</p>
-        </div>
-        @endif
-
-        <form method="POST" action="{{ route('contact.send') }}" style="display: flex; flex-direction: column; gap: 1rem;">
-          @csrf
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-            <div>
-              <label style="display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;">
-                <span x-show="lang==='fr'">Nom *</span>
-                <span x-show="lang==='en'">Name *</span>
-              </label>
-              <input type="text" name="name" required maxlength="100" value="{{ old('name') }}"
-                     style="width: 100%; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font); outline: none; transition: border-color 0.2s;"
-                     onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
-            </div>
-            <div>
-              <label style="display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;">Email *</label>
-              <input type="email" name="email" required maxlength="200" value="{{ old('email') }}"
-                     style="width: 100%; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font); outline: none; transition: border-color 0.2s;"
-                     onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-            <div>
-              <label style="display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;">
-                <span x-show="lang==='fr'">Entreprise</span>
-                <span x-show="lang==='en'">Company</span>
-              </label>
-              <input type="text" name="company" maxlength="100" value="{{ old('company') }}"
-                     style="width: 100%; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font); outline: none; transition: border-color 0.2s;"
-                     onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
-            </div>
-            <div>
-              <label style="display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;">
-                <span x-show="lang==='fr'">Telephone</span>
-                <span x-show="lang==='en'">Phone</span>
-              </label>
-              <input type="tel" name="phone" maxlength="30" value="{{ old('phone') }}"
-                     style="width: 100%; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font); outline: none; transition: border-color 0.2s;"
-                     onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
-            </div>
-          </div>
-
-          <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;">Message *</label>
-            <textarea name="message" required rows="5" minlength="10" maxlength="5000"
-                      style="width: 100%; padding: 10px 14px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; font-family: var(--font); outline: none; resize: vertical; transition: border-color 0.2s;"
-                      onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'"
-                      x-bind:placeholder="lang==='fr' ? 'Decrivez votre projet, vos besoins...' : 'Describe your project, your needs...'">{{ old('message') }}</textarea>
-          </div>
-
-          @if($errors->any())
-          <div style="font-size: 0.8rem; color: var(--accent-red);">
-            @foreach($errors->all() as $error)
-              <p>{{ $error }}</p>
-            @endforeach
-          </div>
-          @endif
-
-          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
-            <span x-show="lang==='fr'">Envoyer le message</span>
-            <span x-show="lang==='en'">Send message</span>
-          </button>
-        </form>
-      </div>
+        <span style="margin-left: auto; font-size: 1.2rem;">&rarr;</span>
+      </a>
 
     </div>
   </div>
