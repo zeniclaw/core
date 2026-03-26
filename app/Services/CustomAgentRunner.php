@@ -722,6 +722,17 @@ class CustomAgentRunner extends BaseAgent
         $workspace = $this->customAgent->workspacePath();
         $parts[] = "ESPACE DE TRAVAIL : {$workspace}\nSi tu dois telecharger, generer ou stocker des fichiers, utilise ce repertoire. Sous-dossiers : docs/, scripts/, downloads/";
 
+        // Inject available credentials (keys only, not values — agent reads them at runtime)
+        $creds = $this->customAgent->credentials()->where('is_active', true)->pluck('description', 'key');
+        if ($creds->isNotEmpty()) {
+            $credList = "CREDENTIALS DISPONIBLES (chiffres, accessibles via getCredential('key')) :\n";
+            foreach ($creds as $key => $desc) {
+                $credList .= "- {$key}" . ($desc ? " : {$desc}" : '') . "\n";
+            }
+            $credList .= "Pour utiliser un credential dans un script, appelle \$agent->getCredential('key_name').";
+            $parts[] = $credList;
+        }
+
         $parts[] = "Réponds en français sauf si l'utilisateur écrit dans une autre langue.";
 
         return implode("\n\n", $parts);

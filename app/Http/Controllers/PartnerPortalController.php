@@ -37,8 +37,9 @@ class PartnerPortalController extends Controller
         $documents = $customAgent->documents()->orderByDesc('created_at')->get();
         $skills = $customAgent->skills()->orderByDesc('created_at')->get();
         $scripts = $customAgent->scripts()->orderByDesc('created_at')->get();
+        $credentials = $customAgent->credentials()->orderBy('key')->get();
 
-        return view('partner.portal', compact('share', 'customAgent', 'documents', 'skills', 'scripts'));
+        return view('partner.portal', compact('share', 'customAgent', 'documents', 'skills', 'scripts', 'credentials'));
     }
 
     public function uploadDocument(Request $request, string $token)
@@ -356,6 +357,49 @@ Quand tu as assez d'infos, genere le code final EXACTEMENT dans ce format (et RI
 }
 
 Guide l'utilisateur etape par etape. Sois concis et pratique. Reponds en francais.";
+    }
+
+    // ── Credentials ────────────────────────────────────────────
+
+    public function storeCredential(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+
+        $validated = $request->validate([
+            'key' => 'required|string|max:100|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+            'value' => 'required|string|max:5000',
+            'description' => 'nullable|string|max:200',
+        ]);
+
+        $customAgent = $share->customAgent;
+
+        // Upsert: update if key exists, create if not
+        $cred = $customAgent->credentials()->where('key', $validated['key'])->first();
+        if ($cred) {
+            $cred->update([
+                'value' => $validated['value'],
+                'description' => $validated['description'] ?? $cred->description,
+            ]);
+        } else {
+            \App\Models\CustomAgentCredential::create([
+                'custom_agent_id' => $customAgent->id,
+                'key' => $validated['key'],
+                'value' => $validated['value'],
+                'description' => $validated['description'] ?? null,
+            ]);
+        }
+
+        return back()->with('success', "Credential \"{$validated['key']}\" sauvegarde (chiffre AES-256).");
+    }
+
+    public function destroyCredential(string $token, \App\Models\CustomAgentCredential $credential)
+    {
+        $share = $this->resolveShare($token);
+        if ($credential->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        $key = $credential->key;
+        $credential->delete();
+        return back()->with('success', "Credential \"{$key}\" supprime.");
     }
 
     private function processAsync(CustomAgentDocument $document): void

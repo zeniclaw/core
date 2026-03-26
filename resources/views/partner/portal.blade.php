@@ -50,7 +50,7 @@
 {{-- Tabs --}}
 <div class="max-w-6xl mx-auto px-6 mt-4">
   <div class="flex gap-1 bg-gray-900 rounded-xl p-1 mb-6">
-    @foreach(['chat' => '💬 Chat', 'documents' => '📄 Documents', 'skills' => '⚡ Skills', 'scripts' => '💻 Scripts'] as $t => $l)
+    @foreach(['chat' => '💬 Chat', 'documents' => '📄 Documents', 'skills' => '⚡ Skills', 'scripts' => '💻 Scripts', 'credentials' => '🔐 Credentials'] as $t => $l)
     <button @click="tab = '{{ $t }}'"
             :class="tab === '{{ $t }}' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'"
             class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-all">{{ $l }}</button>
@@ -355,6 +355,72 @@
           <p class="text-sm">Aucun script. Ajoutez du code que l'agent pourra executer.</p>
         </div>
         @endforelse
+      </div>
+    </div>
+  </div>
+
+</div>
+
+  {{-- ══════ CREDENTIALS TAB ══════ --}}
+  <div x-show="tab === 'credentials'">
+    <div class="grid gap-6 lg:grid-cols-5">
+      <div class="lg:col-span-2">
+        <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6">
+          <h3 class="font-semibold text-gray-200 mb-2">Ajouter un credential</h3>
+          <p class="text-xs text-gray-400 mb-4">Les credentials sont chiffres (AES-256) et accessibles uniquement par cet agent. Utilisez-les pour les cles API, tokens, mots de passe de services externes.</p>
+
+          <form method="POST" action="{{ route('partner.credentials.store', $share->token) }}" class="space-y-3">
+            @csrf
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Cle (identifiant) *</label>
+              <input type="text" name="key" required placeholder="ex: api_token, db_password, openai_key" maxlength="100" pattern="[a-zA-Z_][a-zA-Z0-9_]*"
+                     class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono">
+              <p class="text-xs text-gray-600 mt-1">Lettres, chiffres et _ uniquement</p>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Valeur *</label>
+              <textarea name="value" required rows="3" placeholder="La valeur secrete (sera chiffree)"
+                        class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500 mono"></textarea>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Description (optionnel)</label>
+              <input type="text" name="description" placeholder="A quoi sert ce credential" maxlength="200"
+                     class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-500">
+            </div>
+            <button type="submit" class="w-full px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Sauvegarder (chiffre)</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="lg:col-span-3 space-y-3">
+        <div class="bg-gray-900 rounded-2xl border border-gray-800">
+          <div class="px-6 py-4 border-b border-gray-800">
+            <h3 class="font-semibold text-gray-200">Credentials stockes ({{ $credentials->count() }})</h3>
+            <p class="text-xs text-gray-500 mt-1">Les valeurs sont chiffrees — seul l'agent peut les lire a l'execution.</p>
+          </div>
+          @forelse($credentials as $cred)
+          <div class="px-6 py-3 flex items-center gap-3 border-b border-gray-800/50 last:border-0">
+            <span class="text-lg">🔑</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-200 mono">{{ $cred->key }}</p>
+              <div class="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                @if($cred->description)<span>{{ $cred->description }}</span>@endif
+                <span>{{ $cred->updated_at->diffForHumans() }}</span>
+              </div>
+            </div>
+            <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 mono">●●●●●●●●</span>
+            <form method="POST" action="{{ route('partner.credentials.destroy', [$share->token, $cred]) }}" onsubmit="return confirm('Supprimer ce credential ?')">
+              @csrf @method('DELETE')
+              <button class="text-xs text-red-400 hover:text-red-300">Suppr.</button>
+            </form>
+          </div>
+          @empty
+          <div class="px-6 py-10 text-center text-gray-500">
+            <p class="text-lg mb-1">🔐</p>
+            <p class="text-sm">Aucun credential. Ajoutez des cles API ou tokens pour que l'agent puisse se connecter a des services externes.</p>
+          </div>
+          @endforelse
+        </div>
       </div>
     </div>
   </div>

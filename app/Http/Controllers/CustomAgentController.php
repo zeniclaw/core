@@ -79,8 +79,9 @@ class CustomAgentController extends Controller
         $customAgent->loadCount(['documents', 'chunks']);
         $documents = $customAgent->documents()->orderBy('created_at', 'desc')->get();
         $shares = $customAgent->shares()->orderBy('created_at', 'desc')->get();
+        $credentials = $customAgent->credentials()->orderBy('key')->get();
 
-        return view('custom-agents.show', compact('agent', 'customAgent', 'documents', 'shares'));
+        return view('custom-agents.show', compact('agent', 'customAgent', 'documents', 'shares', 'credentials'));
     }
 
     /**
@@ -386,6 +387,44 @@ class CustomAgentController extends Controller
         $share->update(['is_revoked' => true]);
 
         return back()->with('success', 'Lien révoqué.');
+    }
+
+    // ── Credentials ────────────────────────────────────────────
+
+    public function storeCredential(Request $request, Agent $agent, CustomAgent $customAgent)
+    {
+        $this->authorizeAgent($agent);
+        $this->ensureOwnership($agent, $customAgent);
+
+        $validated = $request->validate([
+            'key' => 'required|string|max:100|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+            'value' => 'required|string|max:5000',
+            'description' => 'nullable|string|max:200',
+        ]);
+
+        $cred = $customAgent->credentials()->where('key', $validated['key'])->first();
+        if ($cred) {
+            $cred->update(['value' => $validated['value'], 'description' => $validated['description'] ?? $cred->description]);
+        } else {
+            \App\Models\CustomAgentCredential::create([
+                'custom_agent_id' => $customAgent->id,
+                'key' => $validated['key'],
+                'value' => $validated['value'],
+                'description' => $validated['description'] ?? null,
+            ]);
+        }
+
+        return back()->with('success', "Credential \"{$validated['key']}\" sauvegarde.");
+    }
+
+    public function destroyCredential(Agent $agent, CustomAgent $customAgent, \App\Models\CustomAgentCredential $credential)
+    {
+        $this->authorizeAgent($agent);
+        $this->ensureOwnership($agent, $customAgent);
+        if ($credential->custom_agent_id !== $customAgent->id) abort(403);
+
+        $credential->delete();
+        return back()->with('success', 'Credential supprime.');
     }
 
     /**

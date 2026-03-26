@@ -51,6 +51,8 @@ Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')-
     Route::post('/documents', [\App\Http\Controllers\PartnerPortalController::class, 'uploadDocument'])->name('documents.upload');
     Route::post('/chat', [\App\Http\Controllers\PartnerPortalController::class, 'chat'])->name('chat');
     Route::post('/assist', [\App\Http\Controllers\PartnerPortalController::class, 'assistCreate'])->name('assist');
+    Route::post('/credentials', [\App\Http\Controllers\PartnerPortalController::class, 'storeCredential'])->name('credentials.store');
+    Route::delete('/credentials/{credential}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyCredential'])->name('credentials.destroy');
     Route::post('/skills', [\App\Http\Controllers\PartnerPortalController::class, 'storeSkill'])->name('skills.store');
     Route::put('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'updateSkill'])->name('skills.update');
     Route::delete('/skills/{skill}', [\App\Http\Controllers\PartnerPortalController::class, 'destroySkill'])->name('skills.destroy');
@@ -132,6 +134,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agents/{agent}/custom-agents/{customAgent}/update-access', [CustomAgentController::class, 'updateAccess'])->name('custom-agents.update-access');
     Route::post('/agents/{agent}/custom-agents/{customAgent}/test-chat', [CustomAgentController::class, 'testChat'])->name('custom-agents.test-chat');
     Route::post('/agents/{agent}/custom-agents/{customAgent}/shares', [CustomAgentController::class, 'createShare'])->name('custom-agents.shares.create');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/credentials', [CustomAgentController::class, 'storeCredential'])->name('custom-agents.credentials.store');
+    Route::delete('/agents/{agent}/custom-agents/{customAgent}/credentials/{credential}', [CustomAgentController::class, 'destroyCredential'])->name('custom-agents.credentials.destroy');
     Route::delete('/agents/{agent}/custom-agents/{customAgent}/shares/{share}', [CustomAgentController::class, 'revokeShare'])->name('custom-agents.shares.revoke');
 
     // Reminders

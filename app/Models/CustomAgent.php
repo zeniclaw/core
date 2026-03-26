@@ -50,6 +50,20 @@ class CustomAgent extends Model
         return $this->hasMany(CustomAgentScript::class);
     }
 
+    public function credentials(): HasMany
+    {
+        return $this->hasMany(CustomAgentCredential::class);
+    }
+
+    /**
+     * Get a decrypted credential value by key. Only accessible by the agent itself.
+     */
+    public function getCredential(string $key): ?string
+    {
+        $cred = $this->credentials()->where('key', $key)->where('is_active', true)->first();
+        return $cred?->decrypted_value;
+    }
+
     /**
      * Check if a peer (WhatsApp ID) is authorized to use this agent.
      * If allowed_peers is empty/null, the agent is open to all.
