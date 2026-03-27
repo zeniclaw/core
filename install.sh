@@ -728,6 +728,16 @@ STOREOF
     echo ""
     success "Container images built successfully"
 
+    # Ensure Podman registries are configured (must be before compose up)
+    if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
+        if ! grep -rq 'docker.io' /etc/containers/registries.conf /etc/containers/registries.conf.d/ 2>/dev/null; then
+            info "Configuring Docker Hub as default registry for Podman..."
+            sudo mkdir -p /etc/containers/registries.conf.d
+            echo 'unqualified-search-registries = ["docker.io"]' | sudo tee /etc/containers/registries.conf.d/docker-hub.conf > /dev/null
+            success "Docker Hub registry configured"
+        fi
+    fi
+
     # Start
     info "Starting services..."
     if ! dcompose $OLLAMA_PROFILE up -d 2>&1; then
