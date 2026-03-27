@@ -693,20 +693,36 @@ STOREOF
         info "Ollama disabled — skipping local LLM container"
     fi
 
-    # Pull remote images first (postgres, redis, ollama if enabled)
-    info "Pulling remote images (PostgreSQL, Redis${OLLAMA_PROFILE:+, Ollama})..."
-    echo ""
-    if ! dcompose $OLLAMA_PROFILE pull 2>&1 | while IFS= read -r line; do
-        echo -e "    ${DIM}${line}${NC}"
-    done; then
-        warn "Some images could not be pulled. Retrying individually..."
-        # Retry each service separately so one failure doesn't block the rest
-        for svc in db redis ${OLLAMA_PROFILE:+ollama}; do
-            dcompose pull "$svc" 2>&1 || warn "Failed to pull $svc image — will retry on 'up'"
-        done
+    # Pull remote images one by one with clear progress
+    local images_to_pull=("db:docker.io/library/postgres:16-alpine:~80MB" "redis:docker.io/library/redis:7-alpine:~15MB")
+    if [[ -n "$OLLAMA_PROFILE" ]]; then
+        images_to_pull+=("ollama:docker.io/ollama/ollama:latest:~1.5GB")
     fi
+
+    local total=${#images_to_pull[@]}
+    local current=0
+
+    for img_entry in "${images_to_pull[@]}"; do
+        IFS=':' read -r svc_name img_repo img_tag img_size <<< "$img_entry"
+        current=$((current + 1))
+        local full_image="${img_repo}:${img_tag}"
+        info "[${current}/${total}] Pulling ${svc_name} (${full_image} ~${img_size})..."
+
+        if $CONTAINER_CMD pull "${full_image}" 2>&1 | while IFS= read -r line; do
+            # Show only meaningful lines (not blob hashes)
+            if echo "$line" | grep -qE "Copying|Writing|already exists|Pulling|Trying|manifest"; then
+                echo -ne "\r    ${DIM}${line}${NC}                    "
+            fi
+        done; then
+            echo ""
+            success "[${current}/${total}] ${svc_name} ready"
+        else
+            echo ""
+            warn "[${current}/${total}] Failed to pull ${svc_name} — will retry on start"
+        fi
+    done
     echo ""
-    success "Remote images pulled"
+    success "All remote images pulled"
 
     # Build custom images (app + waha)
     info "Building container images (this may take a few minutes on first run)..."
