@@ -920,7 +920,7 @@ graph LR
           <h3 x-show="lang==='en'">Run the installer</h3>
           <p x-show="lang==='fr'">Le script configure automatiquement les 5 conteneurs (app, base de donnees, cache, gateway, LLM).</p>
           <p x-show="lang==='en'">The script automatically configures all 5 containers (app, database, cache, gateway, LLM).</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>bash install.sh<br><span class="comment"># 5 containers: app, postgres, redis, gateway, ollama</span></div>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>sudo bash install.sh<br><span class="comment"># 5 containers: app, postgres, redis, gateway, ollama</span></div>
         </div>
       </div>
       <div class="install-step">
