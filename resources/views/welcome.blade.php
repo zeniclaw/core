@@ -415,7 +415,7 @@ footer {
           <span x-show="lang==='en'">Go to Dashboard</span>
         </a>
       @else
-        <a href="{{ route('login') }}" class="btn btn-primary">
+        <a href="#contact" class="btn btn-primary">
           <span x-show="lang==='fr'">Demander une demo</span>
           <span x-show="lang==='en'">Request a Demo</span>
         </a>
@@ -910,7 +910,7 @@ graph LR
           <h3 x-show="lang==='en'">Clone the repository</h3>
           <p x-show="lang==='fr'">Recuperez le code source et lancez l'installateur interactif.</p>
           <p x-show="lang==='en'">Fetch the source code and run the interactive installer.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw</div>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>sudo git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw</div>
         </div>
       </div>
       <div class="install-step">
@@ -1141,16 +1141,29 @@ document.addEventListener('DOMContentLoaded', () => {
 <script>
 function copyCode(btn) {
   const block = btn.parentElement;
-  const text = block.innerText.replace('Copy', '').trim();
-  navigator.clipboard.writeText(text).then(() => {
+  const text = block.innerText.replace('Copy', '').replace('Copied!', '').trim();
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy', 2000);
-  });
+  }
 }
-const observer = new IntersectionObserver((entries) => {
+const fadeObserver = new IntersectionObserver((entries) => {
   entries.forEach(e => { if (e.isIntersecting) e.target.style.animationPlayState = 'running'; });
 }, { threshold: 0.1 });
-document.querySelectorAll('.fade-up').forEach(el => { el.style.animationPlayState = 'paused'; observer.observe(el); });
+document.querySelectorAll('.fade-up').forEach(el => { el.style.animationPlayState = 'paused'; fadeObserver.observe(el); });
 </script>
 </body>
 </html>
