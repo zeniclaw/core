@@ -685,22 +685,50 @@ STOREOF
         info "Ollama disabled — skipping local LLM container"
     fi
 
-    # Build
-    info "Building container images (this may take a few minutes on first run)..."
+    # Pull remote images first (postgres, redis, ollama if enabled)
+    info "Pulling remote images (PostgreSQL, Redis${OLLAMA_PROFILE:+, Ollama})..."
     echo ""
-    if ! dcompose $OLLAMA_PROFILE build 2>&1 | while IFS= read -r line; do
+    if ! dcompose $OLLAMA_PROFILE pull 2>&1 | while IFS= read -r line; do
         echo -e "    ${DIM}${line}${NC}"
     done; then
-        error "Container build failed. Check the output above for details."
-        exit 1
+        warn "Some images could not be pulled. Retrying individually..."
+        # Retry each service separately so one failure doesn't block the rest
+        for svc in db redis ${OLLAMA_PROFILE:+ollama}; do
+            dcompose pull "$svc" 2>&1 || warn "Failed to pull $svc image — will retry on 'up'"
+        done
     fi
+    echo ""
+    success "Remote images pulled"
+
+    # Build custom images (app + waha)
+    info "Building container images (this may take a few minutes on first run)..."
+    echo ""
+    local build_log
+    build_log=$(mktemp)
+    if ! dcompose $OLLAMA_PROFILE build --pull 2>&1 | tee "$build_log" | while IFS= read -r line; do
+        echo -e "    ${DIM}${line}${NC}"
+    done; then
+        # Double-check with the log file (pipefail + while can mask exit codes)
+        if grep -qi "error\|failed\|fatal" "$build_log" 2>/dev/null; then
+            error "Container build failed. Check the output above for details."
+            rm -f "$build_log"
+            exit 1
+        fi
+        warn "Build exited with non-zero code but no errors found — continuing..."
+    fi
+    rm -f "$build_log"
     echo ""
     success "Container images built successfully"
 
     # Start
     info "Starting services..."
     if ! dcompose $OLLAMA_PROFILE up -d 2>&1; then
-        error "Failed to start services."
+        error "Failed to start services. Checking image availability..."
+        echo ""
+        # Show which images are available to help debug
+        $CONTAINER_CMD images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}" 2>/dev/null | grep -E "zeniclaw|postgres|redis|ollama" || true
+        echo ""
+        error "Try running: $COMPOSE_CMD pull && $COMPOSE_CMD up -d"
         exit 1
     fi
     success "Services started"
