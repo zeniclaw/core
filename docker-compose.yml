@@ -47,7 +47,7 @@ services:
       - zeniclaw
 
   db:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine
     container_name: zeniclaw_db
     restart: unless-stopped
     environment:
@@ -65,7 +65,7 @@ services:
       - zeniclaw
 
   redis:
-    image: redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     container_name: zeniclaw_redis
     restart: unless-stopped
     volumes:
@@ -79,7 +79,7 @@ services:
       - zeniclaw
 
   ollama:
-    image: ollama/ollama:latest
+    image: docker.io/ollama/ollama:latest
     container_name: zeniclaw_ollama
     restart: unless-stopped
     profiles:

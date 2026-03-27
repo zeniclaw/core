@@ -295,6 +295,14 @@ ensure_runtime_running() {
             # Podman is daemonless, just needs to be available
             CONTAINER_CMD="podman"
             success "Podman is available (daemonless)"
+            # Ensure Docker Hub is configured as default registry (Podman requires this)
+            if ! grep -q 'docker.io' /etc/containers/registries.conf 2>/dev/null && \
+               ! grep -q 'docker.io' /etc/containers/registries.conf.d/*.conf 2>/dev/null; then
+                info "Configuring Docker Hub as default registry for Podman..."
+                sudo mkdir -p /etc/containers/registries.conf.d
+                echo 'unqualified-search-registries = ["docker.io"]' | sudo tee /etc/containers/registries.conf.d/docker-hub.conf > /dev/null
+                success "Docker Hub registry configured"
+            fi
             detect_runtime
             return 0
         elif check_command docker; then
