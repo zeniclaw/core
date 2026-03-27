@@ -689,7 +689,7 @@ footer {
 </section>
 
 {{-- ========== TECHNOLOGY ========== --}}
-<section id="technology">
+<section id="technology" x-data="{ archMode: 'hybrid' }">
   <div class="section-inner">
     <span class="section-label">// technology</span>
     <h2 class="section-title">
@@ -697,41 +697,184 @@ footer {
       <span x-show="lang==='en'">Enterprise-grade <span class="gradient-text">architecture</span></span>
     </h2>
     <p class="section-desc">
-      <span x-show="lang==='fr'">Cinq conteneurs, zero dependance externe. LLMs cloud ou 100% on-prem avec Ollama &mdash; a vous de choisir.</span>
-      <span x-show="lang==='en'">Five containers, zero external dependencies. Cloud LLMs or fully on-prem with Ollama &mdash; your choice.</span>
+      <span x-show="lang==='fr'">Choisissez votre mode de deploiement. Full on-prem, full cloud ou hybride &mdash; la meme plateforme, votre infrastructure.</span>
+      <span x-show="lang==='en'">Choose your deployment mode. Full on-prem, full cloud or hybrid &mdash; same platform, your infrastructure.</span>
     </p>
-    <div class="arch-diagram">
-<pre>
-  <span class="hl-green">Channels</span>                 <span class="hl-blue">ZeniClaw Stack</span>                    <span class="hl-purple">AI Providers</span>
 
-  +-----------+       +----------------------------------+       +-------------+
-  |  <span class="hl-green">WhatsApp</span> |  QR   |  <span class="hl-green">WhatsApp Gateway</span> (port 3000)    |       |  <span class="hl-purple">Claude</span>     |
-  |  Phone    |&lt;-----&gt;|  Baileys + Express               |       |  Opus/Sonnet|
-  +-----------+       +-----------|----------------------+       |  Haiku      |
-                                  | webhook POST                 +-------------+
-  +-----------+                   v                                     ^
-  |  <span class="hl-blue">Web Chat</span> |       +----------------------------------+       +-------------+
-  |  Dashboard|------&gt;|  <span class="hl-blue">App</span> (port 8080)                |       |  <span class="hl-purple">OpenAI</span>    |
-  +-----------+       |  Laravel 12 + PHP 8.4            |------&gt;|  GPT-4o     |
-                      |                                  |       +-------------+
-  +-----------+       |  <span class="hl-amber">RouterAgent</span> (fast-path + LLM)   |
-  |  <span class="hl-green">API</span>      |       |  <span class="hl-amber">Intent Classifier</span> (per agent)  |       +-------------+
-  |  REST     |------&gt;|  <span class="hl-amber">36+ Agents</span> (parallel execution)|       | <span class="hl-cyan">Ollama</span>     |
-  +-----------+       |  <span class="hl-amber">Agentic Loop</span> + RAG Engine      |&lt;-----&gt;| Qwen/Mistral|
-                      |  <span class="hl-amber">Custom Agents</span> (document-trained)|       | Llama      |
-                      |  <span class="hl-amber">Model Roles</span> (fast/balanced/pow)|       +-------------+
-                      +-----------|----------------------+       <span class="hl-cyan">100% Private</span>
-                                  |
-                      +-----------|-----------+
-                      |           v           |
-                +----------+  +---------+
-                | <span class="hl-blue">Postgres</span> |  |  <span class="hl-green">Redis</span>  |
-                |  16      |  |  7      |
-                |  Vectors |  |  Queue  |
-                |  Memory  |  |  Cache  |
-                +----------+  +---------+
-</pre>
+    {{-- Mode toggle --}}
+    <div style="display: flex; gap: 4px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 4px; max-width: 500px; margin-bottom: 2rem;">
+      <button @click="archMode = 'onprem'" :style="archMode === 'onprem' ? 'background: linear-gradient(135deg, #10b981, #059669); color: #fff;' : 'color: var(--text-muted);'"
+              style="flex: 1; padding: 10px 16px; border: none; border-radius: 10px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: var(--font); transition: all 0.2s;">
+        <span x-show="lang==='fr'">Full On-Prem</span><span x-show="lang==='en'">Full On-Prem</span>
+      </button>
+      <button @click="archMode = 'hybrid'" :style="archMode === 'hybrid' ? 'background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff;' : 'color: var(--text-muted);'"
+              style="flex: 1; padding: 10px 16px; border: none; border-radius: 10px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: var(--font); transition: all 0.2s;">
+        Hybride
+      </button>
+      <button @click="archMode = 'cloud'" :style="archMode === 'cloud' ? 'background: linear-gradient(135deg, #8b5cf6, #ec4899); color: #fff;' : 'color: var(--text-muted);'"
+              style="flex: 1; padding: 10px 16px; border: none; border-radius: 10px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: var(--font); transition: all 0.2s;">
+        Full Cloud
+      </button>
     </div>
+
+    {{-- Mode description --}}
+    <div style="margin-bottom: 1.5rem; padding: 1rem 1.5rem; border-radius: 10px; font-size: 0.9rem;" :style="archMode === 'onprem' ? 'background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #6ee7b7;' : (archMode === 'cloud' ? 'background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); color: #c4b5fd;' : 'background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #93c5fd;')">
+      <template x-if="archMode === 'onprem'">
+        <div>
+          <strong x-show="lang==='fr'">100% On-Prem</strong><strong x-show="lang==='en'">100% On-Prem</strong>
+          <span x-show="lang==='fr'"> &mdash; Zero donnee sortante. LLMs locaux via Ollama (Qwen, Mistral, Llama). Ideal conformite NIS2, RGPD, secteurs sensibles.</span>
+          <span x-show="lang==='en'"> &mdash; Zero data leaving your servers. Local LLMs via Ollama (Qwen, Mistral, Llama). Ideal for NIS2, GDPR, sensitive sectors.</span>
+        </div>
+      </template>
+      <template x-if="archMode === 'hybrid'">
+        <div>
+          <strong>Hybride</strong>
+          <span x-show="lang==='fr'"> &mdash; LLMs locaux pour les taches courantes + Cloud (Claude, GPT-4) pour le raisonnement complexe. Le meilleur des deux mondes.</span>
+          <span x-show="lang==='en'"> &mdash; Local LLMs for routine tasks + Cloud (Claude, GPT-4) for complex reasoning. Best of both worlds.</span>
+        </div>
+      </template>
+      <template x-if="archMode === 'cloud'">
+        <div>
+          <strong x-show="lang==='fr'">Full Cloud</strong><strong x-show="lang==='en'">Full Cloud</strong>
+          <span x-show="lang==='fr'"> &mdash; Puissance maximale avec Claude Opus/Sonnet et GPT-4. Pas besoin de GPU. Deploiement le plus simple.</span>
+          <span x-show="lang==='en'"> &mdash; Maximum power with Claude Opus/Sonnet and GPT-4. No GPU needed. Simplest deployment.</span>
+        </div>
+      </template>
+    </div>
+
+    {{-- Mermaid diagram --}}
+    <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; overflow-x: auto;">
+      <div class="mermaid" x-show="archMode === 'onprem'" x-cloak>
+graph LR
+  subgraph Channels["Canaux"]
+    WA["WhatsApp<br/>Baileys"]
+    WEB["Web Chat<br/>Dashboard"]
+    API["API REST"]
+  end
+  subgraph STACK["ZeniClaw Stack — Vos Serveurs"]
+    GW["WhatsApp<br/>Gateway<br/>:3000"]
+    APP["App Laravel 12<br/>PHP 8.4<br/>:8080"]
+    ROUTER["RouterAgent<br/>Intent Classifier"]
+    AGENTS["36+ Agents<br/>Agentic Loop<br/>RAG Engine"]
+    CUSTOM["Custom Agents<br/>Skills & Scripts"]
+    DB[("PostgreSQL 16<br/>Vectors + Memory")]
+    CACHE[("Redis 7<br/>Queue + Cache")]
+  end
+  subgraph LLM["LLMs On-Prem"]
+    OLLAMA["Ollama<br/>Qwen 2.5 | Mistral<br/>Llama | DeepSeek"]
+  end
+  WA <-->|QR| GW
+  WEB --> APP
+  API --> APP
+  GW -->|webhook| APP
+  APP --> ROUTER
+  ROUTER --> AGENTS
+  AGENTS --> CUSTOM
+  AGENTS <-->|embeddings| OLLAMA
+  CUSTOM <-->|inference| OLLAMA
+  APP --- DB
+  APP --- CACHE
+  style STACK fill:#0a2e1a,stroke:#10b981,stroke-width:2px
+  style LLM fill:#0a2e1a,stroke:#10b981,stroke-width:2px
+  style Channels fill:#1a1f2e,stroke:#334155
+  style OLLAMA fill:#065f46,stroke:#10b981,color:#fff
+  style APP fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style DB fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style CACHE fill:#0f3a2a,stroke:#10b981,color:#fff
+      </div>
+
+      <div class="mermaid" x-show="archMode === 'hybrid'" x-cloak>
+graph LR
+  subgraph Channels["Canaux"]
+    WA["WhatsApp<br/>Baileys"]
+    WEB["Web Chat<br/>Dashboard"]
+    API["API REST"]
+  end
+  subgraph STACK["ZeniClaw Stack — Vos Serveurs"]
+    GW["WhatsApp<br/>Gateway<br/>:3000"]
+    APP["App Laravel 12<br/>PHP 8.4<br/>:8080"]
+    ROUTER["RouterAgent<br/>Intent Classifier"]
+    AGENTS["36+ Agents<br/>Agentic Loop<br/>RAG Engine"]
+    CUSTOM["Custom Agents<br/>Skills & Scripts"]
+    DB[("PostgreSQL 16<br/>Vectors + Memory")]
+    CACHE[("Redis 7<br/>Queue + Cache")]
+  end
+  subgraph LOCAL["LLMs On-Prem"]
+    OLLAMA["Ollama<br/>Qwen 2.5 | Mistral"]
+  end
+  subgraph CLOUD["Cloud LLMs"]
+    CLAUDE["Claude<br/>Opus | Sonnet | Haiku"]
+    GPT["OpenAI<br/>GPT-4o"]
+  end
+  WA <-->|QR| GW
+  WEB --> APP
+  API --> APP
+  GW -->|webhook| APP
+  APP --> ROUTER
+  ROUTER --> AGENTS
+  AGENTS --> CUSTOM
+  AGENTS <-->|"fast tasks"| OLLAMA
+  AGENTS <-->|"complex reasoning"| CLAUDE
+  AGENTS -.->|optional| GPT
+  APP --- DB
+  APP --- CACHE
+  style STACK fill:#111827,stroke:#3b82f6,stroke-width:2px
+  style LOCAL fill:#0a2e1a,stroke:#10b981,stroke-width:2px
+  style CLOUD fill:#1a1035,stroke:#8b5cf6,stroke-width:2px
+  style Channels fill:#1a1f2e,stroke:#334155
+  style OLLAMA fill:#065f46,stroke:#10b981,color:#fff
+  style CLAUDE fill:#3b1f7e,stroke:#8b5cf6,color:#fff
+  style GPT fill:#3b1f7e,stroke:#8b5cf6,color:#fff
+  style APP fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style DB fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style CACHE fill:#0f3a2a,stroke:#10b981,color:#fff
+      </div>
+
+      <div class="mermaid" x-show="archMode === 'cloud'" x-cloak>
+graph LR
+  subgraph Channels["Canaux"]
+    WA["WhatsApp<br/>Baileys"]
+    WEB["Web Chat<br/>Dashboard"]
+    API["API REST"]
+  end
+  subgraph STACK["ZeniClaw Stack — Vos Serveurs"]
+    GW["WhatsApp<br/>Gateway<br/>:3000"]
+    APP["App Laravel 12<br/>PHP 8.4<br/>:8080"]
+    ROUTER["RouterAgent<br/>Intent Classifier"]
+    AGENTS["36+ Agents<br/>Agentic Loop<br/>RAG Engine"]
+    CUSTOM["Custom Agents<br/>Skills & Scripts"]
+    DB[("PostgreSQL 16<br/>Vectors + Memory")]
+    CACHE[("Redis 7<br/>Queue + Cache")]
+  end
+  subgraph CLOUD["Cloud AI Providers"]
+    CLAUDE["Claude<br/>Opus | Sonnet | Haiku"]
+    GPT["OpenAI<br/>GPT-4o | GPT-4o-mini"]
+    EMBED["Embeddings<br/>text-embedding-3"]
+  end
+  WA <-->|QR| GW
+  WEB --> APP
+  API --> APP
+  GW -->|webhook| APP
+  APP --> ROUTER
+  ROUTER --> AGENTS
+  AGENTS --> CUSTOM
+  AGENTS <-->|inference| CLAUDE
+  AGENTS <-->|fallback| GPT
+  AGENTS <-->|RAG| EMBED
+  APP --- DB
+  APP --- CACHE
+  style STACK fill:#111827,stroke:#3b82f6,stroke-width:2px
+  style CLOUD fill:#1a1035,stroke:#8b5cf6,stroke-width:2px
+  style Channels fill:#1a1f2e,stroke:#334155
+  style CLAUDE fill:#3b1f7e,stroke:#8b5cf6,color:#fff
+  style GPT fill:#3b1f7e,stroke:#8b5cf6,color:#fff
+  style EMBED fill:#3b1f7e,stroke:#8b5cf6,color:#fff
+  style APP fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style DB fill:#1e3a5f,stroke:#3b82f6,color:#fff
+  style CACHE fill:#1e3a5f,stroke:#3b82f6,color:#fff
+      </div>
+    </div>
+
     <div class="tech-grid" style="margin-top: 2rem;">
       <div class="tech-item"><div class="tech-icon">&#x1F418;</div><span>PHP 8.4</span></div>
       <div class="tech-item"><div class="tech-icon">&#x1F3F0;</div><span>Laravel 12</span></div>
@@ -954,6 +1097,46 @@ footer {
   </div>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  themeVariables: {
+    primaryColor: '#1e3a5f',
+    primaryTextColor: '#f1f5f9',
+    primaryBorderColor: '#3b82f6',
+    lineColor: '#475569',
+    secondaryColor: '#1a1035',
+    tertiaryColor: '#0a2e1a',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: '13px',
+  },
+  flowchart: { curve: 'basis', padding: 20 },
+});
+// Re-render mermaid when Alpine changes the diagram
+async function renderMermaid() {
+  document.querySelectorAll('.mermaid[data-processed]').forEach(el => {
+    el.removeAttribute('data-processed');
+    el.innerHTML = el.getAttribute('data-original') || el.innerHTML;
+  });
+  // Save originals
+  document.querySelectorAll('.mermaid:not([data-original])').forEach(el => {
+    el.setAttribute('data-original', el.innerHTML);
+  });
+  await mermaid.run({ querySelector: '.mermaid' });
+}
+// Initial render + re-render on mode change
+document.addEventListener('alpine:initialized', () => {
+  setTimeout(renderMermaid, 100);
+});
+// Watch for x-show changes
+const observer = new MutationObserver(() => setTimeout(renderMermaid, 50));
+document.addEventListener('DOMContentLoaded', () => {
+  const techSection = document.getElementById('technology');
+  if (techSection) observer.observe(techSection, { attributes: true, subtree: true, attributeFilter: ['style'] });
+});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 <script>
 function copyCode(btn) {
