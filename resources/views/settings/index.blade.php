@@ -359,7 +359,14 @@ NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
                                         <span class="text-sm font-medium text-gray-900" x-text="m.name"></span>
                                         <span class="text-[10px] text-gray-500" x-text="formatSize(m.size)"></span>
                                     </div>
-                                    <span class="text-[10px] text-green-600 font-medium">En memoire</span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] text-green-600 font-medium">En memoire</span>
+                                        <button type="button" @@click="unloading = m.name; unloadModel(m.name).then(() => { unloading = ''; refresh(); })"
+                                                :disabled="unloading === m.name"
+                                                class="px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 rounded text-[10px] font-medium hover:bg-red-100 transition-colors disabled:opacity-50 whitespace-nowrap">
+                                            <span x-text="unloading === m.name ? 'Dechargement...' : 'Decharger'"></span>
+                                        </button>
+                                    </div>
                                 </div>
                             </template>
                         </div>
@@ -389,7 +396,7 @@ NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
                 <script>
                 function ollamaLoadedApp() {
                     return {
-                        loaded: [], loading: false,
+                        loaded: [], loading: false, unloading: '',
                         async refresh() {
                             this.loading = true;
                             try {
@@ -398,6 +405,15 @@ NO_PROXY=localhost,127.0.0.1,db,redis,waha,ollama,app</pre>
                                 this.loaded = data.models || [];
                             } catch(e) { this.loaded = []; }
                             this.loading = false;
+                        },
+                        async unloadModel(model) {
+                            try {
+                                await fetch('{{ route("api.ollama.unload") }}', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                                    body: JSON.stringify({ model: model }),
+                                });
+                            } catch(e) {}
                         },
                         async warmup(model) {
                             try {

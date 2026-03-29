@@ -43,6 +43,7 @@ class ModelResolver
         'deepseek-coder-v2:16b'     => 'DeepSeek Coder V2 16B (code)',
         'mistral:7b'                => 'Mistral 7B (francais)',
         'llama3.1:8b'               => 'Llama 3.1 8B (Meta)',
+        'mistral-small:22b'         => 'Mistral Small 22B (francais+)',
         'mixtral:8x7b'              => 'Mixtral 8x7B (MoE)',
     ];
 

@@ -292,6 +292,38 @@ class OllamaController extends Controller
     }
 
     /**
+     * Unload a model from Ollama memory.
+     */
+    public function unload(Request $request): JsonResponse
+    {
+        $request->validate(['model' => 'required|string|max:100']);
+        $model = $request->input('model');
+
+        $baseUrl = $this->getOrDetectBaseUrl();
+        if (!$baseUrl) {
+            return response()->json(['error' => 'Ollama non configure'], 422);
+        }
+
+        try {
+            $response = Http::timeout(30)
+                ->withHeaders($this->getHeaders())
+                ->post(rtrim($baseUrl, '/') . '/api/generate', [
+                    'model' => $model,
+                    'keep_alive' => 0,
+                    'stream' => false,
+                ]);
+
+            if ($response->successful()) {
+                return response()->json(['ok' => true, 'message' => "Modele {$model} decharge de la memoire"]);
+            }
+
+            return response()->json(['error' => 'Ollama error: ' . $response->body()], 502);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
+    }
+
+    /**
      * Server hardware check + model compatibility analysis.
      */
     public function serverCheck(): JsonResponse
@@ -354,6 +386,7 @@ class OllamaController extends Controller
             ['id' => 'llama3.1:8b', 'name' => 'Llama 3.1 8B (Meta)', 'type' => 'onprem', 'ram_gb' => 8, 'disk_gb' => 4.7, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 4, 'tags' => ['chat', 'meta']],
             ['id' => 'qwen2.5:14b', 'name' => 'Qwen 2.5 14B', 'type' => 'onprem', 'ram_gb' => 16, 'disk_gb' => 9, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'lent', 'quality' => 5, 'tags' => ['chat', 'puissant']],
             ['id' => 'deepseek-coder-v2:16b', 'name' => 'DeepSeek Coder V2 16B', 'type' => 'onprem', 'ram_gb' => 16, 'disk_gb' => 9, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'lent', 'quality' => 5, 'tags' => ['code', 'puissant']],
+            ['id' => 'mistral-small:22b', 'name' => 'Mistral Small 22B', 'type' => 'onprem', 'ram_gb' => 16, 'disk_gb' => 13, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'lent', 'quality' => 5, 'tags' => ['chat', 'francais', 'puissant']],
             ['id' => 'mixtral:8x7b', 'name' => 'Mixtral 8x7B (MoE)', 'type' => 'onprem', 'ram_gb' => 32, 'disk_gb' => 26, 'min_cpu' => 8, 'gpu_required' => false, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'expert']],
             ['id' => 'llama3.1:70b', 'name' => 'Llama 3.1 70B (Meta)', 'type' => 'onprem', 'ram_gb' => 48, 'disk_gb' => 40, 'min_cpu' => 8, 'gpu_required' => true, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'top']],
             ['id' => 'qwen2.5:72b', 'name' => 'Qwen 2.5 72B', 'type' => 'onprem', 'ram_gb' => 48, 'disk_gb' => 42, 'min_cpu' => 8, 'gpu_required' => true, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'top']],

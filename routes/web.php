@@ -224,6 +224,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/api/ollama/start', [OllamaController::class, 'start'])->name('api.ollama.start');
     Route::post('/api/ollama/warmup', [OllamaController::class, 'warmup'])->name('api.ollama.warmup');
     Route::get('/api/ollama/loaded', [OllamaController::class, 'loaded'])->name('api.ollama.loaded');
+    Route::post('/api/ollama/unload', [OllamaController::class, 'unload'])->name('api.ollama.unload');
 
     // API Tokens
     Route::post('/settings/tokens', [ApiTokenController::class, 'store'])->name('tokens.store');
