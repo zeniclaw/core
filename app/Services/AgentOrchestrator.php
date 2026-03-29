@@ -229,13 +229,7 @@ class AgentOrchestrator
                 return AgentResult::reply($reply);
             }
 
-            // 0d. Route to active custom agent if set
-            if (!empty($context->session->active_custom_agent_id)) {
-                $customAgentName = "custom_{$context->session->active_custom_agent_id}";
-                return $this->dispatch($context, $customAgentName);
-            }
-
-            // 1. Handle pending stateful flows
+            // 1. Handle pending stateful flows (before custom agent routing — preserves photo/PDF context)
             $pendingResult = $this->handlePendingStates($context, $debug, $debugTraces);
             if ($pendingResult) {
                 // Append debug traces to pending result too
@@ -247,6 +241,12 @@ class AgentOrchestrator
                     );
                 }
                 return $pendingResult;
+            }
+
+            // 1b. Route to active custom agent if set (after pending states)
+            if (!empty($context->session->active_custom_agent_id)) {
+                $customAgentName = "custom_{$context->session->active_custom_agent_id}";
+                return $this->dispatch($context, $customAgentName);
             }
 
             // 2. Route the message
