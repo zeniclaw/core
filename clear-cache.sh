@@ -31,7 +31,7 @@ curl -s http://localhost/_opcache_reset.php 2>/dev/null && echo "" || echo "FPM 
 
 echo "[6/7] PHP-FPM reload..."
 if command -v supervisorctl &>/dev/null; then
-    supervisorctl restart php-fpm
+    supervisorctl restart php-fpm 2>/dev/null || sudo supervisorctl restart php-fpm 2>/dev/null || echo "php-fpm: supervisorctl failed (permission denied)"
 elif pgrep php-fpm &>/dev/null; then
     kill -USR2 $(pgrep -o php-fpm)
     echo "php-fpm: reloaded"

@@ -29,8 +29,8 @@ echo "    App root: $APP_ROOT"
 echo "    Owner: $OWNER"
 
 echo "[1/5] Ownership → $OWNER (excluding .git)..."
-find "$APP_ROOT" -maxdepth 0 -exec chown "$OWNER" {} +
-find "$APP_ROOT" -mindepth 1 -maxdepth 1 ! -name '.git' -exec chown -R "$OWNER" {} +
+find "$APP_ROOT" -maxdepth 0 -exec chown "$OWNER" {} + 2>/dev/null || true
+find "$APP_ROOT" -mindepth 1 -maxdepth 1 ! -name '.git' -exec chown -R "$OWNER" {} + 2>/dev/null || true
 echo "    done"
 
 echo "[2/5] .git → $OWNER..."
