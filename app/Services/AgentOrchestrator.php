@@ -220,6 +220,21 @@ class AgentOrchestrator
             $debug = $context->session->debug_mode ?? false;
             $debugTraces = [];
 
+            // 0c. Check for #exit to deactivate custom agent
+            $cleanBody = mb_strtolower(trim($context->body ?? ''));
+            if (($cleanBody === '#exit' || $cleanBody === '/exit') && !empty($context->session->active_custom_agent_id)) {
+                $context->session->update(['active_custom_agent_id' => null]);
+                $reply = "✅ Mode agent prive desactive. Tu parles a nouveau a l'assistant principal.";
+                $this->sendReply($context, $reply);
+                return AgentResult::reply($reply);
+            }
+
+            // 0d. Route to active custom agent if set
+            if (!empty($context->session->active_custom_agent_id)) {
+                $customAgentName = "custom_{$context->session->active_custom_agent_id}";
+                return $this->dispatch($context, $customAgentName);
+            }
+
             // 1. Handle pending stateful flows
             $pendingResult = $this->handlePendingStates($context, $debug, $debugTraces);
             if ($pendingResult) {
