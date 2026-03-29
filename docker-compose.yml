@@ -111,6 +111,8 @@ services:
       - waha_data:/data
     environment:
       - WEBHOOK_URL=http://app:80/webhook/whatsapp/1
+      - WEBHOOK_TIMEOUT=120000
+      - WEBHOOK_RETRIES=3
       - API_KEY=zeniclaw-waha-2026
       - PORT=3000
       - LOG_LEVEL=info
