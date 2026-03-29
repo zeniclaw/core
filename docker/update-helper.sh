@@ -107,13 +107,16 @@ if [ "$CONTAINER_CMD" = "podman" ]; then
     (
         cd "${HOST_REPO}"
         echo 'Started rebuild...' > "$LOG"
+        echo 'Removing orphan containers...' >> "$LOG"
+        $CONTAINER_CMD container prune -f >> "$LOG" 2>&1 || true
         $COMPOSE_CMD up -d --build --force-recreate app >> "$LOG" 2>&1 && \
             echo 'Successfully built app' >> "$LOG" && \
             echo 'Starting all services (including new ones)...' >> "$LOG" && \
-            $COMPOSE_CMD up -d >> "$LOG" 2>&1 && \
+            $COMPOSE_CMD up -d --remove-orphans >> "$LOG" 2>&1 && \
             echo 'Started' >> "$LOG" \
             || { echo 'ERROR: rebuild failed' >> "$LOG"; \
                  echo 'Ensuring app container is running...' >> "$LOG"; \
+                 $CONTAINER_CMD container prune -f >> "$LOG" 2>&1 || true; \
                  $COMPOSE_CMD up -d app >> "$LOG" 2>&1; }
     ) &
     disown
@@ -128,13 +131,16 @@ else
         docker:cli sh -c "\
             echo 'Started rebuild...' > /tmp/rebuild.log && \
             docker builder prune -f >> /tmp/rebuild.log 2>&1; \
+            echo 'Removing orphan containers...' >> /tmp/rebuild.log && \
+            docker container prune -f >> /tmp/rebuild.log 2>&1; \
             docker compose up -d --build --force-recreate app >> /tmp/rebuild.log 2>&1 && \
             echo 'Successfully built app' >> /tmp/rebuild.log && \
             echo 'Starting all services (including new ones)...' >> /tmp/rebuild.log && \
-            docker compose up -d >> /tmp/rebuild.log 2>&1 && \
+            docker compose up -d --remove-orphans >> /tmp/rebuild.log 2>&1 && \
             echo 'Started' >> /tmp/rebuild.log \
             || { echo 'ERROR: rebuild failed' >> /tmp/rebuild.log; \
                  echo 'Ensuring app container is running...' >> /tmp/rebuild.log; \
+                 docker container prune -f >> /tmp/rebuild.log 2>&1; \
                  docker compose up -d app >> /tmp/rebuild.log 2>&1; }"
 fi
 
