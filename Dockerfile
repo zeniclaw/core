@@ -62,11 +62,13 @@ COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/update-helper.sh /usr/local/bin/zeniclaw-update
 RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
     && echo "www-data ALL=(root) NOPASSWD: /usr/local/bin/zeniclaw-update" > /etc/sudoers.d/zeniclaw-update \
-    && chmod 0440 /etc/sudoers.d/zeniclaw-update
+    && chmod 0440 /etc/sudoers.d/zeniclaw-update \
+    && echo "www-data ALL=(root) NOPASSWD: SETENV: /usr/local/bin/claude" > /etc/sudoers.d/claude-cli \
+    && chmod 0440 /etc/sudoers.d/claude-cli
 
 # Version — stored outside storage/ so the volume mount doesn't override it.
 # entrypoint.sh copies it to storage/app/version.txt at runtime.
-RUN echo "2.39.3" > /tmp/.zeniclaw-version
+RUN echo "2.40.0" > /tmp/.zeniclaw-version
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \

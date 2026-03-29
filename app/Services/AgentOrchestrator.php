@@ -503,7 +503,7 @@ class AgentOrchestrator
 
         $clean = mb_strtolower(trim($context->body));
 
-        $patterns = ['/private', 'private bot', 'bot prive', 'bots prives', 'agents prives', 'agent prive'];
+        $patterns = ['#private', '/private', 'private bot', 'bot prive', 'bots prives', 'agents prives', 'agent prive'];
         $match = false;
         foreach ($patterns as $pattern) {
             if ($clean === $pattern || str_contains($clean, $pattern)) {
@@ -513,8 +513,15 @@ class AgentOrchestrator
         }
         if (!$match) return null;
 
+        // Hardcoded private sub-agents
         $privateAgents = AgentController::getPrivateSubAgents();
-        if (empty($privateAgents)) {
+
+        // Custom agents from database (created via UI)
+        $customAgents = \App\Models\CustomAgent::where('agent_id', $context->agent->id)
+            ->where('is_active', true)
+            ->get();
+
+        if (empty($privateAgents) && $customAgents->isEmpty()) {
             return AgentResult::reply("Aucun agent prive disponible.");
         }
 
@@ -523,13 +530,32 @@ class AgentOrchestrator
         $lines = [];
         $available = [];
         $i = 1;
+
+        // List hardcoded private agents
         foreach ($privateAgents as $key => $meta) {
             $allowedPeers = $currentAccess[$key] ?? [];
             $hasAccess = in_array($context->from, $allowedPeers);
             $status = $hasAccess ? ' _(actif)_' : '';
             $lines[] = "{$i}. {$meta['icon']} *{$meta['label']}*{$status}
    _{$meta['description']}_";
-            $available[] = ['key' => $key, 'meta' => $meta, 'has_access' => $hasAccess];
+            $available[] = ['key' => $key, 'meta' => $meta, 'has_access' => $hasAccess, 'type' => 'sub_agent'];
+            $i++;
+        }
+
+        // List custom agents from DB
+        foreach ($customAgents as $ca) {
+            $allowedPeers = $ca->allowed_peers ?? [];
+            $hasAccess = empty($allowedPeers) || in_array($context->from, $allowedPeers);
+            $status = $hasAccess ? ' _(actif)_' : '';
+            $icon = $ca->avatar ?? '🤖';
+            $lines[] = "{$i}. {$icon} *{$ca->name}*{$status}
+   _{$ca->description}_";
+            $available[] = ['key' => "custom_{$ca->id}", 'meta' => [
+                'label' => $ca->name,
+                'icon' => $icon,
+                'description' => $ca->description,
+                'model' => $ca->model,
+            ], 'has_access' => $hasAccess, 'type' => 'custom', 'custom_id' => $ca->id];
             $i++;
         }
 
@@ -560,15 +586,19 @@ class AgentOrchestrator
 
         // Parse numeric choice
         if (!ctype_digit($input) || (int) $input < 1 || (int) $input > count($agents)) {
-            return AgentResult::reply("Choix invalide. Envoie */private* pour revoir la liste.");
+            return AgentResult::reply("Choix invalide. Envoie *#private* pour revoir la liste.");
         }
 
         $choice = $agents[(int) $input - 1];
         $agentKey = $choice['key'];
         $meta = $choice['meta'];
 
-        // Already has access?
+        // Already has access — activate the agent for this session
         if ($choice['has_access']) {
+            if (($choice['type'] ?? '') === 'custom' && !empty($choice['custom_id'])) {
+                $context->session->update(['active_custom_agent_id' => $choice['custom_id']]);
+                return AgentResult::reply("{$meta['icon']} *{$meta['label']}* est maintenant actif ! Tes prochains messages lui seront envoyes.\n\n_Envoie *#exit* pour revenir au mode normal._");
+            }
             return AgentResult::reply("{$meta['icon']} Tu as deja acces a *{$meta['label']}*. Utilise-le directement !");
         }
 
@@ -610,13 +640,13 @@ class AgentOrchestrator
         $clean = mb_strtolower(trim($context->body));
 
         // Exact match shortcuts
-        if ($clean === '/debug') {
+        if ($clean === '#debug' || $clean === '/debug') {
             $context->session->update(['debug_mode' => true]);
             return AgentResult::reply(
-                "🔍 *Mode debug activé*\n\nChaque réponse inclura le routing, l'agent choisi, le timing.\nPour désactiver : _/nodebug_"
+                "🔍 *Mode debug activé*\n\nChaque réponse inclura le routing, l'agent choisi, le timing.\nPour désactiver : _#nodebug_"
             );
         }
-        if ($clean === '/nodebug') {
+        if ($clean === '#nodebug' || $clean === '/nodebug') {
             $context->session->update(['debug_mode' => false]);
             return AgentResult::reply("✅ Mode debug désactivé.");
         }

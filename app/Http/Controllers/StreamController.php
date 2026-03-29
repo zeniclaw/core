@@ -85,7 +85,9 @@ class StreamController extends Controller
 
                 // Check if this is a simple chat that can use direct streaming
                 $agentType = $context->agent->type ?? 'chat';
-                $useDirectStream = in_array($agentType, ['chat', 'general', 'default']);
+                $isCommand = preg_match('/^[#\/](private|debug|nodebug)\b/i', trim($context->body));
+                $hasPending = !empty($context->session->pending_agent_context);
+                $useDirectStream = !$isCommand && !$hasPending && in_array($agentType, ['chat', 'general', 'default']);
 
                 if ($useDirectStream) {
                     $this->streamDirect($context);

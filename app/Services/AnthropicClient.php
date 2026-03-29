@@ -628,11 +628,11 @@ class AnthropicClient
         }
 
         try {
+            // Use sudo to run as root (www-data can't run claude CLI directly)
+            $cmd = 'sudo CLAUDE_CODE_OAUTH_TOKEN=' . escapeshellarg($apiKey)
+                 . ' HOME=/tmp ' . $cmd;
+
             $result = Process::timeout(180) // 3 min max for multi-turn
-                ->env([
-                    'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
-                    'HOME' => '/tmp',
-                ])
                 ->run($cmd);
 
             if (!$result->successful()) {
@@ -1111,6 +1111,40 @@ class AnthropicClient
         // Route on-prem models to Ollama streaming
         if ($this->isOnPremModel($model)) {
             yield from $this->chatStreamOnPrem($messages, $model, $systemPrompt, $maxTokens);
+            return;
+        }
+
+        // OAuth tokens: fall back to non-streaming via CLI, then simulate stream
+        if ($this->isOAuthToken()) {
+            $userMessage = '';
+            foreach (array_reverse($messages) as $msg) {
+                if (($msg['role'] ?? '') === 'user') {
+                    $userMessage = is_array($msg['content'] ?? '')
+                        ? collect($msg['content'])->pluck('text')->filter()->implode("\n")
+                        : ($msg['content'] ?? '');
+                    break;
+                }
+            }
+            $result = $this->executeClaudeCli($userMessage ?: 'hi', $model, $systemPrompt);
+            $text = $result['text'] ?? '';
+            if ($text) {
+                // Simulate streaming by yielding chunks
+                $words = preg_split('/(\s+)/u', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+                $chunk = '';
+                foreach ($words as $word) {
+                    $chunk .= $word;
+                    if (mb_strlen($chunk) >= 20) {
+                        yield ['type' => 'text_delta', 'data' => $chunk];
+                        $chunk = '';
+                    }
+                }
+                if ($chunk !== '') {
+                    yield ['type' => 'text_delta', 'data' => $chunk];
+                }
+                yield ['type' => 'done', 'data' => ''];
+            } else {
+                yield ['type' => 'error', 'data' => 'No response from Claude CLI'];
+            }
             return;
         }
 
