@@ -34,7 +34,7 @@ find "$APP_ROOT" -mindepth 1 -maxdepth 1 ! -name '.git' -exec chown -R "$OWNER" 
 echo "    done"
 
 echo "[2/5] .git → $OWNER..."
-chown -R "$OWNER" "$APP_ROOT/.git"
+[ -d "$APP_ROOT/.git" ] && chown -R "$OWNER" "$APP_ROOT/.git" || echo "    .git not present (skipped)"
 echo "    done"
 
 echo "[3/5] Directories → 755..."

@@ -30,11 +30,10 @@ echo '<?php opcache_reset(); echo "FPM OPcache reset OK"; unlink(__FILE__);' > /
 curl -s http://localhost/_opcache_reset.php 2>/dev/null && echo "" || echo "FPM OPcache reset skipped"
 
 echo "[6/7] PHP-FPM reload..."
-if command -v supervisorctl &>/dev/null; then
-    supervisorctl restart php-fpm 2>/dev/null || sudo supervisorctl restart php-fpm 2>/dev/null || echo "php-fpm: supervisorctl failed (permission denied)"
+if command -v supervisorctl &>/dev/null && supervisorctl restart php-fpm 2>/dev/null; then
+    true
 elif pgrep php-fpm &>/dev/null; then
-    kill -USR2 $(pgrep -o php-fpm)
-    echo "php-fpm: reloaded"
+    kill -USR2 $(pgrep -o php-fpm) 2>/dev/null && echo "php-fpm: reloaded via signal" || echo "php-fpm: reload skipped (no permission)"
 else
     echo "php-fpm: not found (skipped)"
 fi
