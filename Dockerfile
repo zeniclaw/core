@@ -68,7 +68,7 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
 
 # Version — stored outside storage/ so the volume mount doesn't override it.
 # entrypoint.sh copies it to storage/app/version.txt at runtime.
-RUN echo "2.42.2" > /tmp/.zeniclaw-version
+RUN echo "2.42.3" > /tmp/.zeniclaw-version
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \

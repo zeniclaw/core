@@ -752,6 +752,15 @@ class AgentOrchestrator
                     }
 
                     $agent = $this->agents[$pendingCtx['agent']] ?? null;
+
+                    // If agent not in registry, try to instantiate it (e.g. excluded/custom agents)
+                    if (!$agent) {
+                        $agentClass = "App\\Services\\Agents\\" . str_replace(' ', '', ucwords(str_replace('_', ' ', $pendingCtx['agent']))) . 'Agent';
+                        if (class_exists($agentClass)) {
+                            $agent = new $agentClass();
+                        }
+                    }
+
                     if ($agent && method_exists($agent, 'handlePendingContext')) {
                         $result = $agent->handlePendingContext($context, $pendingCtx);
                         if ($result) return $result;
