@@ -226,7 +226,7 @@ async function connectWhatsApp() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(parseInt(process.env.WEBHOOK_TIMEOUT || "120000")),
           });
           logger.info({ from: remoteJid, status: res.status }, "Webhook delivered");
         } catch (err) {
