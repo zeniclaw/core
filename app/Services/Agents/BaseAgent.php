@@ -70,13 +70,31 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
         // 1. Custom agent credentials (linked via active_custom_agent_id or custom agent)
         $customAgentId = $context->session->active_custom_agent_id ?? null;
         if ($customAgentId) {
+            // Try exact key match first
             $cred = \Illuminate\Support\Facades\DB::table('custom_agent_credentials')
                 ->where('custom_agent_id', $customAgentId)
                 ->where('key', $key)
                 ->where('is_active', true)
                 ->first();
+
+            // Fallback: first active credential for this custom agent
+            if (!$cred) {
+                $cred = \Illuminate\Support\Facades\DB::table('custom_agent_credentials')
+                    ->where('custom_agent_id', $customAgentId)
+                    ->where('is_active', true)
+                    ->first();
+            }
+
             if ($cred && $cred->value) {
-                try { return decrypt($cred->value); } catch (\Throwable $e) { return $cred->value; }
+                // Try Laravel decrypt (with serialize), then without serialize, then raw
+                try { return decrypt($cred->value); } catch (\Throwable $e) {}
+                try {
+                    $encrypter = new \Illuminate\Encryption\Encrypter(
+                        base64_decode(substr(config('app.key'), 7)), config('app.cipher')
+                    );
+                    return $encrypter->decrypt($cred->value, false);
+                } catch (\Throwable $e) {}
+                return $cred->value;
             }
         }
 

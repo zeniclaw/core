@@ -825,38 +825,47 @@ class ZenibizDocsAgent extends BaseAgent
             }
         }
 
-        $prompt = "Lis l'image {$imagePath} et classifie ce document.\n"
-            . ($userHint ? "Indication: {$userHint}\n" : '')
+        $textPrompt = "Analyse cette image de document. Fais l'OCR du texte visible, puis classifie le document.\n"
+            . ($userHint ? "Indication de l'utilisateur: {$userHint}\n" : '')
             . "\nCategories disponibles:\n{$catTree}\n"
             . "Reponds UNIQUEMENT en JSON valide (sans markdown, sans ```), exactement ce format:\n"
-            . '{"title": "titre court", "category_id": N, "subcategory_id": N_ou_null, "category_name": "nom", "subcategory_name": "nom_ou_null", "tags": ["tag1", "tag2"]}';
+            . '{"title": "titre court et descriptif base sur le contenu", "category_id": N, "subcategory_id": N_ou_null, "category_name": "nom", "subcategory_name": "nom_ou_null", "tags": ["tag1", "tag2"], "ocr_text": "texte extrait du document"}';
 
         try {
-            $apiKey = \App\Models\AppSetting::get('anthropic_api_key');
-            $cmd = sprintf(
-                'claude -p %s --model claude-sonnet-4-6 --output-format json --max-turns 2 --dangerously-skip-permissions 2>/dev/null',
-                escapeshellarg($prompt)
-            );
+            // Build multimodal message with base64 image
+            $imageData = @file_get_contents($imagePath);
+            if (!$imageData) {
+                Log::warning('ZenibizDocsAgent: cannot read image at ' . $imagePath);
+                throw new \RuntimeException('Cannot read image file');
+            }
 
-            $result = \Illuminate\Support\Facades\Process::timeout(120)
-                ->env([
-                    'CLAUDE_CODE_OAUTH_TOKEN' => $apiKey,
-                    'HOME' => '/tmp',
-                ])
-                ->run($cmd);
+            $base64 = base64_encode($imageData);
+            $mime = mime_content_type($imagePath) ?: 'image/jpeg';
 
-            $data = json_decode($result->output(), true);
-            $text = $data['result'] ?? '';
+            $message = [
+                ['type' => 'image', 'source' => [
+                    'type' => 'base64',
+                    'media_type' => $mime,
+                    'data' => $base64,
+                ]],
+                ['type' => 'text', 'text' => $textPrompt],
+            ];
 
-            Log::info('ZenibizDocsAgent classification', ['result' => mb_substr($text, 0, 500)]);
+            $claude = new \App\Services\AnthropicClient();
+            $model = \App\Services\ModelResolver::balanced();
+            $text = $claude->chat($message, $model);
 
-            $json = json_decode($text, true);
+            Log::info('ZenibizDocsAgent classification', ['result' => mb_substr($text ?? '', 0, 500)]);
+
+            // Parse JSON from response
+            $json = json_decode($text ?? '', true);
             if ($json && isset($json['category_id'])) {
                 return $this->applyLearnedRules($json, $context);
             }
-            if (preg_match('/\{[^{}]*"category_id"[^{}]*\}/s', $text, $matches)) {
+            // Try to extract JSON from mixed text
+            if (preg_match('/\{[^{}]*"category_id"[^{}]*\}/s', $text ?? '', $matches)) {
                 $json = json_decode($matches[0], true);
-                if ($json && isset($json['category_id'])) return $json;
+                if ($json && isset($json['category_id'])) return $this->applyLearnedRules($json, $context);
             }
         } catch (\Throwable $e) {
             Log::warning('ZenibizDocsAgent classification failed: ' . $e->getMessage());

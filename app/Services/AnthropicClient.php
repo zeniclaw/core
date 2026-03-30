@@ -596,19 +596,38 @@ class AnthropicClient
         $apiKey = AppSetting::get('anthropic_api_key');
         if (!$apiKey) return null;
 
-        $textMessage = is_array($message)
-            ? collect($message)->where('type', 'text')->pluck('text')->implode("\n")
-            : $message;
+        // Extract text and detect image content blocks
+        $textMessage = $message;
+        $imageFile = null;
+        if (is_array($message)) {
+            $texts = [];
+            foreach ($message as $block) {
+                if (($block['type'] ?? '') === 'text') {
+                    $texts[] = $block['text'] ?? '';
+                } elseif (($block['type'] ?? '') === 'image' && isset($block['source']['data'])) {
+                    // Save base64 image to temp file for CLI to read
+                    $ext = str_contains($block['source']['media_type'] ?? '', 'png') ? 'png' : 'jpg';
+                    $imageFile = '/tmp/claude_vision_' . uniqid() . '.' . $ext;
+                    file_put_contents($imageFile, base64_decode($block['source']['data']));
+                }
+            }
+            $textMessage = implode("\n", $texts);
+        }
 
         // Build the prompt with system instructions
         $fullPrompt = $systemPrompt
             ? "{$systemPrompt}\n\n---\n\nMessage de l'utilisateur:\n{$textMessage}"
             : $textMessage;
 
+        // If image is present, add file reference to prompt and skip session resume
+        if ($imageFile) {
+            $fullPrompt .= "\n\n[Image file: {$imageFile}] — Use the Read tool to view this image file.";
+        }
+
         $slug = $this->cliModelSlug($model);
 
-        // Check for existing session to resume
-        $sessionId = $this->getCliSessionId();
+        // Skip session resume when processing images (fresh context needed)
+        $sessionId = $imageFile ? null : $this->getCliSessionId();
 
         if ($sessionId) {
             // Resume existing session — send new message via --resume
@@ -619,11 +638,13 @@ class AnthropicClient
                 escapeshellarg($slug)
             );
         } else {
-            // New session
+            // New session — include Read tool for image analysis
+            $tools = $imageFile ? 'Bash,Read,WebSearch,WebFetch' : 'Bash,WebSearch,WebFetch';
             $cmd = sprintf(
-                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools "Bash,WebSearch,WebFetch" 2>/dev/null',
+                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools %s 2>/dev/null',
                 escapeshellarg($fullPrompt),
-                escapeshellarg($slug)
+                escapeshellarg($slug),
+                escapeshellarg($tools)
             );
         }
 
@@ -687,6 +708,11 @@ class AnthropicClient
         } catch (\Exception $e) {
             Log::error('AnthropicClient::executeClaudeCli exception', ['error' => $e->getMessage()]);
             return null;
+        } finally {
+            // Clean up temp image file
+            if ($imageFile && file_exists($imageFile)) {
+                @unlink($imageFile);
+            }
         }
     }
 
