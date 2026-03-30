@@ -333,7 +333,7 @@ class PartnerPortalController extends Controller
         }
 
         $timeout = min((int) $request->input('timeout', 30), 60);
-        $args = $request->input('args', '');
+        $args = $request->input('args', '') ?? '';
 
         $cmd = match ($script->language) {
             'python' => 'python3',
@@ -361,8 +361,13 @@ class PartnerPortalController extends Controller
         $needsHostNetwork = (bool) preg_match('/\b(nmap|netifaces|scapy|socket\.connect|ping)\b/', $script->code);
 
         if ($needsHostNetwork) {
-            // Run in a temporary container with host network for full network access
-            return $this->runScriptInHostNetwork($script, $tmpDir, $tmpFile, $cmd, $args, $timeout);
+            // Use storage dir (volume-mounted, visible from host) for temp files
+            $storageTmpDir = storage_path('app/tmp_scripts/' . uniqid());
+            @mkdir($storageTmpDir, 0755, true);
+            file_put_contents($storageTmpDir . '/script' . $ext, $script->code);
+            chmod($storageTmpDir . '/script' . $ext, 0755);
+            \Illuminate\Support\Facades\Process::run("rm -rf {$tmpDir}");
+            return $this->runScriptInHostNetwork($script, $storageTmpDir, $storageTmpDir . '/script' . $ext, $cmd, $args, $timeout);
         }
 
         // Auto-install dependencies before execution
@@ -405,10 +410,10 @@ class PartnerPortalController extends Controller
      */
     private function runScriptInHostNetwork($script, string $tmpDir, string $tmpFile, string $cmd, string $args, int $timeout)
     {
-        // Detect container runtime
-        $runtime = 'podman';
-        if (!\Illuminate\Support\Facades\Process::run('which podman')->successful()) {
-            $runtime = 'docker';
+        // Detect container runtime (inside container, docker CLI talks to podman socket)
+        $runtime = 'docker';
+        if (\Illuminate\Support\Facades\Process::run('which podman')->successful()) {
+            $runtime = 'podman';
         }
 
         // Build a requirements.txt from imports
@@ -429,14 +434,20 @@ class PartnerPortalController extends Controller
 
         // Build the docker/podman run command
         $image = 'python:3-slim';
-        $installCmd = count($packages) > 0
-            ? 'pip install --no-cache-dir -r /work/requirements.txt && apt-get update -qq && apt-get install -y -qq nmap > /dev/null 2>&1; '
-            : 'apt-get update -qq && apt-get install -y -qq nmap > /dev/null 2>&1; ';
+        $installCmd = 'apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1; '
+            . (count($packages) > 0 ? 'pip install --no-cache-dir -r /work/requirements.txt; ' : '');
+
+        // Resolve host path: storage volume is mounted from host
+        // Container path: /var/www/html/storage/... -> Host: volume source + relative path
+        $storageBase = storage_path();
+        $relativePath = str_replace($storageBase, '', $tmpDir);
+        $volumeSource = trim(shell_exec("docker inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'") ?? '');
+        $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $tmpDir;
 
         $containerCmd = sprintf(
             '%s run --rm --network=host -v %s:/work:ro %s bash -c %s',
             $runtime,
-            escapeshellarg($tmpDir),
+            escapeshellarg($hostDir),
             escapeshellarg($image),
             escapeshellarg("cd /work && {$installCmd}python3 /work/script.py {$args}")
         );
