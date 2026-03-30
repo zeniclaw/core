@@ -5,13 +5,10 @@
 set -e
 
 # Auto-detect repo path dynamically
-# This script is installed at /usr/local/bin/zeniclaw-update but the repo
-# is bind-mounted somewhere. Use find to locate the .git directory.
 REPO=""
 for CANDIDATE in /opt/zeniclaw-repo /opt/zeniclaw /home/zeniclaw /var/www/html; do
     [ -d "$CANDIDATE/.git" ] && REPO="$CANDIDATE" && break
 done
-# Last resort: search common mount points
 if [ -z "$REPO" ]; then
     REPO=$(find /opt /home /srv -maxdepth 2 -name ".git" -type d 2>/dev/null | head -1 | sed 's|/.git$||' || true)
 fi
@@ -35,18 +32,23 @@ fi
 git clean -fd --exclude=.env --exclude=storage/ --exclude=node_modules/ 2>/dev/null || true
 git checkout -- . 2>/dev/null || true
 
-# Read version from Dockerfile (supports both old and new version location)
+# Read version from Dockerfile
 VERSION=$(grep -oP 'echo "\K[^"]+(?=" > /tmp/\.zeniclaw-version)' Dockerfile 2>/dev/null || \
           grep -oP 'echo "\K[^"]+(?=" > storage/app/version\.txt)' Dockerfile 2>/dev/null || \
           echo "unknown")
 echo "VERSION=$VERSION"
 
-# Detect container runtime
+# Detect container runtime CLI and whether the server is Podman
 CONTAINER_CMD=""
+SERVER_IS_PODMAN=false
 if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
     CONTAINER_CMD="podman"
+    SERVER_IS_PODMAN=true
 elif command -v docker &>/dev/null; then
     CONTAINER_CMD="docker"
+    if docker version 2>/dev/null | grep -qi "podman"; then
+        SERVER_IS_PODMAN=true
+    fi
 fi
 
 if [ -z "$CONTAINER_CMD" ]; then
@@ -54,11 +56,12 @@ if [ -z "$CONTAINER_CMD" ]; then
     exit 1
 fi
 
-# Resolve the host path of the repo from container bind mounts
-# Try the detected $REPO first, then scan all bind mounts for one containing docker-compose.yml
-HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format "{{ range .Mounts }}{{ if eq .Destination \"${REPO}\" }}{{ .Source }}{{ end }}{{ end }}" 2>/dev/null || echo "")
+# Resolve the host path of the repo
+HOST_REPO="${HOST_REPO_PATH:-}"
 if [ -z "$HOST_REPO" ]; then
-    # Fallback: find any bind mount whose Source contains a docker-compose.yml
+    HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format "{{ range .Mounts }}{{ if eq .Destination \"${REPO}\" }}{{ .Source }}{{ end }}{{ end }}" 2>/dev/null || echo "")
+fi
+if [ -z "$HOST_REPO" ]; then
     HOST_REPO=$($CONTAINER_CMD inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Type "bind" }}{{ .Source }}{{"\n"}}{{ end }}{{ end }}' 2>/dev/null \
         | while read -r src; do
             [ -n "$src" ] && [ -f "$src/docker-compose.yml" ] && echo "$src" && break
@@ -69,62 +72,45 @@ if [ -z "$HOST_REPO" ]; then
     exit 1
 fi
 
+# Resolve the HOST path of the container socket
+HOST_SOCKET_PATH=$($CONTAINER_CMD inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination "/var/run/docker.sock" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || echo "")
+if [ -z "$HOST_SOCKET_PATH" ]; then
+    if [ -S "/var/run/docker.sock" ]; then
+        HOST_SOCKET_PATH="/var/run/docker.sock"
+    elif [ -S "/run/podman/podman.sock" ]; then
+        HOST_SOCKET_PATH="/run/podman/podman.sock"
+    fi
+fi
+
 LOG="$REPO/storage/app/update-rebuild.log"
 > "$LOG"
 
-# Detect compose command
-COMPOSE_CMD=""
-if [ "$CONTAINER_CMD" = "podman" ]; then
-    if podman compose version &>/dev/null 2>&1; then
-        COMPOSE_CMD="podman compose"
-    elif command -v podman-compose &>/dev/null; then
-        COMPOSE_CMD="podman-compose"
-    fi
-else
-    if docker compose version &>/dev/null 2>&1; then
-        COMPOSE_CMD="docker compose"
-    elif command -v docker-compose &>/dev/null; then
-        COMPOSE_CMD="docker-compose"
-    fi
-fi
+# Build and restart strategy depends on the container runtime.
+# The build MUST run in background so the HTTP request returns quickly.
 
-# Detect socket path
-SOCKET_PATH=""
-if [ -S "/run/podman/podman.sock" ]; then
-    SOCKET_PATH="/run/podman/podman.sock"
-elif [ -S "/var/run/docker.sock" ]; then
-    SOCKET_PATH="/var/run/docker.sock"
-fi
-
-# Spawn an independent container to rebuild the app.
-# This container runs on the host's container runtime and survives the
-# app container being removed/recreated during the rebuild.
-# IMPORTANT: We do NOT remove the old container before building.
-# compose up --build will only replace it after a successful build.
-# If the build fails, the old container keeps running.
-if [ "$CONTAINER_CMD" = "podman" ]; then
-    # Podman: run rebuild directly (no need for docker:cli image)
+if [ "$SERVER_IS_PODMAN" = "true" ]; then
+    # Podman (even via Docker CLI): build image in background, then signal completion.
+    # The app container stays running during the build — no downtime.
     (
-        cd "${HOST_REPO}"
         echo 'Started rebuild...' > "$LOG"
-        echo 'Removing orphan containers...' >> "$LOG"
-        $CONTAINER_CMD container prune -f >> "$LOG" 2>&1 || true
-        $COMPOSE_CMD up -d --build --force-recreate app >> "$LOG" 2>&1 && \
-            echo 'Successfully built app' >> "$LOG" && \
-            echo 'Starting all services (including new ones)...' >> "$LOG" && \
-            $COMPOSE_CMD up -d --remove-orphans >> "$LOG" 2>&1 && \
-            echo 'Started' >> "$LOG" \
-            || { echo 'ERROR: rebuild failed' >> "$LOG"; \
-                 echo 'Ensuring app container is running...' >> "$LOG"; \
-                 $CONTAINER_CMD container prune -f >> "$LOG" 2>&1 || true; \
-                 $COMPOSE_CMD up -d app >> "$LOG" 2>&1; }
+        echo 'Building new image...' >> "$LOG"
+        if $CONTAINER_CMD build -t zeniclaw_app -f "$REPO/Dockerfile" "$REPO" >> "$LOG" 2>&1; then
+            echo 'Successfully built app' >> "$LOG"
+            echo 'IMAGE_BUILT' >> "$LOG"
+            echo "Run on host to apply: cd ${HOST_REPO} && podman compose up -d --force-recreate app" >> "$LOG"
+            echo 'Started' >> "$LOG"
+        else
+            echo 'ERROR: rebuild failed' >> "$LOG"
+        fi
     ) &
     disown
+    echo "REBUILD_STARTED"
+
 else
-    # Docker: use docker:cli container
+    # Native Docker: use docker:cli container (runs on host, survives app restart)
     docker run --rm -d \
         --name zeniclaw_updater \
-        -v "${SOCKET_PATH}:/var/run/docker.sock" \
+        -v "${HOST_SOCKET_PATH}:/var/run/docker.sock" \
         -v "${HOST_REPO}:${HOST_REPO}" \
         -w "${HOST_REPO}" \
         -v "${HOST_REPO}/storage/app/update-rebuild.log:/tmp/rebuild.log" \
@@ -142,6 +128,6 @@ else
                  echo 'Ensuring app container is running...' >> /tmp/rebuild.log; \
                  docker container prune -f >> /tmp/rebuild.log 2>&1; \
                  docker compose up -d app >> /tmp/rebuild.log 2>&1; }"
-fi
 
-echo "REBUILD_STARTED"
+    echo "REBUILD_STARTED"
+fi

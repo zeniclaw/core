@@ -83,6 +83,17 @@ class UpdateController extends Controller
                 ], 500);
             }
 
+            // Podman: image built in background, container needs recreate on host
+            if (str_contains($output, 'REBUILD_STARTED') && str_contains($output, 'IMAGE_BUILT') === false) {
+                return response()->json([
+                    'success' => true,
+                    'message' => "Code updated to v{$newVersion}. Image is building in background — check rebuild status.",
+                    'version' => $newVersion,
+                    'output' => $output,
+                    'rebuilding' => true,
+                ]);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Update completed',

@@ -658,8 +658,20 @@ ENVEOF
     if [[ "$CONTAINER_CMD" == *"podman"* ]]; then
         echo "" >> "$ENV_FILE"
         echo "# --- Container Runtime ---" >> "$ENV_FILE"
-        echo "CONTAINER_SOCKET=/run/podman/podman.sock" >> "$ENV_FILE"
+        # Use rootless socket if available (required for rootless Podman)
+        local user_socket="/run/user/$(id -u)/podman/podman.sock"
+        if [ -S "$user_socket" ]; then
+            echo "CONTAINER_SOCKET=$user_socket" >> "$ENV_FILE"
+        elif [ -S "/run/podman/podman.sock" ]; then
+            echo "CONTAINER_SOCKET=/run/podman/podman.sock" >> "$ENV_FILE"
+        else
+            systemctl --user enable --now podman.socket 2>/dev/null || true
+            echo "CONTAINER_SOCKET=$user_socket" >> "$ENV_FILE"
+        fi
     fi
+
+    # Host repo path for update helper (needed inside container to spawn rebuild)
+    echo "HOST_REPO_PATH=$(pwd)" >> "$ENV_FILE"
 
     success ".env file generated"
 }

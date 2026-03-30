@@ -172,7 +172,7 @@ class ZeniclawUpdate extends Command
         if (file_exists($fixScript)) {
             $this->info('▶ Fixing permissions...');
             $fixProcess = new Process(['bash', $fixScript]);
-            $fixProcess->setTimeout(30);
+            $fixProcess->setTimeout(120);
             $fixProcess->run(fn($type, $buf) => $this->getOutput()->write($buf));
             $this->info('✓ Permissions fixed');
         }
