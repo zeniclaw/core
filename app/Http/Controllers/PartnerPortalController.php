@@ -436,9 +436,10 @@ class PartnerPortalController extends Controller
                 flush();
             };
 
-            $sendSSE('status', ['message' => 'Preparation...']);
+            $sendSSE('status', ['message' => "Preparation du script {$script->language}..."]);
 
             if ($needsHostNetwork) {
+                $sendSSE('status', ['message' => 'Mode reseau hote detecte — lancement dans un container dedie...']);
                 $storageTmpDir = storage_path('app/tmp_scripts/' . uniqid());
                 @mkdir($storageTmpDir, 0755, true);
                 file_put_contents($storageTmpDir . '/script' . $ext, $script->code);
@@ -465,14 +466,16 @@ class PartnerPortalController extends Controller
                 $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $storageTmpDir;
 
                 $image = 'python:3-slim';
-                $installCmd = 'apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1; '
-                    . (count($packages) > 0 ? 'pip install --no-cache-dir -r /work/requirements.txt 2>&1; ' : '');
+                $sendSSE('status', ['message' => 'Installation des dependances systeme (nmap, gcc)...']);
+
+                $installCmd = 'echo ">>> Installation systeme..." && apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1 && echo ">>> OK"; '
+                    . (count($packages) > 0 ? 'echo ">>> Installation packages Python: ' . implode(', ', $packages) . '..." && pip install --no-cache-dir -q -r /work/requirements.txt && echo ">>> Dependances OK"; ' : '');
 
                 $fullCmd = sprintf(
                     'docker run --rm --network=host --privileged -v %s:/work %s bash -c %s',
                     escapeshellarg($hostDir),
                     escapeshellarg($image),
-                    escapeshellarg("cd /work && {$installCmd}python3 -u /work/script{$ext} {$args}")
+                    escapeshellarg("cd /work && {$installCmd}echo '>>> Lancement du script...' && python3 -u /work/script{$ext} {$args}")
                 );
                 $cleanupDir = $storageTmpDir;
             } else {
