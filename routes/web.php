@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Route;
 
 // ── Public ────────────────────────────────────────────────────────────────────
 Route::get('/', fn() => view('welcome'));
+Route::get('/docs/install', fn() => view('docs.install'))->name('docs.install');
 Route::get('/health', [HealthController::class, 'check'])->name('health');
 
 // Dynamic robots.txt — allow bots only on the official domain

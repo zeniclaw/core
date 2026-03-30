@@ -377,6 +377,7 @@ footer {
       <li><a href="#agents" x-show="lang==='fr'">Agents</a><a href="#agents" x-show="lang==='en'">Agents</a></li>
       <li><a href="#technology" x-show="lang==='fr'">Technologie</a><a href="#technology" x-show="lang==='en'">Technology</a></li>
       <li><a href="#contact" x-show="lang==='fr'">Contact</a><a href="#contact" x-show="lang==='en'">Contact</a></li>
+      <li><a href="{{ route('docs.install') }}" x-show="lang==='fr'">Guide WSL</a><a href="{{ route('docs.install') }}" x-show="lang==='en'">WSL Guide</a></li>
       <li>
         <div class="lang-toggle">
           <button class="lang-btn" :class="{ 'active': lang==='fr' }" @click="lang='fr'">FR</button>
