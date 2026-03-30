@@ -383,11 +383,13 @@ footer {
           <button class="lang-btn" :class="{ 'active': lang==='en' }" @click="lang='en'">EN</button>
         </div>
       </li>
-      @auth
-        <li><a href="{{ route('dashboard') }}" class="nav-cta">Dashboard</a></li>
-      @else
-        <li><a href="{{ route('login') }}" class="nav-cta">Sign In</a></li>
-      @endauth
+      @if(!\App\Http\Middleware\BlockAuthOnOfficialDomain::isOfficialDomain())
+        @auth
+          <li><a href="{{ route('dashboard') }}" class="nav-cta">Dashboard</a></li>
+        @else
+          <li><a href="{{ route('login') }}" class="nav-cta">Sign In</a></li>
+        @endauth
+      @endif
     </ul>
   </div>
 </nav>
@@ -409,23 +411,30 @@ footer {
       <span x-show="lang==='en'">Deploy pre-built and custom AI agents directly on your infrastructure. Local LLMs via Ollama, zero API costs, full data sovereignty.</span>
     </p>
     <div class="hero-actions fade-up d3">
-      @auth
-        <a href="{{ route('dashboard') }}" class="btn btn-primary">
-          <span x-show="lang==='fr'">Tableau de bord</span>
-          <span x-show="lang==='en'">Go to Dashboard</span>
-        </a>
-      @else
+      @if(\App\Http\Middleware\BlockAuthOnOfficialDomain::isOfficialDomain())
         <a href="#contact" class="btn btn-primary">
           <span x-show="lang==='fr'">Demander une demo</span>
           <span x-show="lang==='en'">Request a Demo</span>
         </a>
-        @if (Route::has('register'))
-          <a href="{{ route('register') }}" class="btn btn-secondary">
-            <span x-show="lang==='fr'">Creer un compte</span>
-            <span x-show="lang==='en'">Create Account</span>
+      @else
+        @auth
+          <a href="{{ route('dashboard') }}" class="btn btn-primary">
+            <span x-show="lang==='fr'">Tableau de bord</span>
+            <span x-show="lang==='en'">Go to Dashboard</span>
           </a>
-        @endif
-      @endauth
+        @else
+          <a href="#contact" class="btn btn-primary">
+            <span x-show="lang==='fr'">Demander une demo</span>
+            <span x-show="lang==='en'">Request a Demo</span>
+          </a>
+          @if (Route::has('register'))
+            <a href="{{ route('register') }}" class="btn btn-secondary">
+              <span x-show="lang==='fr'">Creer un compte</span>
+              <span x-show="lang==='en'">Create Account</span>
+            </a>
+          @endif
+        @endauth
+      @endif
       <a href="#agents" class="btn btn-secondary">
         <span x-show="lang==='fr'">Explorer les agents</span>
         <span x-show="lang==='en'">Explore Agents</span>
@@ -1084,11 +1093,13 @@ graph LR
       <li><a href="#contact">Contact</a></li>
       <li><a href="https://github.com/zeniclaw/core" target="_blank">GitHub</a></li>
       <li><a href="https://www.zenibiz.com" target="_blank">ZeniBiz</a></li>
-      @auth
-        <li><a href="{{ route('dashboard') }}">Dashboard</a></li>
-      @else
-        <li><a href="{{ route('login') }}">Sign In</a></li>
-      @endauth
+      @if(!\App\Http\Middleware\BlockAuthOnOfficialDomain::isOfficialDomain())
+        @auth
+          <li><a href="{{ route('dashboard') }}">Dashboard</a></li>
+        @else
+          <li><a href="{{ route('login') }}">Sign In</a></li>
+        @endauth
+      @endif
     </ul>
     <p class="footer-copy">&copy; 2026 ZeniClaw by ZeniBiz &mdash;
       <span x-show="lang==='fr'">Plateforme IA d'entreprise on-prem</span>
