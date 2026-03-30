@@ -11,7 +11,7 @@ ARG NO_PROXY="localhost,127.0.0.1,db,redis,waha,ollama,app"
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libzip-dev libpng-dev libonig-dev \
     libxml2-dev nginx supervisor procps sudo cron poppler-utils \
-    python3-pip \
+    python3-pip python3-venv python3-full \
     && ARCH=$(uname -m) \
     && (curl -fsSL --retry 3 --retry-delay 5 -o /tmp/docker.tgz \
        https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz \
@@ -69,7 +69,7 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/zeniclaw-update \
 
 # Version — stored outside storage/ so the volume mount doesn't override it.
 # entrypoint.sh copies it to storage/app/version.txt at runtime.
-RUN echo "2.45.1" > /tmp/.zeniclaw-version
+RUN echo "2.45.2" > /tmp/.zeniclaw-version
 
 # Storage permissions
 RUN mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache \

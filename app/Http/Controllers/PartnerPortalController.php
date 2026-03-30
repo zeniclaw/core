@@ -360,10 +360,15 @@ class PartnerPortalController extends Controller
         // Auto-install dependencies before execution
         $this->installDependencies($script->language, $script->code, $tmpDir);
 
+        // Use venv python if available
+        if ($script->language === 'python' && file_exists($tmpDir . '/venv/bin/python')) {
+            $cmd = $tmpDir . '/venv/bin/python';
+        }
+
         try {
             $result = \Illuminate\Support\Facades\Process::timeout($timeout)
                 ->path($tmpDir)
-                ->env(['SCRIPT_ARGS' => $args, 'PYTHONPATH' => $tmpDir . '/venv/lib/python3/site-packages:' . ($tmpDir . '/venv/lib/python3.11/site-packages'), 'NODE_PATH' => $tmpDir . '/node_modules'])
+                ->env(['SCRIPT_ARGS' => $args, 'NODE_PATH' => $tmpDir . '/node_modules'])
                 ->run("{$cmd} {$tmpFile} {$args}");
 
             return response()->json([
@@ -439,9 +444,12 @@ class PartnerPortalController extends Controller
         $packages = array_map(fn($p) => $nameMap[$p] ?? $p, $toInstall);
 
         // Install to temp directory using pip
+        // Create venv and install packages
+        $venvDir = $tmpDir . '/venv';
+        \Illuminate\Support\Facades\Process::timeout(30)->run("python3 -m venv {$venvDir} 2>&1");
         $pkgList = implode(' ', array_map('escapeshellarg', $packages));
         \Illuminate\Support\Facades\Process::timeout(60)
-            ->run("python3 -m pip install --target={$tmpDir}/venv/lib/python3/site-packages {$pkgList} 2>&1 || pip3 install --target={$tmpDir}/venv/lib/python3/site-packages {$pkgList} 2>&1");
+            ->run("{$venvDir}/bin/pip install {$pkgList} 2>&1");
     }
 
     private function installNodeDeps(string $code, string $tmpDir): void
