@@ -148,6 +148,13 @@ class ChannelController extends Controller
             $payload = $request->input('payload', []);
             $body = $payload['body'] ?? null;
             $from = $payload['from'] ?? null;
+
+            Log::info('WhatsApp webhook received', [
+                'from' => $from,
+                'body' => substr($body ?? '', 0, 100),
+                'hasMedia' => $payload['hasMedia'] ?? false,
+                'agent_id' => $agent->id,
+            ]);
             $fromMe = $payload['fromMe'] ?? false;
             $hasMedia = $payload['hasMedia'] ?? false;
             $media = $payload['media'] ?? null;
@@ -267,23 +274,22 @@ class ChannelController extends Controller
             );
             $session->increment('message_count');
 
-            // Build context and delegate to orchestrator
-            $context = new AgentContext(
-                agent: $agent,
-                session: $session,
-                from: $from,
-                senderName: $payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? 'ami',
-                body: $body,
-                hasMedia: $hasMedia,
-                mediaUrl: $mediaUrl,
-                mimetype: $mimetype,
-                media: $media,
+            // Dispatch to queue for async processing — respond to WAHA immediately
+            $senderName = $payload['_data']['pushName'] ?? $payload['_data']['notifyName'] ?? 'ami';
+
+            \App\Jobs\ProcessWhatsAppMessageJob::dispatch(
+                $agent->id,
+                $session->id,
+                $from,
+                $senderName,
+                $body,
+                $hasMedia,
+                $mediaUrl,
+                $mimetype,
+                $media,
             );
 
-            $orchestrator = new AgentOrchestrator();
-            $result = $orchestrator->process($context);
-
-            return response()->json(['ok' => true, 'action' => $result->action, 'metadata' => $result->metadata]);
+            return response()->json(['ok' => true, 'action' => 'queued']);
         } catch (\Exception $e) {
             Log::error('WhatsApp webhook error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
