@@ -336,7 +336,7 @@
       {{-- Scripts list --}}
       <div class="lg:col-span-3 space-y-3">
         @forelse($scripts as $script)
-        <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div class="bg-gray-900 rounded-xl border border-gray-800 p-5" x-data="scriptCard_{{ $script->id }}()">
           <div class="flex items-start justify-between mb-2">
             <div>
               <h4 class="font-semibold text-gray-200">💻 {{ $script->name }}</h4>
@@ -346,6 +346,7 @@
               <span class="px-2 py-0.5 rounded text-xs {{ $script->is_active ? 'bg-green-900/50 text-green-400' : 'bg-gray-800 text-gray-500' }}">
                 {{ $script->is_active ? 'Actif' : 'Inactif' }}
               </span>
+              <button @click="editing = !editing" class="text-xs text-blue-400 hover:text-blue-300">Modifier</button>
               <form method="POST" action="{{ route('partner.scripts.destroy', [$share->token, $script]) }}" onsubmit="return confirm('Supprimer ?')">
                 @csrf @method('DELETE')
                 <button class="text-xs text-red-400 hover:text-red-300">Suppr.</button>
@@ -355,8 +356,110 @@
           @if($script->description)
             <p class="text-sm text-gray-400 mb-2">{{ $script->description }}</p>
           @endif
-          <pre class="text-xs bg-gray-800 rounded-lg p-3 text-gray-300 overflow-x-auto mono leading-relaxed">{{ $script->code }}</pre>
+
+          {{-- View mode --}}
+          <div x-show="!editing">
+            <pre class="text-xs bg-gray-800 rounded-lg p-3 text-gray-300 overflow-x-auto mono leading-relaxed max-h-[400px] overflow-y-auto" x-text="code"></pre>
+          </div>
+
+          {{-- Edit mode --}}
+          <div x-show="editing" x-cloak>
+            {{-- AI Edit --}}
+            <div class="mb-3 flex gap-2">
+              <input type="text" x-model="aiInstruction" placeholder="Instruction IA: ex. ajoute la gestion d'erreurs..."
+                     class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-purple-500">
+              <button @click="aiEdit()" :disabled="aiLoading || !aiInstruction.trim()"
+                      class="px-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-40 whitespace-nowrap flex items-center gap-1">
+                <template x-if="aiLoading"><svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
+                <span x-text="aiLoading ? 'IA...' : '🤖 Modifier via IA'"></span>
+              </button>
+            </div>
+
+            {{-- Code editor --}}
+            <textarea x-model="code" rows="15" class="w-full px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-xs text-green-300 mono leading-relaxed outline-none focus:border-green-500 resize-y"></textarea>
+
+            <div class="flex items-center justify-between mt-2">
+              <button @click="editing = false" class="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200">Annuler</button>
+              <button @click="saveCode()" :disabled="saving"
+                      class="px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-40">
+                <span x-text="saving ? 'Sauvegarde...' : 'Sauvegarder'"></span>
+              </button>
+            </div>
+          </div>
+
+          {{-- Run section --}}
+          <div class="mt-3 border-t border-gray-800 pt-3">
+            <div class="flex items-center gap-2">
+              <button @click="runScript()" :disabled="running"
+                      class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-40 flex items-center gap-1">
+                <template x-if="running"><svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
+                <span x-text="running ? 'Execution...' : '▶ Executer'"></span>
+              </button>
+              <input type="text" x-model="runArgs" placeholder="Arguments (optionnel)"
+                     class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-indigo-500">
+            </div>
+
+            {{-- Output --}}
+            <template x-if="runResult !== null">
+              <div class="mt-2 rounded-lg overflow-hidden">
+                <div class="flex items-center justify-between px-3 py-1.5 text-xs"
+                     :class="runResult.success ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+                  <span x-text="runResult.success ? '✓ Exit code: ' + runResult.exit_code : '✗ Exit code: ' + runResult.exit_code"></span>
+                  <button @click="runResult = null" class="text-gray-500 hover:text-gray-300">✕</button>
+                </div>
+                <pre x-show="runResult.output" class="text-xs bg-gray-950 p-3 text-gray-300 overflow-x-auto mono leading-relaxed max-h-[300px] overflow-y-auto" x-text="runResult.output"></pre>
+                <pre x-show="runResult.error_output" class="text-xs bg-gray-950 p-3 text-red-400 overflow-x-auto mono leading-relaxed max-h-[150px] overflow-y-auto border-t border-gray-800" x-text="runResult.error_output"></pre>
+              </div>
+            </template>
+          </div>
         </div>
+        <script>
+        function scriptCard_{{ $script->id }}() {
+          return {
+            editing: false, saving: false, running: false,
+            aiLoading: false, aiInstruction: '', runArgs: '',
+            code: @js($script->code),
+            runResult: null,
+            async runScript() {
+              this.running = true; this.runResult = null;
+              try {
+                const res = await fetch('{{ route("partner.scripts.run", [$share->token, $script]) }}', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                  body: JSON.stringify({ args: this.runArgs, timeout: 30 }),
+                });
+                this.runResult = await res.json();
+              } catch(e) { this.runResult = { success: false, exit_code: -1, output: '', error_output: e.message }; }
+              this.running = false;
+            },
+            async saveCode() {
+              this.saving = true;
+              try {
+                await fetch('{{ route("partner.scripts.update", [$share->token, $script]) }}', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                  body: JSON.stringify({ name: @js($script->name), language: @js($script->language), code: this.code, is_active: {{ $script->is_active ? 'true' : 'false' }} }),
+                });
+                this.editing = false;
+              } catch(e) {}
+              this.saving = false;
+            },
+            async aiEdit() {
+              this.aiLoading = true;
+              try {
+                const res = await fetch('{{ route("partner.scripts.aiEdit", [$share->token, $script]) }}', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                  body: JSON.stringify({ instruction: this.aiInstruction }),
+                });
+                const data = await res.json();
+                if (data.code) { this.code = data.code; this.aiInstruction = ''; }
+              } catch(e) {}
+              this.aiLoading = false;
+            },
+          };
+        }
+        </script>
         @empty
         <div class="bg-gray-900 rounded-xl border border-gray-800 p-10 text-center text-gray-500">
           <p class="text-lg mb-1">💻</p>

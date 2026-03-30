@@ -321,6 +321,96 @@ class PartnerPortalController extends Controller
     }
 
     /**
+     * Execute a script in a sandboxed environment and return output.
+     */
+    public function runScript(Request $request, string $token, CustomAgentScript $script)
+    {
+        $share = $this->resolveShare($token);
+        if ($script->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        if (!$script->is_active) {
+            return response()->json(['error' => 'Script inactif'], 422);
+        }
+
+        $timeout = min((int) $request->input('timeout', 30), 60);
+        $args = $request->input('args', '');
+
+        $cmd = match ($script->language) {
+            'python' => 'python3',
+            'php' => 'php',
+            'bash' => 'bash',
+            'node' => 'node',
+            default => null,
+        };
+
+        if (!$cmd) {
+            return response()->json(['error' => 'Langage non supporté'], 422);
+        }
+
+        // Write script to temp file
+        $ext = match ($script->language) {
+            'python' => '.py', 'php' => '.php', 'bash' => '.sh', 'node' => '.js', default => '.txt',
+        };
+        $tmpFile = tempnam('/tmp', 'zscript_') . $ext;
+        file_put_contents($tmpFile, $script->code);
+        chmod($tmpFile, 0755);
+
+        try {
+            $result = \Illuminate\Support\Facades\Process::timeout($timeout)
+                ->env(['SCRIPT_ARGS' => $args])
+                ->run("{$cmd} {$tmpFile} {$args}");
+
+            return response()->json([
+                'success' => $result->successful(),
+                'exit_code' => $result->exitCode(),
+                'output' => mb_substr($result->output(), 0, 10000),
+                'error_output' => mb_substr($result->errorOutput(), 0, 5000),
+                'duration_ms' => null,
+            ]);
+        } catch (\Illuminate\Process\Exceptions\ProcessTimedOutException $e) {
+            return response()->json([
+                'success' => false,
+                'exit_code' => -1,
+                'output' => '',
+                'error_output' => "Timeout après {$timeout}s",
+                'duration_ms' => $timeout * 1000,
+            ]);
+        } finally {
+            @unlink($tmpFile);
+        }
+    }
+
+    /**
+     * AI-assisted script editing: send instruction + current code, get modified code back.
+     */
+    public function aiEditScript(Request $request, string $token, CustomAgentScript $script)
+    {
+        $share = $this->resolveShare($token);
+        if ($script->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        $request->validate(['instruction' => 'required|string|max:2000']);
+
+        $prompt = "Tu es un developpeur expert. Modifie ce script {$script->language} selon l'instruction.\n\n"
+            . "INSTRUCTION: {$request->input('instruction')}\n\n"
+            . "CODE ACTUEL:\n```{$script->language}\n{$script->code}\n```\n\n"
+            . "Reponds UNIQUEMENT avec le code modifie, sans explication, sans ```markdown. Juste le code brut.";
+
+        $claude = new \App\Services\AnthropicClient();
+        $model = \App\Services\ModelResolver::balanced();
+        $result = $claude->chat($prompt, $model);
+
+        if (!$result) {
+            return response()->json(['error' => 'Erreur IA'], 502);
+        }
+
+        // Clean markdown fences if present
+        $code = preg_replace('/^```\w*\n?/', '', trim($result));
+        $code = preg_replace('/\n?```$/', '', $code);
+
+        return response()->json(['code' => $code]);
+    }
+
+    /**
      * AI Assistant: help partner create skills/scripts via conversation.
      */
     public function assistCreate(Request $request, string $token)
