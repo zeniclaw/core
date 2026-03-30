@@ -401,6 +401,25 @@ preflight_checks() {
     offer_install "openssl" "openssl" "true"
     offer_install "git"     "git"     "true"
 
+    # Check Git identity
+    info "Checking Git identity..."
+    if git config --global user.name &>/dev/null && git config --global user.email &>/dev/null; then
+        success "Git identity: $(git config --global user.name) <$(git config --global user.email)>"
+    else
+        warn "Git user identity not configured."
+        local current_user
+        current_user="$(whoami)"
+        echo -ne "${PURPLE}🔹 Git user name ${DIM}[$current_user]${NC}: "
+        read -r git_name
+        git_name="${git_name:-$current_user}"
+        echo -ne "${PURPLE}🔹 Git email ${DIM}[${current_user}@$(hostname)]${NC}: "
+        read -r git_email
+        git_email="${git_email:-${current_user}@$(hostname)}"
+        git config --global user.name "$git_name"
+        git config --global user.email "$git_email"
+        success "Git identity set: $git_name <$git_email>"
+    fi
+
     # Check Node.js (needed for Claude Code CLI inside container and on host)
     info "Checking Node.js..."
     if check_command node; then
@@ -429,22 +448,25 @@ preflight_checks() {
     info "Checking Claude Code CLI..."
     if check_command claude; then
         success "Claude Code CLI found ($(claude --version 2>/dev/null | head -1))"
-    elif check_command node; then
-        echo -ne "${PURPLE}🔹 Install Claude Code CLI globally? ${DIM}[Y/n]${NC}: "
+    else
+        echo -ne "${PURPLE}🔹 Install Claude Code CLI? ${DIM}[Y/n]${NC}: "
         read -r answer
         if [[ "${answer,,}" != "n" ]]; then
-            info "Installing @anthropic-ai/claude-code..."
-            sudo -E npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
+            info "Installing Claude Code via curl..."
+            curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
+            # Ensure ~/.local/bin is in PATH
+            if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                export PATH="$HOME/.local/bin:$PATH"
+                echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            fi
             if check_command claude; then
                 success "Claude Code CLI installed"
             else
-                warn "Claude Code CLI installation failed. You can install it later: sudo npm i -g @anthropic-ai/claude-code"
+                warn "Claude Code CLI installation failed. You can install it later: curl -fsSL https://claude.ai/install.sh | bash"
             fi
         else
-            warn "Skipping Claude Code CLI (optional, install later with: sudo npm i -g @anthropic-ai/claude-code)"
+            warn "Skipping Claude Code CLI (optional, install later with: curl -fsSL https://claude.ai/install.sh | bash)"
         fi
-    else
-        warn "Skipping Claude Code CLI (Node.js not available)"
     fi
 
     # Check container runtime (Podman or Docker)
@@ -961,11 +983,19 @@ ask_proxy_early() {
 # --- Clone or Update Repository ----------------------------------------------
 
 REPO_URL="https://github.com/zeniclaw/core.git"
-INSTALL_DIR="${ZENICLAW_DIR:-/opt/zeniclaw}"
+DEFAULT_INSTALL_DIR="$HOME/zeniclaw"
+INSTALL_DIR="${ZENICLAW_DIR:-}"
 BRANCH="${ZENICLAW_BRANCH:-main}"
 
 clone_or_update_repo() {
     step "0/6 — Downloading ZeniClaw"
+
+    # Ask for install directory if not set via env
+    if [[ -z "$INSTALL_DIR" ]]; then
+        echo -ne "${PURPLE}🔹 Installation directory ${DIM}[$DEFAULT_INSTALL_DIR]${NC}: "
+        read -r custom_dir
+        INSTALL_DIR="${custom_dir:-$DEFAULT_INSTALL_DIR}"
+    fi
 
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         info "Repository already exists at $INSTALL_DIR, pulling latest..."
@@ -974,9 +1004,8 @@ clone_or_update_repo() {
         success "Repository updated"
     else
         info "Cloning $REPO_URL into $INSTALL_DIR..."
-        sudo -E mkdir -p "$(dirname "$INSTALL_DIR")"
-        sudo -E git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
-        sudo chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"
+        mkdir -p "$(dirname "$INSTALL_DIR")"
+        git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
         success "Repository cloned"
     fi
 

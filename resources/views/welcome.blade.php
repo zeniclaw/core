@@ -919,7 +919,7 @@ graph LR
           <h3 x-show="lang==='en'">Clone the repository</h3>
           <p x-show="lang==='fr'">Recuperez le code source et lancez l'installateur interactif.</p>
           <p x-show="lang==='en'">Fetch the source code and run the interactive installer.</p>
-          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>sudo git clone https://github.com/zeniclaw/core.git /opt/zeniclaw<br>cd /opt/zeniclaw</div>
+          <div class="code-block"><button class="code-block-copy" onclick="copyCode(this)">Copy</button>git clone https://github.com/zeniclaw/core.git ~/zeniclaw<br>cd ~/zeniclaw</div>
         </div>
       </div>
       <div class="install-step">
