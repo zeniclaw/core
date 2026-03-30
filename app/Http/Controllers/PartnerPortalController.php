@@ -357,6 +357,14 @@ class PartnerPortalController extends Controller
         file_put_contents($tmpFile, $script->code);
         chmod($tmpFile, 0755);
 
+        // Detect if script needs host network (nmap, netifaces, socket scanning)
+        $needsHostNetwork = (bool) preg_match('/\b(nmap|netifaces|scapy|socket\.connect|ping)\b/', $script->code);
+
+        if ($needsHostNetwork) {
+            // Run in a temporary container with host network for full network access
+            return $this->runScriptInHostNetwork($script, $tmpDir, $tmpFile, $cmd, $args, $timeout);
+        }
+
         // Auto-install dependencies before execution
         $this->installDependencies($script->language, $script->code, $tmpDir);
 
@@ -388,6 +396,71 @@ class PartnerPortalController extends Controller
             ]);
         } finally {
             // Clean up temp directory
+            \Illuminate\Support\Facades\Process::run("rm -rf {$tmpDir}");
+        }
+    }
+
+    /**
+     * Run script in a temporary container with host network access.
+     */
+    private function runScriptInHostNetwork($script, string $tmpDir, string $tmpFile, string $cmd, string $args, int $timeout)
+    {
+        // Detect container runtime
+        $runtime = 'podman';
+        if (!\Illuminate\Support\Facades\Process::run('which podman')->successful()) {
+            $runtime = 'docker';
+        }
+
+        // Build a requirements.txt from imports
+        $reqFile = $tmpDir . '/requirements.txt';
+        preg_match_all('/^\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/m', $script->code, $matches);
+        $imports = array_unique($matches[1] ?? []);
+        $stdlib = ['os', 'sys', 'json', 'csv', 'datetime', 'time', 'math', 'random', 're',
+            'pathlib', 'collections', 'itertools', 'functools', 'io', 'string', 'typing',
+            'subprocess', 'shutil', 'glob', 'tempfile', 'hashlib', 'base64', 'urllib',
+            'http', 'socket', 'ssl', 'concurrent', 'threading', 'argparse', 'struct',
+        ];
+        $nameMap = ['cv2' => 'opencv-python', 'PIL' => 'Pillow', 'sklearn' => 'scikit-learn',
+            'bs4' => 'beautifulsoup4', 'yaml' => 'pyyaml', 'nmap' => 'python-nmap',
+            'dotenv' => 'python-dotenv', 'dateutil' => 'python-dateutil',
+        ];
+        $packages = array_map(fn($p) => $nameMap[$p] ?? $p, array_diff($imports, $stdlib));
+        file_put_contents($reqFile, implode("\n", $packages));
+
+        // Build the docker/podman run command
+        $image = 'python:3-slim';
+        $installCmd = count($packages) > 0
+            ? 'pip install --no-cache-dir -r /work/requirements.txt && apt-get update -qq && apt-get install -y -qq nmap > /dev/null 2>&1; '
+            : 'apt-get update -qq && apt-get install -y -qq nmap > /dev/null 2>&1; ';
+
+        $containerCmd = sprintf(
+            '%s run --rm --network=host -v %s:/work:ro %s bash -c %s',
+            $runtime,
+            escapeshellarg($tmpDir),
+            escapeshellarg($image),
+            escapeshellarg("cd /work && {$installCmd}python3 /work/script.py {$args}")
+        );
+
+        try {
+            $result = \Illuminate\Support\Facades\Process::timeout($timeout + 60) // extra time for pip install
+                ->run($containerCmd);
+
+            return response()->json([
+                'success' => $result->successful(),
+                'exit_code' => $result->exitCode(),
+                'output' => mb_substr($result->output(), 0, 10000),
+                'error_output' => mb_substr($result->errorOutput(), 0, 5000),
+                'duration_ms' => null,
+            ]);
+        } catch (\Illuminate\Process\Exceptions\ProcessTimedOutException $e) {
+            return response()->json([
+                'success' => false,
+                'exit_code' => -1,
+                'output' => '',
+                'error_output' => "Timeout après {$timeout}s",
+                'duration_ms' => $timeout * 1000,
+            ]);
+        } finally {
             \Illuminate\Support\Facades\Process::run("rm -rf {$tmpDir}");
         }
     }
