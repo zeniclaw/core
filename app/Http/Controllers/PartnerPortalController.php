@@ -351,13 +351,19 @@ class PartnerPortalController extends Controller
         $ext = match ($script->language) {
             'python' => '.py', 'php' => '.php', 'bash' => '.sh', 'node' => '.js', default => '.txt',
         };
-        $tmpFile = tempnam('/tmp', 'zscript_') . $ext;
+        $tmpDir = '/tmp/zscript_' . uniqid();
+        @mkdir($tmpDir, 0755, true);
+        $tmpFile = $tmpDir . '/script' . $ext;
         file_put_contents($tmpFile, $script->code);
         chmod($tmpFile, 0755);
 
+        // Auto-install dependencies before execution
+        $this->installDependencies($script->language, $script->code, $tmpDir);
+
         try {
             $result = \Illuminate\Support\Facades\Process::timeout($timeout)
-                ->env(['SCRIPT_ARGS' => $args])
+                ->path($tmpDir)
+                ->env(['SCRIPT_ARGS' => $args, 'PYTHONPATH' => $tmpDir . '/venv/lib/python3/site-packages:' . ($tmpDir . '/venv/lib/python3.11/site-packages'), 'NODE_PATH' => $tmpDir . '/node_modules'])
                 ->run("{$cmd} {$tmpFile} {$args}");
 
             return response()->json([
@@ -376,8 +382,87 @@ class PartnerPortalController extends Controller
                 'duration_ms' => $timeout * 1000,
             ]);
         } finally {
-            @unlink($tmpFile);
+            // Clean up temp directory
+            \Illuminate\Support\Facades\Process::run("rm -rf {$tmpDir}");
         }
+    }
+
+    /**
+     * Detect and install dependencies for a script.
+     */
+    private function installDependencies(string $language, string $code, string $tmpDir): void
+    {
+        try {
+            match ($language) {
+                'python' => $this->installPythonDeps($code, $tmpDir),
+                'node' => $this->installNodeDeps($code, $tmpDir),
+                'php' => null, // PHP extensions are pre-installed
+                'bash' => null, // System packages need manual install
+                default => null,
+            };
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('installDependencies failed: ' . $e->getMessage());
+        }
+    }
+
+    private function installPythonDeps(string $code, string $tmpDir): void
+    {
+        // Extract imports from code
+        preg_match_all('/^\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/m', $code, $matches);
+        $imports = array_unique($matches[1] ?? []);
+
+        // Standard library modules to skip
+        $stdlib = ['os', 'sys', 'json', 'csv', 'datetime', 'time', 'math', 'random', 're',
+            'pathlib', 'collections', 'itertools', 'functools', 'io', 'string', 'typing',
+            'subprocess', 'shutil', 'glob', 'tempfile', 'hashlib', 'base64', 'urllib',
+            'http', 'socket', 'ssl', 'email', 'html', 'xml', 'logging', 'unittest',
+            'argparse', 'configparser', 'sqlite3', 'copy', 'pprint', 'textwrap',
+            'struct', 'enum', 'abc', 'contextlib', 'threading', 'multiprocessing',
+            'asyncio', 'concurrent', 'queue', 'signal', 'traceback', 'inspect',
+            'importlib', 'pkgutil', 'zipfile', 'gzip', 'bz2', 'lzma', 'tarfile',
+            'uuid', 'secrets', 'hmac', 'decimal', 'fractions', 'statistics',
+            'operator', 'dataclasses', 'heapq', 'bisect', 'array', 'weakref',
+            'types', 'warnings', 'platform', 'ctypes', 'codecs', 'locale',
+            'gettext', 'unicodedata', 'pdb', 'profile', 'timeit', 'dis',
+        ];
+
+        $toInstall = array_diff($imports, $stdlib);
+        if (empty($toInstall)) return;
+
+        // Map common import names to pip package names
+        $nameMap = [
+            'cv2' => 'opencv-python', 'PIL' => 'Pillow', 'sklearn' => 'scikit-learn',
+            'bs4' => 'beautifulsoup4', 'yaml' => 'pyyaml', 'dotenv' => 'python-dotenv',
+            'gi' => 'PyGObject', 'attr' => 'attrs', 'dateutil' => 'python-dateutil',
+        ];
+
+        $packages = array_map(fn($p) => $nameMap[$p] ?? $p, $toInstall);
+
+        // Install to temp directory using pip
+        $pkgList = implode(' ', array_map('escapeshellarg', $packages));
+        \Illuminate\Support\Facades\Process::timeout(60)
+            ->run("python3 -m pip install --target={$tmpDir}/venv/lib/python3/site-packages {$pkgList} 2>&1 || pip3 install --target={$tmpDir}/venv/lib/python3/site-packages {$pkgList} 2>&1");
+    }
+
+    private function installNodeDeps(string $code, string $tmpDir): void
+    {
+        // Extract require/import statements
+        preg_match_all('/(?:require\s*\(\s*[\'"]([^\.\/][^\'"]+)[\'"]\s*\)|from\s+[\'"]([^\.\/][^\'"]+)[\'"])/m', $code, $matches);
+        $packages = array_unique(array_filter(array_merge($matches[1] ?? [], $matches[2] ?? [])));
+
+        // Built-in Node modules to skip
+        $builtins = ['fs', 'path', 'os', 'http', 'https', 'url', 'querystring', 'crypto',
+            'stream', 'util', 'events', 'child_process', 'cluster', 'net', 'dns',
+            'readline', 'zlib', 'buffer', 'assert', 'tls', 'dgram',
+        ];
+
+        $toInstall = array_diff($packages, $builtins);
+        if (empty($toInstall)) return;
+
+        $pkgList = implode(' ', array_map('escapeshellarg', $toInstall));
+        \Illuminate\Support\Facades\Process::timeout(60)
+            ->path($tmpDir)
+            ->run("npm install --no-save {$pkgList} 2>&1");
     }
 
     /**
