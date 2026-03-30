@@ -142,6 +142,9 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/agents/{agent}/custom-agents/{customAgent}/credentials', [CustomAgentController::class, 'storeCredential'])->name('custom-agents.credentials.store');
     Route::delete('/agents/{agent}/custom-agents/{customAgent}/credentials/{credential}', [CustomAgentController::class, 'destroyCredential'])->name('custom-agents.credentials.destroy');
     Route::delete('/agents/{agent}/custom-agents/{customAgent}/shares/{share}', [CustomAgentController::class, 'revokeShare'])->name('custom-agents.shares.revoke');
+    Route::post('/agents/{agent}/custom-agents/{customAgent}/export', [CustomAgentController::class, 'export'])->name('custom-agents.export');
+    Route::post('/agents/{agent}/custom-agents/import/preview', [CustomAgentController::class, 'importPreview'])->name('custom-agents.import.preview');
+    Route::post('/agents/{agent}/custom-agents/import', [CustomAgentController::class, 'import'])->name('custom-agents.import');
 
     // Reminders
     Route::get('/reminders', [ReminderController::class, 'index'])->name('reminders.index');

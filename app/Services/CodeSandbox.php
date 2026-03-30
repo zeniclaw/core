@@ -81,14 +81,18 @@ class CodeSandbox
 
             file_put_contents($codeFile, $code);
 
-            // Run in Docker container with safety guards
+            // Detect container runtime
+            $runtime = self::detectRuntime();
+
+            // Run in container with safety guards
             $dockerCmd = sprintf(
-                'docker run --rm --network=none --memory=%s --cpus=1 ' .
+                '%s run --rm --network=none --memory=%s --cpus=1 ' .
                 '--read-only --tmpfs /tmp:rw,noexec,nosuid ' .
                 '-v %s:/code:ro ' .
                 '-w /code ' .
                 '%s ' .
                 'timeout %d %s /code/code.%s 2>&1',
+                $runtime,
                 self::MEMORY_LIMIT,
                 escapeshellarg($tmpDir),
                 escapeshellarg($config['image']),
@@ -162,15 +166,32 @@ class CodeSandbox
     }
 
     /**
-     * Check if Docker is available for sandbox execution.
+     * Check if a container runtime is available for sandbox execution.
      */
     public static function isAvailable(): bool
     {
         try {
-            $result = Process::timeout(5)->run('docker info 2>/dev/null');
+            $runtime = self::detectRuntime();
+            $result = Process::timeout(5)->run("{$runtime} info 2>/dev/null");
             return $result->exitCode() === 0;
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Detect available container runtime (podman preferred over docker).
+     */
+    private static function detectRuntime(): string
+    {
+        try {
+            if (Process::timeout(3)->run('which podman')->successful()) {
+                return 'podman';
+            }
+        } catch (\Exception $e) {
+            // fall through
+        }
+
+        return 'docker';
     }
 }

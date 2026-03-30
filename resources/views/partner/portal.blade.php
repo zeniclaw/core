@@ -420,6 +420,12 @@
                 <pre x-show="runResult.error_output"
                      class="text-xs bg-gray-950 p-3 text-red-400 overflow-x-auto mono leading-relaxed max-h-[150px] overflow-y-auto border-t border-gray-800"
                      x-text="runResult.error_output"></pre>
+                <div x-show="runResult.ai_analysis" class="border-t border-gray-800 bg-indigo-950/40 p-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-indigo-400 text-xs font-semibold uppercase tracking-wider">Analyse IA</span>
+                  </div>
+                  <div class="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap" x-text="runResult.ai_analysis"></div>
+                </div>
               </div>
             </template>
           </div>
@@ -433,7 +439,7 @@
             runResult: null,
             async runScript() {
               this.running = true;
-              this.runResult = { success: null, exit_code: null, output: '', error_output: '' };
+              this.runResult = { success: null, exit_code: null, output: '', error_output: '', ai_analysis: '' };
               try {
                 const res = await fetch('{{ route("partner.scripts.runStream", [$share->token, $script]) }}', {
                   method: 'POST',
@@ -458,6 +464,7 @@
                         else if (this._sseEvent === 'stderr') this.runResult.error_output += data.text;
                         else if (this._sseEvent === 'status') this.runResult.output += '⏳ ' + data.message + '\n';
                         else if (this._sseEvent === 'error') this.runResult.error_output += '❌ ' + data.message + '\n';
+                        else if (this._sseEvent === 'analysis') this.runResult.ai_analysis = data.text;
                         else if (this._sseEvent === 'done') {
                           this.runResult.exit_code = data.exit_code;
                           this.runResult.success = data.exit_code === 0;

@@ -8,6 +8,7 @@ use App\Models\CustomAgentShare;
 use App\Models\CustomAgentSkill;
 use App\Models\CustomAgentScript;
 use App\Services\AgentContext;
+use App\Services\AnthropicClient;
 use App\Services\CustomAgentRunner;
 use App\Services\KnowledgeChunker;
 use Illuminate\Http\Request;
@@ -384,12 +385,16 @@ class PartnerPortalController extends Controller
                 ->env(['SCRIPT_ARGS' => $args, 'NODE_PATH' => $tmpDir . '/node_modules'])
                 ->run("{$cmd} {$tmpFile} {$args}");
 
+            $output = mb_substr($result->output(), 0, 10000);
+            $analysis = $result->successful() ? $this->analyzeScriptOutput($output, $script) : null;
+
             return response()->json([
                 'success' => $result->successful(),
                 'exit_code' => $result->exitCode(),
-                'output' => mb_substr($result->output(), 0, 10000),
+                'output' => $output,
                 'error_output' => mb_substr($result->errorOutput(), 0, 5000),
                 'duration_ms' => null,
+                'ai_analysis' => $analysis,
             ]);
         } catch (\Illuminate\Process\Exceptions\ProcessTimedOutException $e) {
             return response()->json([
@@ -462,17 +467,20 @@ class PartnerPortalController extends Controller
 
                 $storageBase = storage_path();
                 $relativePath = str_replace($storageBase, '', $storageTmpDir);
-                $volumeSource = trim(shell_exec("docker inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'") ?? '');
+                $runtime = \Illuminate\Support\Facades\Process::run('which podman')->successful() ? 'podman' : 'docker';
+                $inspectCmd = "{$runtime} inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'";
+                $volumeSource = trim(shell_exec($inspectCmd) ?? '');
                 $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $storageTmpDir;
 
                 $image = 'python:3-slim';
                 $sendSSE('status', ['message' => 'Installation des dependances systeme (nmap, gcc)...']);
 
-                $installCmd = 'echo ">>> Installation systeme..." && apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1 && echo ">>> OK"; '
+                $installCmd = 'echo ">>> Installation systeme..." && apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev iproute2 iputils-ping net-tools > /dev/null 2>&1 && echo ">>> OK"; '
                     . (count($packages) > 0 ? 'echo ">>> Installation packages Python: ' . implode(', ', $packages) . '..." && pip install --no-cache-dir -q -r /work/requirements.txt && echo ">>> Dependances OK"; ' : '');
 
                 $fullCmd = sprintf(
-                    'docker run --rm --network=host --privileged -v %s:/work %s bash -c %s',
+                    '%s run --rm --network=host --privileged --cap-add=NET_RAW --cap-add=NET_ADMIN -v %s:/work %s bash -c %s',
+                    $runtime,
                     escapeshellarg($hostDir),
                     escapeshellarg($image),
                     escapeshellarg("cd /work && {$installCmd}echo '>>> Lancement du script...' && python3 -u /work/script{$ext} {$args}")
@@ -511,6 +519,7 @@ class PartnerPortalController extends Controller
             stream_set_blocking($pipes[1], false);
             stream_set_blocking($pipes[2], false);
 
+            $outputBuffer = '';
             $startTime = time();
             while (true) {
                 $stdout = fgets($pipes[1]);
@@ -518,6 +527,7 @@ class PartnerPortalController extends Controller
 
                 if ($stdout !== false && $stdout !== '') {
                     $sendSSE('stdout', ['text' => $stdout]);
+                    $outputBuffer .= $stdout;
                 }
                 if ($stderr !== false && $stderr !== '') {
                     $sendSSE('stderr', ['text' => $stderr]);
@@ -526,7 +536,7 @@ class PartnerPortalController extends Controller
                 $status = proc_get_status($process);
                 if (!$status['running']) {
                     // Drain remaining output
-                    while (($line = fgets($pipes[1])) !== false) $sendSSE('stdout', ['text' => $line]);
+                    while (($line = fgets($pipes[1])) !== false) { $sendSSE('stdout', ['text' => $line]); $outputBuffer .= $line; }
                     while (($line = fgets($pipes[2])) !== false) $sendSSE('stderr', ['text' => $line]);
                     break;
                 }
@@ -545,6 +555,15 @@ class PartnerPortalController extends Controller
             $exitCode = proc_close($process);
 
             $sendSSE('done', ['exit_code' => $exitCode]);
+
+            // AI analysis of successful output
+            if ($exitCode === 0 && mb_strlen(trim($outputBuffer)) >= 20) {
+                $sendSSE('status', ['message' => 'Analyse IA en cours...']);
+                $analysis = $this->analyzeScriptOutput(mb_substr($outputBuffer, 0, 10000), $script);
+                if ($analysis) {
+                    $sendSSE('analysis', ['text' => $analysis]);
+                }
+            }
 
             // Cleanup
             if (!empty($cleanupDir)) {
@@ -587,18 +606,19 @@ class PartnerPortalController extends Controller
 
         // Build the docker/podman run command
         $image = 'python:3-slim';
-        $installCmd = 'apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1; '
+        $installCmd = 'apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev iproute2 iputils-ping net-tools > /dev/null 2>&1; '
             . (count($packages) > 0 ? 'pip install --no-cache-dir -r /work/requirements.txt; ' : '');
 
         // Resolve host path: storage volume is mounted from host
         // Container path: /var/www/html/storage/... -> Host: volume source + relative path
         $storageBase = storage_path();
         $relativePath = str_replace($storageBase, '', $tmpDir);
-        $volumeSource = trim(shell_exec("docker inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'") ?? '');
+        $inspectCmd = "{$runtime} inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'";
+        $volumeSource = trim(shell_exec($inspectCmd) ?? '');
         $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $tmpDir;
 
         $containerCmd = sprintf(
-            '%s run --rm --network=host --privileged -v %s:/work %s bash -c %s',
+            '%s run --rm --network=host --privileged --cap-add=NET_RAW --cap-add=NET_ADMIN -v %s:/work %s bash -c %s',
             $runtime,
             escapeshellarg($hostDir),
             escapeshellarg($image),
@@ -609,12 +629,16 @@ class PartnerPortalController extends Controller
             $result = \Illuminate\Support\Facades\Process::timeout($timeout + 60) // extra time for pip install
                 ->run($containerCmd);
 
+            $output = mb_substr($result->output(), 0, 10000);
+            $analysis = $result->successful() ? $this->analyzeScriptOutput($output, $script) : null;
+
             return response()->json([
                 'success' => $result->successful(),
                 'exit_code' => $result->exitCode(),
-                'output' => mb_substr($result->output(), 0, 10000),
+                'output' => $output,
                 'error_output' => mb_substr($result->errorOutput(), 0, 5000),
                 'duration_ms' => null,
+                'ai_analysis' => $analysis,
             ]);
         } catch (\Illuminate\Process\Exceptions\ProcessTimedOutException $e) {
             return response()->json([
@@ -626,6 +650,36 @@ class PartnerPortalController extends Controller
             ]);
         } finally {
             \Illuminate\Support\Facades\Process::run("rm -rf {$tmpDir}");
+        }
+    }
+
+    /**
+     * Analyze script output with AI and return a summary.
+     */
+    private function analyzeScriptOutput(string $output, CustomAgentScript $script): ?string
+    {
+        if (mb_strlen(trim($output)) < 20) {
+            return null;
+        }
+
+        try {
+            $claude = new AnthropicClient();
+            $prompt = "Tu es un expert en analyse de resultats de scripts. "
+                . "Voici la sortie du script \"{$script->name}\" ({$script->language}):\n\n"
+                . "```\n{$output}\n```\n\n"
+                . "Fais un compte rendu concis et utile en francais:\n"
+                . "- Resume les resultats cles\n"
+                . "- Signale tout ce qui est notable, anormal ou merite attention\n"
+                . "- Donne des recommandations si pertinent\n"
+                . "- Utilise des emojis pour la lisibilite\n"
+                . "Reponds directement, sans introduction.";
+
+            $response = $claude->chat($prompt, model: 'claude-sonnet-4-20250514');
+
+            return $response ?: null;
+        } catch (\Throwable $e) {
+            Log::warning('AI analysis failed: ' . $e->getMessage());
+            return null;
         }
     }
 

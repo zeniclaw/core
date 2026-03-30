@@ -10,6 +10,7 @@ use App\Models\CustomAgentDocument;
 use App\Services\AgentContext;
 use App\Services\CustomAgentRunner;
 use App\Services\KnowledgeChunker;
+use App\Services\ZclPackageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -425,6 +426,75 @@ class CustomAgentController extends Controller
 
         $credential->delete();
         return back()->with('success', 'Credential supprime.');
+    }
+
+    /**
+     * Export custom agent as encrypted .zcl package.
+     */
+    public function export(Request $request, Agent $agent, CustomAgent $customAgent)
+    {
+        $this->authorizeAgent($agent);
+        $this->ensureOwnership($agent, $customAgent);
+
+        $request->validate(['password' => 'required|string|min:6']);
+
+        $service = new ZclPackageService();
+        $binary = $service->export($customAgent, $request->password);
+
+        $filename = str($customAgent->name)->slug() . '.zcl';
+
+        return response($binary)
+            ->header('Content-Type', 'application/octet-stream')
+            ->header('Content-Disposition', "attachment; filename=\"{$filename}\"");
+    }
+
+    /**
+     * Preview a .zcl package before importing.
+     */
+    public function importPreview(Request $request, Agent $agent)
+    {
+        $this->authorizeAgent($agent);
+
+        $request->validate([
+            'file' => 'required|file|max:51200',
+            'password' => 'required|string|min:6',
+        ]);
+
+        $binary = file_get_contents($request->file('file')->getRealPath());
+
+        try {
+            $service = new ZclPackageService();
+            $preview = $service->preview($binary, $request->password);
+            return response()->json(['success' => true, 'preview' => $preview]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Import a .zcl package into a new custom agent.
+     */
+    public function import(Request $request, Agent $agent)
+    {
+        $this->authorizeAgent($agent);
+
+        $request->validate([
+            'file' => 'required|file|max:51200',
+            'password' => 'required|string|min:6',
+        ]);
+
+        $binary = file_get_contents($request->file('file')->getRealPath());
+
+        try {
+            $service = new ZclPackageService();
+            $customAgent = $service->import($binary, $request->password, $agent);
+
+            return redirect()
+                ->route('custom-agents.show', [$agent, $customAgent])
+                ->with('success', "Agent \"{$customAgent->name}\" importe avec succes. Les documents sont en cours de traitement.");
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
     }
 
     /**

@@ -400,6 +400,83 @@
                     <button type="submit" class="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">Sauvegarder</button>
                 </div>
             </form>
+
+            {{-- Import / Export .zcl --}}
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mt-4" x-data="zclManager()">
+                <h3 class="text-sm font-semibold text-gray-900 mb-4">Import / Export (.zcl)</h3>
+
+                <div class="grid md:grid-cols-2 gap-4">
+                    {{-- Export --}}
+                    <div class="border border-gray-200 rounded-lg p-4 space-y-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">📦</span>
+                            <span class="text-sm font-medium text-gray-700">Exporter cet agent</span>
+                        </div>
+                        <p class="text-xs text-gray-500">Telecharger un package chiffre contenant la config, les documents, skills, scripts et memories.</p>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Mot de passe de protection</label>
+                            <input type="password" x-model="exportPassword" placeholder="Min. 6 caracteres"
+                                   class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <button @click="doExport()" :disabled="exportPassword.length < 6 || exporting"
+                                class="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                            <span x-show="!exporting">Exporter .zcl</span>
+                            <span x-show="exporting">Export en cours...</span>
+                        </button>
+                    </div>
+
+                    {{-- Import --}}
+                    <div class="border border-gray-200 rounded-lg p-4 space-y-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">📥</span>
+                            <span class="text-sm font-medium text-gray-700">Importer un agent</span>
+                        </div>
+                        <p class="text-xs text-gray-500">Importer un package .zcl depuis un autre serveur. L'agent sera cree en mode inactif.</p>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Fichier .zcl</label>
+                            <input type="file" accept=".zcl" x-ref="zclFile" @change="importFile = $event.target.files[0]"
+                                   class="w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Mot de passe</label>
+                            <input type="password" x-model="importPassword" placeholder="Mot de passe du package"
+                                   class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+
+                        {{-- Preview result --}}
+                        <template x-if="preview">
+                            <div class="bg-gray-50 rounded-lg p-3 space-y-1 text-xs">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xl" x-text="preview.avatar"></span>
+                                    <span class="font-semibold text-gray-900" x-text="preview.name"></span>
+                                </div>
+                                <p class="text-gray-500" x-text="preview.description || 'Pas de description'"></p>
+                                <div class="flex gap-3 text-gray-400 pt-1">
+                                    <span x-text="preview.documents_count + ' docs'"></span>
+                                    <span x-text="preview.skills_count + ' skills'"></span>
+                                    <span x-text="preview.scripts_count + ' scripts'"></span>
+                                    <span x-text="preview.memories_count + ' memories'"></span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="flex gap-2">
+                            <button @click="doPreview()" :disabled="!importFile || importPassword.length < 6 || previewing"
+                                    class="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                <span x-show="!previewing">Apercu</span>
+                                <span x-show="previewing">Verification...</span>
+                            </button>
+                            <button @click="doImport()" :disabled="!preview || importing"
+                                    class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                <span x-show="!importing">Importer</span>
+                                <span x-show="importing">Import en cours...</span>
+                            </button>
+                        </div>
+
+                        <p x-show="importError" x-text="importError" class="text-xs text-red-600 mt-1"></p>
+                    </div>
+                </div>
+            </div>
         </div>
 
     </div>
@@ -470,6 +547,109 @@ function customAgentPage() {
             this.$nextTick(() => {
                 this.$refs.chatMessages.scrollTop = this.$refs.chatMessages.scrollHeight;
             });
+        }
+    };
+}
+
+function zclManager() {
+    return {
+        exportPassword: '',
+        exporting: false,
+        importPassword: '',
+        importFile: null,
+        preview: null,
+        previewing: false,
+        importing: false,
+        importError: '',
+
+        async doExport() {
+            this.exporting = true;
+            try {
+                const form = new FormData();
+                form.append('password', this.exportPassword);
+                const res = await fetch('{{ route("custom-agents.export", [$agent, $customAgent]) }}', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                    body: form,
+                });
+                if (!res.ok) throw new Error('Export failed');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'agent.zcl';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                this.exportPassword = '';
+            } catch (e) {
+                alert('Erreur lors de l\'export: ' + e.message);
+            }
+            this.exporting = false;
+        },
+
+        async doPreview() {
+            this.previewing = true;
+            this.importError = '';
+            this.preview = null;
+            try {
+                const form = new FormData();
+                form.append('file', this.importFile);
+                form.append('password', this.importPassword);
+                const res = await fetch('{{ route("custom-agents.import.preview", [$agent]) }}', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                    body: form,
+                });
+                const data = await res.json();
+                if (data.success) {
+                    this.preview = data.preview;
+                } else {
+                    this.importError = data.error || 'Fichier invalide.';
+                }
+            } catch (e) {
+                this.importError = 'Erreur: ' + e.message;
+            }
+            this.previewing = false;
+        },
+
+        doImport() {
+            if (!this.preview || !this.importFile) return;
+            this.importing = true;
+            this.importError = '';
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{{ route("custom-agents.import", [$agent]) }}';
+            form.enctype = 'multipart/form-data';
+            form.style.display = 'none';
+
+            const csrf = document.createElement('input');
+            csrf.type = 'hidden';
+            csrf.name = '_token';
+            csrf.value = '{{ csrf_token() }}';
+            form.appendChild(csrf);
+
+            const pw = document.createElement('input');
+            pw.type = 'hidden';
+            pw.name = 'password';
+            pw.value = this.importPassword;
+            form.appendChild(pw);
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.name = 'file';
+            fileInput.style.display = 'none';
+
+            // Transfer the file via DataTransfer
+            const dt = new DataTransfer();
+            dt.items.add(this.importFile);
+            fileInput.files = dt.files;
+            form.appendChild(fileInput);
+
+            document.body.appendChild(form);
+            form.submit();
         }
     };
 }

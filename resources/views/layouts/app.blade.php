@@ -155,7 +155,7 @@
         @endif
 
         {{-- Page content --}}
-        <main class="flex-1 overflow-y-auto p-4 pb-20 lg:pb-6">
+        <main class="flex-1 overflow-y-auto p-4 pb-24 lg:pb-20">
             @yield('content')
         </main>
 
