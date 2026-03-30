@@ -313,6 +313,16 @@ class ZenibizDocsAgent extends BaseAgent
         $subcatName = $classification['subcategory_name'] ?? null;
         $tags = $classification['tags'] ?? ['scan', 'whatsapp'];
 
+        // Validate category_id exists in fetched categories, fallback to first
+        $validCatIds = array_column($categories, 'id');
+        if (!in_array($categoryId, $validCatIds) && !empty($categories)) {
+            Log::info('ZenibizDocsAgent: invalid category_id ' . $categoryId . ', falling back to first');
+            $categoryId = $categories[0]['id'];
+            $catName = $categories[0]['name'];
+            $subcategoryId = null;
+            $subcatName = null;
+        }
+
         $location = $catName;
         if ($subcatName) $location .= " > {$subcatName}";
 
