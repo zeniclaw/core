@@ -429,14 +429,24 @@
             runResult: null,
             async runScript() {
               this.running = true; this.runResult = null;
+              const timeoutMs = (parseInt(this.runTimeout) + 120) * 1000; // script timeout + 2min margin
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), timeoutMs);
               try {
                 const res = await fetch('{{ route("partner.scripts.run", [$share->token, $script]) }}', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
                   body: JSON.stringify({ args: this.runArgs, timeout: parseInt(this.runTimeout) }),
+                  signal: controller.signal,
                 });
-                this.runResult = await res.json();
-              } catch(e) { this.runResult = { success: false, exit_code: -1, output: '', error_output: e.message }; }
+                clearTimeout(timer);
+                const text = await res.text();
+                try { this.runResult = JSON.parse(text); }
+                catch(e) { this.runResult = { success: false, exit_code: -1, output: '', error_output: 'Reponse serveur invalide (timeout nginx?). Augmentez le timeout ou simplifiez le scan.' }; }
+              } catch(e) {
+                clearTimeout(timer);
+                this.runResult = { success: false, exit_code: -1, output: '', error_output: e.name === 'AbortError' ? 'Timeout client (' + this.runTimeout + 's + marge)' : e.message };
+              }
               this.running = false;
             },
             async saveCode() {
