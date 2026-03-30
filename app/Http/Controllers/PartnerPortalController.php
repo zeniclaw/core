@@ -332,7 +332,7 @@ class PartnerPortalController extends Controller
             return response()->json(['error' => 'Script inactif'], 422);
         }
 
-        $timeout = min((int) $request->input('timeout', 60), 600);
+        $timeout = min((int) $request->input('timeout', 300), 3600);
         $args = $request->input('args', '') ?? '';
 
         $cmd = match ($script->language) {
