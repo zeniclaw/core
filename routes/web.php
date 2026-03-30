@@ -60,6 +60,7 @@ Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')-
     Route::post('/scripts', [\App\Http\Controllers\PartnerPortalController::class, 'storeScript'])->name('scripts.store');
     Route::put('/scripts/{script}', [\App\Http\Controllers\PartnerPortalController::class, 'updateScript'])->name('scripts.update');
     Route::post('/scripts/{script}/run', [\App\Http\Controllers\PartnerPortalController::class, 'runScript'])->name('scripts.run');
+    Route::post('/scripts/{script}/run-stream', [\App\Http\Controllers\PartnerPortalController::class, 'runScriptStream'])->name('scripts.runStream');
     Route::post('/scripts/{script}/ai-edit', [\App\Http\Controllers\PartnerPortalController::class, 'aiEditScript'])->name('scripts.aiEdit');
     Route::delete('/scripts/{script}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyScript'])->name('scripts.destroy');
 });

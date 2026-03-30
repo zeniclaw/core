@@ -410,12 +410,16 @@
             <template x-if="runResult !== null">
               <div class="mt-2 rounded-lg overflow-hidden">
                 <div class="flex items-center justify-between px-3 py-1.5 text-xs"
-                     :class="runResult.success ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-                  <span x-text="runResult.success ? '✓ Exit code: ' + runResult.exit_code : '✗ Exit code: ' + runResult.exit_code"></span>
-                  <button @click="runResult = null" class="text-gray-500 hover:text-gray-300">✕</button>
+                     :class="runResult.success === null ? 'bg-blue-900/40 text-blue-400' : (runResult.success ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400')">
+                  <span x-text="runResult.success === null ? '⏳ En cours...' : (runResult.success ? '✓ Exit code: ' + runResult.exit_code : '✗ Exit code: ' + runResult.exit_code)"></span>
+                  <button @click="runResult = null" class="text-gray-500 hover:text-gray-300" x-show="!running">✕</button>
                 </div>
-                <pre x-show="runResult.output" class="text-xs bg-gray-950 p-3 text-gray-300 overflow-x-auto mono leading-relaxed max-h-[300px] overflow-y-auto" x-text="runResult.output"></pre>
-                <pre x-show="runResult.error_output" class="text-xs bg-gray-950 p-3 text-red-400 overflow-x-auto mono leading-relaxed max-h-[150px] overflow-y-auto border-t border-gray-800" x-text="runResult.error_output"></pre>
+                <pre x-show="runResult.output" x-ref="scriptOutput"
+                     class="text-xs bg-gray-950 p-3 text-gray-300 overflow-x-auto mono leading-relaxed max-h-[400px] overflow-y-auto"
+                     x-text="runResult.output" x-effect="if($refs.scriptOutput) $refs.scriptOutput.scrollTop = $refs.scriptOutput.scrollHeight"></pre>
+                <pre x-show="runResult.error_output"
+                     class="text-xs bg-gray-950 p-3 text-red-400 overflow-x-auto mono leading-relaxed max-h-[150px] overflow-y-auto border-t border-gray-800"
+                     x-text="runResult.error_output"></pre>
               </div>
             </template>
           </div>
@@ -428,25 +432,46 @@
             code: @js($script->code),
             runResult: null,
             async runScript() {
-              this.running = true; this.runResult = null;
-              const timeoutMs = (parseInt(this.runTimeout) + 120) * 1000; // script timeout + 2min margin
-              const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), timeoutMs);
+              this.running = true;
+              this.runResult = { success: null, exit_code: null, output: '', error_output: '' };
               try {
-                const res = await fetch('{{ route("partner.scripts.run", [$share->token, $script]) }}', {
+                const res = await fetch('{{ route("partner.scripts.runStream", [$share->token, $script]) }}', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
                   body: JSON.stringify({ args: this.runArgs, timeout: parseInt(this.runTimeout) }),
-                  signal: controller.signal,
                 });
-                clearTimeout(timer);
-                const text = await res.text();
-                try { this.runResult = JSON.parse(text); }
-                catch(e) { this.runResult = { success: false, exit_code: -1, output: '', error_output: 'Reponse serveur invalide (timeout nginx?). Augmentez le timeout ou simplifiez le scan.' }; }
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop();
+                  for (const line of lines) {
+                    if (line.startsWith('event: ')) { this._sseEvent = line.slice(7); continue; }
+                    if (line.startsWith('data: ')) {
+                      try {
+                        const data = JSON.parse(line.slice(6));
+                        if (this._sseEvent === 'stdout') this.runResult.output += data.text;
+                        else if (this._sseEvent === 'stderr') this.runResult.error_output += data.text;
+                        else if (this._sseEvent === 'status') this.runResult.output += '⏳ ' + data.message + '\n';
+                        else if (this._sseEvent === 'error') this.runResult.error_output += '❌ ' + data.message + '\n';
+                        else if (this._sseEvent === 'done') {
+                          this.runResult.exit_code = data.exit_code;
+                          this.runResult.success = data.exit_code === 0;
+                        }
+                      } catch(e) {}
+                    }
+                  }
+                }
               } catch(e) {
-                clearTimeout(timer);
-                this.runResult = { success: false, exit_code: -1, output: '', error_output: e.name === 'AbortError' ? 'Timeout client (' + this.runTimeout + 's + marge)' : e.message };
+                this.runResult.error_output += e.message;
+                this.runResult.success = false;
+                this.runResult.exit_code = -1;
               }
+              if (this.runResult.exit_code === null) { this.runResult.exit_code = -1; this.runResult.success = false; }
               this.running = false;
             },
             async saveCode() {

@@ -406,6 +406,156 @@ class PartnerPortalController extends Controller
     }
 
     /**
+     * Execute a script with live SSE streaming output.
+     */
+    public function runScriptStream(Request $request, string $token, CustomAgentScript $script)
+    {
+        $share = $this->resolveShare($token);
+        if ($script->custom_agent_id !== $share->custom_agent_id) abort(403);
+        if (!$script->is_active) abort(422, 'Script inactif');
+
+        $timeout = min((int) $request->input('timeout', 300), 3600);
+        $args = $request->input('args', '') ?? '';
+
+        $cmd = match ($script->language) {
+            'python' => 'python3', 'php' => 'php', 'bash' => 'bash', 'node' => 'node', default => null,
+        };
+        if (!$cmd) abort(422, 'Langage non supporté');
+
+        $ext = match ($script->language) {
+            'python' => '.py', 'php' => '.php', 'bash' => '.sh', 'node' => '.js', default => '.txt',
+        };
+
+        $needsHostNetwork = (bool) preg_match('/\b(nmap|netifaces|scapy|socket\.connect|ping)\b/', $script->code);
+
+        return new \Symfony\Component\HttpFoundation\StreamedResponse(function () use ($script, $cmd, $ext, $args, $timeout, $needsHostNetwork) {
+            if (ob_get_level()) ob_end_clean();
+
+            $sendSSE = function (string $event, $data) {
+                echo "event: {$event}\ndata: " . json_encode($data, JSON_UNESCAPED_UNICODE) . "\n\n";
+                flush();
+            };
+
+            $sendSSE('status', ['message' => 'Preparation...']);
+
+            if ($needsHostNetwork) {
+                $storageTmpDir = storage_path('app/tmp_scripts/' . uniqid());
+                @mkdir($storageTmpDir, 0755, true);
+                file_put_contents($storageTmpDir . '/script' . $ext, $script->code);
+                chmod($storageTmpDir . '/script' . $ext, 0755);
+
+                // Requirements
+                preg_match_all('/^\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/m', $script->code, $matches);
+                $imports = array_unique($matches[1] ?? []);
+                $stdlib = ['os', 'sys', 'json', 'csv', 'datetime', 'time', 'math', 'random', 're',
+                    'pathlib', 'collections', 'itertools', 'functools', 'io', 'string', 'typing',
+                    'subprocess', 'shutil', 'glob', 'tempfile', 'hashlib', 'base64', 'urllib',
+                    'http', 'socket', 'ssl', 'concurrent', 'threading', 'argparse', 'struct',
+                ];
+                $nameMap = ['cv2' => 'opencv-python', 'PIL' => 'Pillow', 'sklearn' => 'scikit-learn',
+                    'bs4' => 'beautifulsoup4', 'yaml' => 'pyyaml', 'nmap' => 'python-nmap',
+                    'dotenv' => 'python-dotenv', 'dateutil' => 'python-dateutil',
+                ];
+                $packages = array_map(fn($p) => $nameMap[$p] ?? $p, array_diff($imports, $stdlib));
+                file_put_contents($storageTmpDir . '/requirements.txt', implode("\n", $packages));
+
+                $storageBase = storage_path();
+                $relativePath = str_replace($storageBase, '', $storageTmpDir);
+                $volumeSource = trim(shell_exec("docker inspect zeniclaw_app --format '{{ range .Mounts }}{{ if eq .Destination \"/var/www/html/storage\" }}{{ .Source }}{{ end }}{{ end }}'") ?? '');
+                $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $storageTmpDir;
+
+                $image = 'python:3-slim';
+                $installCmd = 'apt-get update -qq && apt-get install -y -qq nmap gcc python3-dev > /dev/null 2>&1; '
+                    . (count($packages) > 0 ? 'pip install --no-cache-dir -r /work/requirements.txt 2>&1; ' : '');
+
+                $fullCmd = sprintf(
+                    'docker run --rm --network=host --privileged -v %s:/work %s bash -c %s',
+                    escapeshellarg($hostDir),
+                    escapeshellarg($image),
+                    escapeshellarg("cd /work && {$installCmd}python3 -u /work/script{$ext} {$args}")
+                );
+                $cleanupDir = $storageTmpDir;
+            } else {
+                $tmpDir = '/tmp/zscript_' . uniqid();
+                @mkdir($tmpDir, 0755, true);
+                $tmpFile = $tmpDir . '/script' . $ext;
+                file_put_contents($tmpFile, $script->code);
+                chmod($tmpFile, 0755);
+
+                $this->installDependencies($script->language, $script->code, $tmpDir);
+
+                if ($script->language === 'python' && file_exists($tmpDir . '/venv/bin/python')) {
+                    $cmd = $tmpDir . '/venv/bin/python';
+                }
+                $fullCmd = "{$cmd} -u {$tmpFile} {$args}";
+                $cleanupDir = $tmpDir;
+            }
+
+            $sendSSE('status', ['message' => 'Execution...']);
+
+            // Stream with proc_open
+            $process = proc_open($fullCmd, [
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ], $pipes);
+
+            if (!is_resource($process)) {
+                $sendSSE('error', ['message' => 'Impossible de lancer le script']);
+                $sendSSE('done', ['exit_code' => -1]);
+                return;
+            }
+
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+
+            $startTime = time();
+            while (true) {
+                $stdout = fgets($pipes[1]);
+                $stderr = fgets($pipes[2]);
+
+                if ($stdout !== false && $stdout !== '') {
+                    $sendSSE('stdout', ['text' => $stdout]);
+                }
+                if ($stderr !== false && $stderr !== '') {
+                    $sendSSE('stderr', ['text' => $stderr]);
+                }
+
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    // Drain remaining output
+                    while (($line = fgets($pipes[1])) !== false) $sendSSE('stdout', ['text' => $line]);
+                    while (($line = fgets($pipes[2])) !== false) $sendSSE('stderr', ['text' => $line]);
+                    break;
+                }
+
+                if ((time() - $startTime) > $timeout) {
+                    proc_terminate($process, 9);
+                    $sendSSE('error', ['message' => "Timeout après {$timeout}s"]);
+                    break;
+                }
+
+                usleep(50000); // 50ms
+            }
+
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $exitCode = proc_close($process);
+
+            $sendSSE('done', ['exit_code' => $exitCode]);
+
+            // Cleanup
+            if (!empty($cleanupDir)) {
+                \Illuminate\Support\Facades\Process::run("rm -rf {$cleanupDir}");
+            }
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
      * Run script in a temporary container with host network access.
      */
     private function runScriptInHostNetwork($script, string $tmpDir, string $tmpFile, string $cmd, string $args, int $timeout)
