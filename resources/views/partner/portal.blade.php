@@ -397,6 +397,13 @@
               </button>
               <input type="text" x-model="runArgs" placeholder="Arguments (optionnel)"
                      class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 outline-none focus:border-indigo-500">
+              <select x-model="runTimeout" class="px-2 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-400 outline-none">
+                <option value="30">30s</option>
+                <option value="60">1min</option>
+                <option value="120">2min</option>
+                <option value="300" selected>5min</option>
+                <option value="600">10min</option>
+              </select>
             </div>
 
             {{-- Output --}}
@@ -417,7 +424,7 @@
         function scriptCard_{{ $script->id }}() {
           return {
             editing: false, saving: false, running: false,
-            aiLoading: false, aiInstruction: '', runArgs: '',
+            aiLoading: false, aiInstruction: '', runArgs: '', runTimeout: '300',
             code: @js($script->code),
             runResult: null,
             async runScript() {
@@ -426,7 +433,7 @@
                 const res = await fetch('{{ route("partner.scripts.run", [$share->token, $script]) }}', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                  body: JSON.stringify({ args: this.runArgs, timeout: 30 }),
+                  body: JSON.stringify({ args: this.runArgs, timeout: parseInt(this.runTimeout) }),
                 });
                 this.runResult = await res.json();
               } catch(e) { this.runResult = { success: false, exit_code: -1, output: '', error_output: e.message }; }
