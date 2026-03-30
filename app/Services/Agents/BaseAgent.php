@@ -18,6 +18,9 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
     protected string $wahaApiKey = 'zeniclaw-waha-2026';
     protected string $sessionName = 'default';
 
+    /** Track if sendText was called during this request (used by async job) */
+    public static bool $whatsappSent = false;
+
     protected AnthropicClient $claude;
     protected ConversationMemoryService $memory;
     protected PreferencesManager $preferencesManager;
@@ -72,6 +75,12 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
     {
         // Skip WhatsApp send for web chat sessions — reply goes through HTTP response
         if (str_starts_with($chatId, 'web-')) {
+            return;
+        }
+
+        static::$whatsappSent = true;
+
+        if (empty(trim($text))) {
             return;
         }
 

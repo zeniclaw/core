@@ -52,11 +52,50 @@ class ProcessWhatsAppMessageJob implements ShouldQueue
                 media: $this->media,
             );
 
+            \App\Services\Agents\BaseAgent::$whatsappSent = false;
+
+            Log::info('ProcessWhatsAppMessageJob: processing', [
+                'from' => $this->from,
+                'body' => substr($this->body ?? '', 0, 50),
+                'hasMedia' => $this->hasMedia,
+            ]);
+
             $orchestrator = new AgentOrchestrator();
-            $orchestrator->process($context);
+            $result = $orchestrator->process($context);
+
+            Log::info('ProcessWhatsAppMessageJob: done', [
+                'action' => $result->action,
+                'reply_len' => strlen($result->reply ?? ''),
+            ]);
+
+            // Ensure reply is sent to WhatsApp (some agents don't call sendText themselves)
+            $alreadySent = \App\Services\Agents\BaseAgent::$whatsappSent;
+            Log::info('ProcessWhatsAppMessageJob: reply check', [
+                'action' => $result->action,
+                'has_reply' => !empty($result->reply),
+                'already_sent' => $alreadySent,
+                'from' => $this->from,
+            ]);
+
+            if ($result->action === 'reply' && $result->reply && !str_starts_with($this->from, 'web-') && !$alreadySent) {
+                try {
+                    \Illuminate\Support\Facades\Http::timeout(15)
+                        ->withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
+                        ->post('http://waha:3000/api/sendText', [
+                            'chatId' => $this->from,
+                            'text' => $result->reply,
+                            'session' => 'default',
+                        ]);
+                } catch (\Exception $e) {
+                    Log::warning('ProcessWhatsAppMessageJob: sendText fallback failed', [
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         } catch (\Exception $e) {
             Log::error('ProcessWhatsAppMessageJob failed', [
                 'error' => $e->getMessage(),
+                'trace' => substr($e->getTraceAsString(), 0, 300),
                 'from' => $this->from,
                 'body' => substr($this->body ?? '', 0, 100),
             ]);

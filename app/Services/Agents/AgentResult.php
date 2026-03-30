@@ -4,6 +4,8 @@ namespace App\Services\Agents;
 
 class AgentResult
 {
+    public bool $whatsappSent = false;
+
     public function __construct(
         public readonly string $action,
         public readonly ?string $reply = null,
