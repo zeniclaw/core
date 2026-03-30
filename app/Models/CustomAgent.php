@@ -84,7 +84,19 @@ class CustomAgent extends Model
      */
     public function isCoded(): bool
     {
-        return !empty($this->agent_class) && class_exists($this->agent_class);
+        return !empty($this->agent_class) && class_exists($this->resolvedAgentClass());
+    }
+
+    /**
+     * Resolve the agent class to a FQCN.
+     */
+    private function resolvedAgentClass(): string
+    {
+        $class = $this->agent_class ?? '';
+        if ($class && !str_contains($class, '\\')) {
+            $class = "App\\Services\\Agents\\{$class}";
+        }
+        return $class;
     }
 
     /**
@@ -92,10 +104,11 @@ class CustomAgent extends Model
      */
     public function makeCodedAgent(): ?\App\Services\Agents\BaseAgent
     {
-        if (!$this->isCoded()) {
+        $class = $this->resolvedAgentClass();
+        if (!$class || !class_exists($class)) {
             return null;
         }
-        return new ($this->agent_class)();
+        return new $class();
     }
 
     /**

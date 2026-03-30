@@ -61,6 +61,43 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
         return false;
     }
 
+    /**
+     * Retrieve a credential/secret for this agent.
+     * Searches in order: custom_agent_credentials → agent_secrets → app_settings.
+     */
+    protected function getCredential(AgentContext $context, string $key): ?string
+    {
+        // 1. Custom agent credentials (linked via active_custom_agent_id or custom agent)
+        $customAgentId = $context->session->active_custom_agent_id ?? null;
+        if ($customAgentId) {
+            $cred = \Illuminate\Support\Facades\DB::table('custom_agent_credentials')
+                ->where('custom_agent_id', $customAgentId)
+                ->where('key', $key)
+                ->where('is_active', true)
+                ->first();
+            if ($cred && $cred->value) {
+                try { return decrypt($cred->value); } catch (\Throwable $e) { return $cred->value; }
+            }
+        }
+
+        // 2. Agent secrets (agent-level)
+        $secret = $context->agent->secrets()
+            ->where('key_name', $key)
+            ->first();
+        if ($secret) {
+            try { return decrypt($secret->encrypted_value); } catch (\Throwable $e) { return $secret->encrypted_value; }
+        }
+
+        // 3. App settings (global)
+        $settingKey = strtolower(str_replace(['_API_KEY', '_SECRET'], ['_api_key', '_secret'], $key));
+        $setting = \App\Models\AppSetting::where('key', $settingKey)->first();
+        if ($setting) {
+            try { return decrypt($setting->encrypted_value ?? $setting->value); } catch (\Throwable $e) { return $setting->value; }
+        }
+
+        return null;
+    }
+
     public function version(): string
     {
         return '1.0.0';

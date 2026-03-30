@@ -1076,20 +1076,7 @@ PROMPT;
 
     private function getApiKey(AgentContext $context): ?string
     {
-        $secret = $context->agent->secrets()
-            ->where('key_name', 'ZENIBIZ_DOCS_API_KEY')
-            ->first();
-
-        if ($secret) {
-            return decrypt($secret->encrypted_value);
-        }
-
-        $setting = \App\Models\AppSetting::where('key', 'zenibiz_docs_api_key')->first();
-        if ($setting) {
-            return decrypt($setting->encrypted_value);
-        }
-
-        return null;
+        return $this->getCredential($context, 'ZENIBIZ_DOCS_API_KEY');
     }
 }
 
