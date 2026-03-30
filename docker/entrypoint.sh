@@ -119,6 +119,7 @@ php artisan storage:link --no-interaction 2>/dev/null || true
 # Fix permissions
 chown -R www-data:www-data storage bootstrap/cache
 chmod -R 775 storage bootstrap/cache
+mkdir -p /var/www/.cache/pip && chown -R www-data:www-data /var/www/.cache
 
 # Re-queue orphaned SubAgents (don't clear queues — preserves pending improvement jobs)
 echo "🧹 Cleaning up orphaned SubAgents + stuck improvements..."
