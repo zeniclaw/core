@@ -445,7 +445,7 @@ class PartnerPortalController extends Controller
         $hostDir = $volumeSource ? rtrim($volumeSource, '/') . $relativePath : $tmpDir;
 
         $containerCmd = sprintf(
-            '%s run --rm --network=host -v %s:/work:ro %s bash -c %s',
+            '%s run --rm --network=host --privileged -v %s:/work %s bash -c %s',
             $runtime,
             escapeshellarg($hostDir),
             escapeshellarg($image),
