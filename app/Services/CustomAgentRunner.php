@@ -724,6 +724,7 @@ class CustomAgentRunner extends BaseAgent
                 $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
                 // Use local chatViaCli with --max-turns 1 (no tools) for prompt steps
                 // This avoids the CLI using Bash in loops and hitting max_turns
+                \Illuminate\Support\Facades\Log::info("Skill step: calling LOCAL chatViaCli", ['msg_len' => mb_strlen($userMsg)]);
                 $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
             }
             \Illuminate\Support\Facades\Log::info("Skill step: reply returned", ['reply_len' => mb_strlen($reply ?? ''), 'preview' => mb_substr($reply ?? '', 0, 100)]);
