@@ -585,17 +585,43 @@ class CustomAgentRunner extends BaseAgent
         }
 
         // Check if message matches a NEW trigger phrase (takes priority over active routines)
+        // Also supports event-based triggers: photo_received, image_received, document_received, pdf_received
         $matchedSkill = null;
-        if ($body) {
-            foreach ($activeSkills as $skill) {
-                $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
-                // Strip surrounding quotes from trigger
-                $trigger = trim($trigger, "\"'");
-                if (!$trigger) continue;
-                if (str_contains($body, $trigger)) {
-                    $matchedSkill = $skill;
-                    break;
-                }
+        $mimetype = $context->mimetype ?? '';
+        $isImage = $context->hasMedia && in_array($mimetype, self::SUPPORTED_IMAGE_TYPES);
+        $isPdf = $context->hasMedia && $mimetype === 'application/pdf';
+
+        foreach ($activeSkills as $skill) {
+            $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
+            $trigger = trim($trigger, "\"'");
+            if (!$trigger) continue;
+
+            // Event-based triggers for media
+            $eventTriggers = ['photo_received', 'image_received', 'photo_reçue', 'image_reçue'];
+            $docTriggers = ['document_received', 'pdf_received', 'document_reçu', 'pdf_reçu'];
+
+            if ($isImage && in_array($trigger, $eventTriggers)) {
+                $matchedSkill = $skill;
+                break;
+            }
+            if ($isPdf && in_array($trigger, $docTriggers)) {
+                $matchedSkill = $skill;
+                break;
+            }
+            // Also match on media if trigger contains "photo" or "image" and media is present
+            if ($isImage && (str_contains($trigger, 'photo') || str_contains($trigger, 'image'))) {
+                $matchedSkill = $skill;
+                break;
+            }
+            if ($isPdf && (str_contains($trigger, 'document') || str_contains($trigger, 'pdf'))) {
+                $matchedSkill = $skill;
+                break;
+            }
+
+            // Standard text matching
+            if ($body && str_contains($body, $trigger)) {
+                $matchedSkill = $skill;
+                break;
             }
         }
 
