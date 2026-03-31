@@ -331,8 +331,8 @@ class CustomAgentRunner extends BaseAgent
             }
         }
 
-        // Always include memory and skill tools — learning is core to custom agents
-        $alwaysInclude = ['memory_store', 'memory_search', 'teach_skill', 'list_skills', 'forget_skill'];
+        // Always include memory, skill, and persistent file tools — learning is core to custom agents
+        $alwaysInclude = ['memory_store', 'memory_search', 'teach_skill', 'list_skills', 'forget_skill', 'update_instructions', 'update_session_memory'];
         $names = array_merge($names, $alwaysInclude);
 
         return array_unique($names);
@@ -1222,9 +1222,22 @@ class CustomAgentRunner extends BaseAgent
             $parts[] = $skillsInfo;
         }
 
+        // Inject persistent instructions file
+        $instructionsPath = $this->customAgent->workspacePath() . '/instructions.md';
+        if (file_exists($instructionsPath) && ($instructions = file_get_contents($instructionsPath))) {
+            $parts[] = "INSTRUCTIONS PERSISTANTES (mises a jour via update_instructions):\n{$instructions}";
+        }
+
+        // Inject session memory file
+        $sessionKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $context->from);
+        $memoryPath = $this->customAgent->workspacePath('memory') . "/{$sessionKey}.md";
+        if (file_exists($memoryPath) && ($sessionMemory = file_get_contents($memoryPath))) {
+            $parts[] = "MEMOIRE DE SESSION (mise a jour via update_session_memory):\n{$sessionMemory}";
+        }
+
         // Inject workspace path so agent knows where to store/read files
         $workspace = $this->customAgent->workspacePath();
-        $parts[] = "ESPACE DE TRAVAIL : {$workspace}\nSi tu dois telecharger, generer ou stocker des fichiers, utilise ce repertoire. Sous-dossiers : docs/, scripts/, downloads/";
+        $parts[] = "ESPACE DE TRAVAIL : {$workspace}\nSi tu dois telecharger, generer ou stocker des fichiers, utilise ce repertoire. Sous-dossiers : docs/, scripts/, downloads/, memory/";
 
         // Inject available credentials (keys only, not values — agent reads them at runtime)
         $creds = $this->customAgent->credentials()->where('is_active', true)->pluck('description', 'key');

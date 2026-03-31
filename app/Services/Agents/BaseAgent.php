@@ -497,6 +497,29 @@ PROMPT;
                     'required' => ['query'],
                 ],
             ],
+            // ── Persistent Files (instructions + session memory) ─────
+            [
+                'name' => 'update_instructions',
+                'description' => 'Mettre a jour les instructions persistantes de cet agent. Ces instructions sont chargees a CHAQUE conversation. Utiliser quand l\'utilisateur dit "a partir de maintenant...", "retiens que tu dois toujours...", "change ta facon de...". Cela modifie le comportement permanent de l\'agent.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Le contenu COMPLET du fichier instructions (pas un diff — reecris tout). Format markdown.'],
+                    ],
+                    'required' => ['content'],
+                ],
+            ],
+            [
+                'name' => 'update_session_memory',
+                'description' => 'Mettre a jour la memoire de cette session. Cette memoire est rechargee a chaque message dans cette conversation. Utiliser pour stocker: liste de todos en cours, contexte de la discussion, preferences temporaires, etat d\'avancement. Reecris le contenu complet a chaque mise a jour.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Le contenu COMPLET de la memoire de session (pas un diff — reecris tout). Format markdown.'],
+                    ],
+                    'required' => ['content'],
+                ],
+            ],
             // ── Spawn SubAgent Tool ───────────────────────────────────
             [
                 'name' => 'spawn_subagent',
@@ -602,6 +625,8 @@ PROMPT;
             'forget_skill' => $this->baseForgetSkill($input, $context),
             'memory_store' => $this->baseMemoryStore($input, $context),
             'memory_search' => $this->baseMemorySearch($input, $context),
+            'update_instructions' => $this->baseUpdateInstructions($input, $context),
+            'update_session_memory' => $this->baseUpdateSessionMemory($input, $context),
             'spawn_subagent' => $this->baseSpawnSubagent($input, $context),
             'send_agent_message' => $this->baseSendAgentMessage($input, $context),
             'create_audio' => $this->baseCreateAudio($input, $context),
@@ -797,6 +822,61 @@ PROMPT;
             'count' => count($cleaned),
             'search_type' => 'hybrid_semantic',
         ]);
+    }
+
+    // ── Persistent Files (instructions + session memory) ────────
+
+    private function baseUpdateInstructions(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        if (!$content) {
+            return json_encode(['error' => 'Missing content parameter']);
+        }
+
+        $customAgent = $this->getCustomAgentFromContext($context);
+        if (!$customAgent) {
+            return json_encode(['error' => 'No custom agent context']);
+        }
+
+        $path = $customAgent->workspacePath() . '/instructions.md';
+        file_put_contents($path, $content);
+
+        return json_encode(['success' => true, 'message' => 'Instructions mises a jour', 'size' => mb_strlen($content)]);
+    }
+
+    private function baseUpdateSessionMemory(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        if (!$content) {
+            return json_encode(['error' => 'Missing content parameter']);
+        }
+
+        $customAgent = $this->getCustomAgentFromContext($context);
+        if (!$customAgent) {
+            return json_encode(['error' => 'No custom agent context']);
+        }
+
+        $dir = $customAgent->workspacePath('memory');
+        $sessionKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $context->from);
+        $path = "{$dir}/{$sessionKey}.md";
+        file_put_contents($path, $content);
+
+        return json_encode(['success' => true, 'message' => 'Memoire de session mise a jour', 'size' => mb_strlen($content)]);
+    }
+
+    private function getCustomAgentFromContext(AgentContext $context): ?\App\Models\CustomAgent
+    {
+        $activeId = $context->session->active_custom_agent_id ?? null;
+        if ($activeId) {
+            return \App\Models\CustomAgent::find($activeId);
+        }
+        // Partner portal sessions: extract from peer_id "partner-{share_id}"
+        if (str_starts_with($context->from, 'partner-')) {
+            $shareId = (int) substr($context->from, 8);
+            $share = \App\Models\CustomAgentShare::find($shareId);
+            return $share?->customAgent;
+        }
+        return null;
     }
 
     // ── Spawn SubAgent Tool ──────────────────────────────────────
