@@ -82,7 +82,8 @@ class AgentTools
                 'store_knowledge' => self::executeStoreKnowledge($input, $context),
                 'recall_knowledge' => self::executeRecallKnowledge($input, $context),
                 'list_knowledge' => self::executeListKnowledge($context),
-                default => json_encode(['error' => "Unknown tool: {$toolName}"]),
+                default => (new Agents\BaseAgent())->executeTool($toolName, $input, $context)
+                    ?? json_encode(['error' => "Unknown tool: {$toolName}"]),
             };
         } catch (\Exception $e) {
             Log::error("AgentTools::execute failed", ['tool' => $toolName, 'error' => $e->getMessage()]);
