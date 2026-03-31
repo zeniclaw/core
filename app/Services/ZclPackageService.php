@@ -59,6 +59,7 @@ class ZclPackageService
             'scripts_count' => count($payload['scripts'] ?? []),
             'memories_count' => count($payload['memories'] ?? []),
             'has_system_prompt' => !empty($payload['agent']['system_prompt']),
+            'agent_class' => $payload['agent']['agent_class'] ?? null,
             'enabled_tools' => $payload['agent']['enabled_tools'] ?? [],
         ];
     }
@@ -103,6 +104,7 @@ class ZclPackageService
                 'system_prompt' => $customAgent->system_prompt,
                 'model' => $customAgent->model,
                 'avatar' => $customAgent->avatar,
+                'agent_class' => $customAgent->agent_class,
                 'settings' => $customAgent->settings,
                 'enabled_tools' => $customAgent->enabled_tools,
             ],
@@ -124,6 +126,7 @@ class ZclPackageService
             'system_prompt' => $agentData['system_prompt'],
             'model' => $agentData['model'] ?? 'default',
             'avatar' => $agentData['avatar'] ?? '🤖',
+            'agent_class' => $agentData['agent_class'] ?? null,
             'settings' => $agentData['settings'] ?? null,
             'enabled_tools' => $agentData['enabled_tools'] ?? null,
             'is_active' => false, // imported agents start inactive
