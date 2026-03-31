@@ -89,12 +89,36 @@ class AgentTools
                 'teach_skill' => self::executeTeachSkill($input, $context),
                 'list_skills' => self::executeListSkills($context),
                 'forget_skill' => self::executeForgetSkill($input, $context),
-                default => json_encode(['error' => "Unknown tool: {$toolName}"]),
+                default => self::executeFallback($toolName, $input, $context),
             };
         } catch (\Exception $e) {
             Log::error("AgentTools::execute failed", ['tool' => $toolName, 'error' => $e->getMessage()]);
             return json_encode(['error' => $e->getMessage()]);
         }
+    }
+
+    /**
+     * Fallback: try known agent classes that implement executeTool.
+     */
+    private static function executeFallback(string $toolName, array $input, AgentContext $context): string
+    {
+        $agentClasses = [
+            Agents\ReminderAgent::class,
+            Agents\TodoAgent::class,
+        ];
+
+        foreach ($agentClasses as $class) {
+            if (!class_exists($class)) continue;
+            try {
+                $agent = new $class();
+                $result = $agent->executeTool($toolName, $input, $context);
+                if ($result !== null) return $result;
+            } catch (\Throwable $e) {
+                // This agent doesn't handle this tool — continue
+            }
+        }
+
+        return json_encode(['error' => "Unknown tool: {$toolName}"]);
     }
 
     // ── Utility executors ───────────────────────────────────────────
