@@ -94,6 +94,9 @@ class CustomAgentRunner extends BaseAgent
         ],
     ];
 
+    private const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    private const MAX_MEDIA_BYTES = 20 * 1024 * 1024; // 20 MB
+
     public function __construct(CustomAgent $customAgent)
     {
         parent::__construct();
@@ -219,8 +222,19 @@ class CustomAgentRunner extends BaseAgent
 
         $loop = new AgenticLoop(maxIterations: 10, debug: $context->session->debug_mode ?? false);
 
+        // Build multimodal message if media is present
+        $userMessage = $context->body ?? '';
+        $mediaBlocks = $this->buildMediaBlocks($context);
+        if ($mediaBlocks) {
+            $contentBlocks = [];
+            if ($userMessage) {
+                $contentBlocks[] = ['type' => 'text', 'text' => $userMessage];
+            }
+            $userMessage = array_merge($contentBlocks, $mediaBlocks);
+        }
+
         $loopResult = $loop->run(
-            userMessage: $context->body ?? '',
+            userMessage: $userMessage,
             systemPrompt: $systemPrompt,
             model: $model,
             context: $context,
@@ -252,10 +266,26 @@ class CustomAgentRunner extends BaseAgent
         $history = $this->memory->read($context->agent->id, $context->from);
         $messages = $this->buildMessages($history, $context, $tier);
 
+        // Build multimodal content blocks if media is present
+        $mediaBlocks = $this->buildMediaBlocks($context);
+        if ($mediaBlocks) {
+            // Convert text history + media into content blocks array
+            $contentBlocks = [];
+            if ($messages) {
+                $contentBlocks[] = ['type' => 'text', 'text' => $messages];
+            }
+            $contentBlocks = array_merge($contentBlocks, $mediaBlocks);
+            $messages = $contentBlocks;
+        }
+
         // Small on-prem models ignore system prompts — inject context into the user message
         $isOnPrem = !str_starts_with($model, 'claude-') && !str_starts_with($model, 'gpt-');
         if ($isOnPrem && $systemPrompt) {
-            $messages = "Instructions: {$systemPrompt}\n\n{$messages}";
+            if (is_array($messages)) {
+                array_unshift($messages, ['type' => 'text', 'text' => "Instructions: {$systemPrompt}"]);
+            } else {
+                $messages = "Instructions: {$systemPrompt}\n\n{$messages}";
+            }
             $systemPrompt = '';
         }
 
@@ -539,12 +569,14 @@ class CustomAgentRunner extends BaseAgent
     private function trySkillTrigger(AgentContext $context): ?AgentResult
     {
         $body = mb_strtolower(trim($context->body ?? ''));
-        if (!$body) return null;
+        $hasContent = $body !== '' || $context->hasMedia;
+
+        if (!$hasContent) return null;
 
         $activeSkills = $this->customAgent->skills()->where('is_active', true)->get();
 
         // Allow user to cancel any active routine
-        if (in_array($body, ['stop', 'annuler', 'cancel', 'quitter', 'sortir', 'exit'])) {
+        if ($body && in_array($body, ['stop', 'annuler', 'cancel', 'quitter', 'sortir', 'exit'])) {
             foreach ($activeSkills as $skill) {
                 $cacheKey = "skill_step:{$context->from}:{$skill->id}";
                 \Illuminate\Support\Facades\Cache::forget($cacheKey);
@@ -554,14 +586,16 @@ class CustomAgentRunner extends BaseAgent
 
         // Check if message matches a NEW trigger phrase (takes priority over active routines)
         $matchedSkill = null;
-        foreach ($activeSkills as $skill) {
-            $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
-            // Strip surrounding quotes from trigger
-            $trigger = trim($trigger, "\"'");
-            if (!$trigger) continue;
-            if (str_contains($body, $trigger)) {
-                $matchedSkill = $skill;
-                break;
+        if ($body) {
+            foreach ($activeSkills as $skill) {
+                $trigger = mb_strtolower(trim($skill->trigger_phrase ?? ''));
+                // Strip surrounding quotes from trigger
+                $trigger = trim($trigger, "\"'");
+                if (!$trigger) continue;
+                if (str_contains($body, $trigger)) {
+                    $matchedSkill = $skill;
+                    break;
+                }
             }
         }
 
@@ -579,6 +613,7 @@ class CustomAgentRunner extends BaseAgent
         }
 
         // No new trigger — check if there's an active routine in progress
+        // (also continues when user sends an image without text as reply to a step)
         foreach ($activeSkills as $skill) {
             $cacheKey = "skill_step:{$context->from}:{$skill->id}";
             $currentStep = \Illuminate\Support\Facades\Cache::get($cacheKey);
@@ -645,11 +680,25 @@ class CustomAgentRunner extends BaseAgent
             $reply = $this->executeStepScript($step, $context, $model);
         } else {
             // ── Simple chat (prompt only) — use CLI with system-prompt-file for long prompts ──
-            $userMsg = "Instruction: {$stepContent}\n\nMessage utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
-            \Illuminate\Support\Facades\Log::info("Skill step: simple chat", ['type' => $stepType, 'step' => $currentStep + 1, 'userMsg_len' => mb_strlen($userMsg), 'sysPrompt_len' => mb_strlen($systemPrompt)]);
-            $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
-            $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
-            \Illuminate\Support\Facades\Log::info("Skill step: chatViaCli returned", ['reply_len' => mb_strlen($reply), 'preview' => mb_substr($reply, 0, 100)]);
+            $userText = "Instruction: {$stepContent}\n\nMessage utilisateur: " . ($context->body ?? '') . "\n\nReponds UNIQUEMENT pour cette etape. Sois naturel et conversationnel.";
+
+            // Include media (image/PDF) if present
+            $mediaBlocks = $this->buildMediaBlocks($context);
+            if ($mediaBlocks) {
+                $userMsg = array_merge(
+                    [['type' => 'text', 'text' => $userText]],
+                    $mediaBlocks,
+                );
+                \Illuminate\Support\Facades\Log::info("Skill step: simple chat with media", ['type' => $stepType, 'step' => $currentStep + 1, 'media_blocks' => count($mediaBlocks)]);
+                $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Analyse du media...");
+                $reply = $this->claude->chat($userMsg, $model, $systemPrompt);
+            } else {
+                $userMsg = $userText;
+                \Illuminate\Support\Facades\Log::info("Skill step: simple chat", ['type' => $stepType, 'step' => $currentStep + 1, 'userMsg_len' => mb_strlen($userMsg), 'sysPrompt_len' => mb_strlen($systemPrompt)]);
+                $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
+                $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
+            }
+            \Illuminate\Support\Facades\Log::info("Skill step: reply returned", ['reply_len' => mb_strlen($reply ?? ''), 'preview' => mb_substr($reply ?? '', 0, 100)]);
         }
 
         if (!$reply) {
@@ -1216,6 +1265,82 @@ class CustomAgentRunner extends BaseAgent
      * Build message string from conversation history.
      * Limits history depth for on-prem models to keep prompt small.
      */
+    /**
+     * Build multimodal content blocks from media in the context.
+     */
+    private function buildMediaBlocks(AgentContext $context): ?array
+    {
+        if (!$context->hasMedia || !$context->mediaUrl) {
+            return null;
+        }
+
+        $mimetype = $context->mimetype ?? '';
+        $isImage = in_array($mimetype, self::SUPPORTED_IMAGE_TYPES);
+        $isPdf = $mimetype === 'application/pdf';
+
+        if (!$isImage && !$isPdf) {
+            return null;
+        }
+
+        $base64Data = $this->downloadMedia($context->mediaUrl);
+        if (!$base64Data) {
+            return null;
+        }
+
+        $blocks = [];
+
+        if ($isImage) {
+            $blocks[] = [
+                'type' => 'image',
+                'source' => [
+                    'type' => 'base64',
+                    'media_type' => $mimetype,
+                    'data' => $base64Data,
+                ],
+            ];
+            $blocks[] = ['type' => 'text', 'text' => $context->body ?: 'Analyse cette image.'];
+        } elseif ($isPdf) {
+            $blocks[] = [
+                'type' => 'document',
+                'source' => [
+                    'type' => 'base64',
+                    'media_type' => 'application/pdf',
+                    'data' => $base64Data,
+                ],
+            ];
+            $blocks[] = ['type' => 'text', 'text' => $context->body ?: 'Analyse ce document PDF.'];
+        }
+
+        return $blocks;
+    }
+
+    private function downloadMedia(string $mediaUrl): ?string
+    {
+        try {
+            $headResponse = $this->waha(10)->head($mediaUrl);
+            if ($headResponse->successful()) {
+                $contentLength = (int) ($headResponse->header('Content-Length') ?? 0);
+                if ($contentLength > 0 && $contentLength > self::MAX_MEDIA_BYTES) {
+                    Log::warning("[custom-agent] Media too large: " . round($contentLength / 1024 / 1024, 1) . " MB");
+                    return null;
+                }
+            }
+
+            $response = $this->waha(30)->get($mediaUrl);
+            if ($response->successful()) {
+                $body = $response->body();
+                if (strlen($body) > self::MAX_MEDIA_BYTES) {
+                    Log::warning('[custom-agent] Downloaded media exceeds size limit, discarding.');
+                    return null;
+                }
+                return base64_encode($body);
+            }
+        } catch (\Throwable $e) {
+            Log::error('[custom-agent] Media download failed: ' . $e->getMessage());
+        }
+        return null;
+    }
+
     private function buildMessages(array $history, AgentContext $context, ModelTier $tier = ModelTier::Balanced): string
     {
         $messages = '';
