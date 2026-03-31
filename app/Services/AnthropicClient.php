@@ -635,7 +635,7 @@ class AnthropicClient
         if ($sessionId) {
             // Resume existing session — send new message via --resume
             $cmd = sprintf(
-                'claude --resume %s -p %s --model %s --output-format json --max-turns 6 --allowedTools "Bash,WebSearch,WebFetch" 2>&1',
+                'claude --resume %s -p %s --model %s --output-format json --max-turns 12 --allowedTools "Bash,WebSearch,WebFetch" 2>&1',
                 escapeshellarg($sessionId),
                 escapeshellarg($textMessage), // Only user message, system prompt already in session
                 escapeshellarg($slug)
@@ -645,7 +645,7 @@ class AnthropicClient
             $tools = $imageFile ? 'Bash,Read,WebSearch,WebFetch' : 'Bash,WebSearch,WebFetch';
             $sysPromptArg = $sysPromptFile ? sprintf(' --system-prompt-file %s', escapeshellarg($sysPromptFile)) : '';
             $cmd = sprintf(
-                'claude -p %s%s --model %s --output-format json --max-turns 6 --allowedTools %s 2>&1',
+                'claude -p %s%s --model %s --output-format json --max-turns 12 --allowedTools %s 2>&1',
                 escapeshellarg($fullPrompt),
                 $sysPromptArg,
                 escapeshellarg($slug),
@@ -661,26 +661,36 @@ class AnthropicClient
             $result = Process::timeout(180) // 3 min max for multi-turn
                 ->run($cmd);
 
+            // Try to parse JSON even on failure (error_max_turns has valid JSON with partial result)
+            $data = json_decode($result->output(), true);
+
             if (!$result->successful()) {
-                Log::warning('AnthropicClient::executeClaudeCli failed', [
-                    'exit_code' => $result->exitCode(),
-                    'stderr' => substr($result->errorOutput(), 0, 500),
-                    'stdout' => substr($result->output(), 0, 500),
-                    'has_session' => (bool) $sessionId,
-                    'has_sysprompt_file' => (bool) $sysPromptFile,
-                ]);
+                // If output has a partial result (e.g. error_max_turns), use it
+                if ($data && !empty($data['result']) && ($data['subtype'] ?? '') === 'error_max_turns') {
+                    Log::info('AnthropicClient::executeClaudeCli max_turns hit, using partial result', [
+                        'num_turns' => $data['num_turns'] ?? '?',
+                    ]);
+                    // Fall through to process the result below
+                } else {
+                    Log::warning('AnthropicClient::executeClaudeCli failed', [
+                        'exit_code' => $result->exitCode(),
+                        'stderr' => substr($result->errorOutput(), 0, 500),
+                        'stdout' => substr($result->output(), 0, 500),
+                        'has_session' => (bool) $sessionId,
+                        'has_sysprompt_file' => (bool) $sysPromptFile,
+                    ]);
 
-                // If resume failed (session expired), retry without resume
-                if ($sessionId) {
-                    Log::info('AnthropicClient: session resume failed, starting fresh');
-                    $this->clearCliSessionId();
-                    return $this->executeClaudeCli($message, $model, $systemPrompt);
+                    // If resume failed (session expired), retry without resume
+                    if ($sessionId) {
+                        Log::info('AnthropicClient: session resume failed, starting fresh');
+                        $this->clearCliSessionId();
+                        return $this->executeClaudeCli($message, $model, $systemPrompt);
+                    }
+
+                    return null;
                 }
-
-                return null;
             }
 
-            $data = json_decode($result->output(), true);
             if (!$data) {
                 Log::warning('AnthropicClient::executeClaudeCli invalid JSON', [
                     'output' => substr($result->output(), 0, 300),
@@ -688,7 +698,7 @@ class AnthropicClient
                 return null;
             }
 
-            if ($data['is_error'] ?? false) {
+            if (($data['is_error'] ?? false) && empty($data['result'])) {
                 Log::warning('AnthropicClient::executeClaudeCli error', [
                     'result' => substr($data['result'] ?? '', 0, 300),
                 ]);
