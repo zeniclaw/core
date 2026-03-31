@@ -1222,15 +1222,20 @@ class CustomAgentRunner extends BaseAgent
             $parts[] = $skillsInfo;
         }
 
-        // Inject persistent instructions file
-        $instructionsPath = $this->customAgent->workspacePath() . '/instructions.md';
+        // Inject persistent instructions file (check both root and memory/ for compatibility)
+        $workspace = $this->customAgent->workspacePath();
+        $memoryDir = $this->customAgent->workspacePath('memory');
+        $instructionsPath = file_exists("{$workspace}/instructions.md") ? "{$workspace}/instructions.md" : "{$memoryDir}/instructions.md";
         if (file_exists($instructionsPath) && ($instructions = file_get_contents($instructionsPath))) {
             $parts[] = "INSTRUCTIONS PERSISTANTES (mises a jour via update_instructions):\n{$instructions}";
         }
 
-        // Inject session memory file
+        // Inject session memory file (try exact session key, then fallback to session.md)
         $sessionKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $context->from);
-        $memoryPath = $this->customAgent->workspacePath('memory') . "/{$sessionKey}.md";
+        $memoryPath = "{$memoryDir}/{$sessionKey}.md";
+        if (!file_exists($memoryPath)) {
+            $memoryPath = "{$memoryDir}/session.md";
+        }
         if (file_exists($memoryPath) && ($sessionMemory = file_get_contents($memoryPath))) {
             $parts[] = "MEMOIRE DE SESSION (mise a jour via update_session_memory):\n{$sessionMemory}";
         }
