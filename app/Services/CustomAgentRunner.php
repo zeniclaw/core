@@ -722,7 +722,13 @@ class CustomAgentRunner extends BaseAgent
                 $userMsg = $userText;
                 \Illuminate\Support\Facades\Log::info("Skill step: simple chat", ['type' => $stepType, 'step' => $currentStep + 1, 'userMsg_len' => mb_strlen($userMsg), 'sysPrompt_len' => mb_strlen($systemPrompt)]);
                 $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
-                $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
+                // Use API directly (more reliable than CLI for simple chat)
+                $reply = $this->claude->chat($userMsg, $model, $systemPrompt);
+                // Fallback to CLI if API fails
+                if (!$reply) {
+                    \Illuminate\Support\Facades\Log::info("Skill step: API failed, trying CLI");
+                    $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
+                }
             }
             \Illuminate\Support\Facades\Log::info("Skill step: reply returned", ['reply_len' => mb_strlen($reply ?? ''), 'preview' => mb_substr($reply ?? '', 0, 100)]);
         }
