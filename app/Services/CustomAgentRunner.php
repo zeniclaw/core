@@ -780,7 +780,35 @@ class CustomAgentRunner extends BaseAgent
         if ($skill->description) {
             $parts[] = "Objectif de la routine: {$skill->description}";
         }
+
+        // Inject previous steps summary so LLM has context of what happened
+        if ($step > 0) {
+            $prevSteps = "ETAPES PRECEDENTES COMPLETEES:\n";
+            for ($i = 0; $i < $step; $i++) {
+                $prevSteps .= "- Etape " . ($i + 1) . ": " . ($routine[$i]['content'] ?? '') . " ✅\n";
+            }
+            $parts[] = $prevSteps;
+
+            // Include recent conversation history for context
+            $history = $this->memory->read($context->agent->id, $context->from);
+            $entries = $history['entries'] ?? [];
+            $recentEntries = array_slice($entries, -($step * 2)); // Last exchanges from skill
+            if (!empty($recentEntries)) {
+                $histBlock = "HISTORIQUE RECENT DE LA CONVERSATION:\n";
+                foreach ($recentEntries as $entry) {
+                    if (!empty($entry['sender_message'])) {
+                        $histBlock .= "Utilisateur: " . mb_substr($entry['sender_message'], 0, 200) . "\n";
+                    }
+                    if (!empty($entry['agent_reply'])) {
+                        $histBlock .= "Assistant: " . mb_substr($entry['agent_reply'], 0, 300) . "\n";
+                    }
+                }
+                $parts[] = $histBlock;
+            }
+        }
+
         $parts[] = "INSTRUCTION POUR CETTE ETAPE:\n{$stepContent}";
+        $parts[] = "IMPORTANT: Execute UNIQUEMENT l'instruction de cette etape. Ne propose pas d'alternatives, execute directement.";
 
         // RAG knowledge
         $ragContext = $this->retrieveKnowledge($context->body ?? $skill->name, $tier);
