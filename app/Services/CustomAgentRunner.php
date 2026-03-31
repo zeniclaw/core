@@ -163,10 +163,10 @@ class CustomAgentRunner extends BaseAgent
         $this->updateProgress($context, 'thinking', 'Generation de la reponse...', "Modele: {$model}");
 
         // 5. Check if tools are enabled — use agentic loop or simple chat
-        // Small/medium on-prem models can't handle tool_use — fall back to simple chat
+        // Small on-prem models can't handle tool_use — fall back to simple chat
         $enabledTools = $this->customAgent->enabled_tools ?? [];
         $hasTools = !empty($enabledTools);
-        $canUseTools = in_array($tier, [ModelTier::Balanced, ModelTier::Powerful]);
+        $canUseTools = in_array($tier, [ModelTier::Medium, ModelTier::Balanced, ModelTier::Powerful]);
 
         // Test chat sessions bypass agentic loop (no tool execution needed)
         $isTestChat = str_starts_with($context->from, 'web-custom-test-');
