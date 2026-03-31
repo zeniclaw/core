@@ -1255,6 +1255,11 @@ class CustomAgentRunner extends BaseAgent
             $parts[] = $credList;
         }
 
+        // Inject current local time so the agent always knows the correct time
+        $tz = \App\Models\AppSetting::timezone();
+        $now = now($tz);
+        $parts[] = "DATE/HEURE ACTUELLE : " . $now->format('d/m/Y H:i') . " ({$tz}). Utilise TOUJOURS cette heure, jamais UTC.";
+
         $parts[] = "Réponds en français sauf si l'utilisateur écrit dans une autre langue.";
 
         return implode("\n\n", $parts);
