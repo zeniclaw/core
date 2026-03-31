@@ -214,7 +214,7 @@ class CustomAgentRunner extends BaseAgent
         // Get all tool definitions and filter
         $allTools = $context->toolRegistry
             ? $context->toolRegistry->definitions()
-            : AgentTools::definitions();
+            : AgentTools::allDefinitions();
 
         $filteredTools = array_values(array_filter($allTools, function ($tool) use ($allowedToolNames) {
             return in_array($tool['name'] ?? '', $allowedToolNames);

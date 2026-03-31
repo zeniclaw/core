@@ -72,6 +72,127 @@ class AgentTools
     }
 
     /**
+     * Return all tool definitions: utility + BaseAgent memory/skill/gitlab tools.
+     * Used by CustomAgentRunner to build the full tool catalog for the agentic loop.
+     */
+    public static function allDefinitions(): array
+    {
+        // Utility tools
+        $tools = self::definitions();
+
+        // BaseAgent memory, skill, persistent files, gitlab tools
+        // We can't instantiate BaseAgent (abstract), so we use a static method
+        $tools = array_merge($tools, self::extraToolDefinitions());
+
+        return $tools;
+    }
+
+    /**
+     * Extra tool definitions (memory, skills, persistent files, gitlab).
+     */
+    public static function extraToolDefinitions(): array
+    {
+        return [
+            [
+                'name' => 'memory_store',
+                'description' => 'Sauvegarder un fait ou une information dans la memoire persistante.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Le fait a memoriser'],
+                        'fact_type' => ['type' => 'string', 'enum' => ['preference', 'personal_info', 'work_context', 'relationship', 'habit', 'other']],
+                        'tags' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tags optionnels'],
+                    ],
+                    'required' => ['content', 'fact_type'],
+                ],
+            ],
+            [
+                'name' => 'memory_search',
+                'description' => 'Chercher dans la memoire persistante.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Mot-cle a chercher'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+            [
+                'name' => 'teach_skill',
+                'description' => 'Enseigner une competence permanente a l\'agent.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'skill_key' => ['type' => 'string', 'description' => 'Identifiant snake_case'],
+                        'title' => ['type' => 'string', 'description' => 'Titre court'],
+                        'instructions' => ['type' => 'string', 'description' => 'Instructions detaillees'],
+                        'examples' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => ['skill_key', 'title', 'instructions'],
+                ],
+            ],
+            [
+                'name' => 'list_skills',
+                'description' => 'Lister les competences apprises.',
+                'input_schema' => ['type' => 'object', 'properties' => (object) []],
+            ],
+            [
+                'name' => 'forget_skill',
+                'description' => 'Oublier une competence.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'skill_key' => ['type' => 'string'],
+                    ],
+                    'required' => ['skill_key'],
+                ],
+            ],
+            [
+                'name' => 'update_instructions',
+                'description' => 'Mettre a jour les instructions persistantes de cet agent (chargees a chaque conversation).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Contenu COMPLET du fichier instructions en markdown'],
+                    ],
+                    'required' => ['content'],
+                ],
+            ],
+            [
+                'name' => 'update_session_memory',
+                'description' => 'Mettre a jour la memoire de cette session (rechargee a chaque message).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Contenu COMPLET de la memoire de session en markdown'],
+                    ],
+                    'required' => ['content'],
+                ],
+            ],
+            [
+                'name' => 'gitlab_api',
+                'description' => 'Appeler l\'API GitLab. Actions: list_projects, get_project, list_branches, list_commits, list_mrs, list_pipelines, list_tree, read_file, list_issues, create_issue, search_code, compare_branches, list_environments.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'action' => ['type' => 'string', 'enum' => ['list_projects', 'get_project', 'list_branches', 'list_commits', 'list_mrs', 'list_pipelines', 'list_tree', 'read_file', 'list_issues', 'create_issue', 'search_code', 'compare_branches', 'list_environments']],
+                        'project_id' => ['type' => 'string', 'description' => 'ID ou chemin encode du projet'],
+                        'search' => ['type' => 'string'],
+                        'branch' => ['type' => 'string'],
+                        'path' => ['type' => 'string'],
+                        'state' => ['type' => 'string'],
+                        'title' => ['type' => 'string'],
+                        'description' => ['type' => 'string'],
+                        'from' => ['type' => 'string'],
+                        'to' => ['type' => 'string'],
+                    ],
+                    'required' => ['action'],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Execute a tool call and return the result as a string.
      */
     public static function execute(string $toolName, array $input, AgentContext $context): string
