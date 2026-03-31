@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AgentLog;
 use App\Models\AuditLog;
 use App\Models\SubAgent;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -22,7 +22,7 @@ class MonitoringController extends Controller
      */
     public function healthCheck(): JsonResponse
     {
-        $health = AnthropicClient::healthCheck();
+        $health = LLMClient::healthCheck();
 
         // Add Redis check
         try {
@@ -58,7 +58,7 @@ class MonitoringController extends Controller
     public function dashboard(): JsonResponse
     {
         // Token usage today
-        $tokenUsage = AnthropicClient::getTokenUsage();
+        $tokenUsage = LLMClient::getTokenUsage();
 
         // Agent stats (last 24h)
         $agentStats = AgentLog::where('created_at', '>=', now()->subHours(24))
@@ -128,7 +128,7 @@ class MonitoringController extends Controller
         }
 
         // Provider health
-        $health = AnthropicClient::healthCheck();
+        $health = LLMClient::healthCheck();
         if (!$health['anthropic']) {
             $alerts[] = [
                 'severity' => 'critical',

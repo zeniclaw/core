@@ -861,7 +861,7 @@ class ZenibizDocsAgent extends BaseAgent
                 ['type' => 'text', 'text' => $textPrompt],
             ];
 
-            $claude = new \App\Services\AnthropicClient();
+            $claude = new \App\Services\LLMClient();
             $model = \App\Services\ModelResolver::balanced();
             $text = $claude->chat($message, $model);
 

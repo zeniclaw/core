@@ -4,11 +4,11 @@ namespace App\Services;
 
 class MeetingAnalyzer
 {
-    private AnthropicClient $claude;
+    private LLMClient $claude;
 
     public function __construct()
     {
-        $this->claude = new AnthropicClient();
+        $this->claude = new LLMClient();
     }
 
     public function analyze(array $messages, string $groupName): array

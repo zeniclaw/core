@@ -859,7 +859,7 @@ class AgentOrchestrator
         if (mb_strlen($clean) < 15) return false;
 
         // Use Haiku to detect if this is a new topic
-        $claude = new AnthropicClient();
+        $claude = new LLMClient();
         $response = $claude->chat(
             "Message: \"{$body}\"",
             ModelResolver::fast(),
@@ -1047,7 +1047,7 @@ class AgentOrchestrator
 
         // Generate summary
         $summary = $this->memory->formatForPrompt($context->agent->id, $context->from)
-            ? (new AnthropicClient())->chat(
+            ? (new LLMClient())->chat(
                 "Résume cet échange en 1 phrase courte (max 20 mots).\n"
                 . "Message de {$context->senderName}: {$bodyForMemory}\n"
                 . "Réponse de ZeniClaw: {$reply}",

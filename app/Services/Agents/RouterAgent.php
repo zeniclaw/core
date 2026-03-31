@@ -10,7 +10,7 @@ use App\Services\AgentContext;
 use App\Services\Agents\SmartContextAgent;
 use App\Services\Agents\ConversationMemoryAgent;
 use App\Services\Agents\ContextAgent;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use App\Services\ContextMemory\ContextStore;
 use App\Services\ContextMemoryBridge;
 use App\Services\ConversationMemoryService;
@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 
 class RouterAgent
 {
-    private AnthropicClient $claude;
+    private LLMClient $claude;
     private SmartContextAgent $smartContext;
     private ConversationMemoryAgent $conversationMemory;
     private ContextAgent $contextAgent;
@@ -91,7 +91,7 @@ class RouterAgent
 
     public function __construct()
     {
-        $this->claude = new AnthropicClient();
+        $this->claude = new LLMClient();
         $this->smartContext = new SmartContextAgent();
         $this->conversationMemory = new ConversationMemoryAgent();
         $this->contextAgent = new ContextAgent();

@@ -180,7 +180,7 @@ ETAPES:
 REGLES:
 - Ne modifie PAS les migrations, RouterAgent, AgentOrchestrator
 - Garde compatibilite BaseAgent/AgentInterface
-- Patterns existants: AnthropicClient, sendText, etc.
+- Patterns existants: LLMClient, sendText, etc.
 - Sois efficace, pas de boucles inutiles
 PROMPT;
     }

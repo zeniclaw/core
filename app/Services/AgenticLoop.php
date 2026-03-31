@@ -13,13 +13,13 @@ use Illuminate\Support\Facades\Log;
  */
 class AgenticLoop
 {
-    private AnthropicClient $claude;
+    private LLMClient $claude;
     private int $maxIterations;
     private bool $debug;
 
     public function __construct(int $maxIterations = 15, bool $debug = false)
     {
-        $this->claude = new AnthropicClient();
+        $this->claude = new LLMClient();
         $this->maxIterations = $maxIterations;
         $this->debug = $debug;
     }

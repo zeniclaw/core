@@ -42,7 +42,7 @@ class ContinuousImprovementService
         $agentPerformance = $this->getAgentPerformance($since);
 
         // Use Claude to analyze and suggest improvements
-        $client = new AnthropicClient();
+        $client = new LLMClient();
         $prompt = $this->buildAnalysisPrompt($errorSummary, $patternSummary, $agentPerformance);
 
         $response = $client->chat(

@@ -8,7 +8,7 @@ use App\Models\AppSetting;
 use App\Models\Project;
 use App\Models\SelfImprovement;
 use App\Models\SubAgent;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -36,7 +36,7 @@ class AutoSuggestCommand extends Command
             : '';
 
         // 3. Call Claude Haiku for the idea
-        $claude = new AnthropicClient();
+        $claude = new LLMClient();
         $response = $claude->chat(
             "Propose UNE amélioration créative pour ZeniClaw.\n\n{$exclusionText}\n\nRéponds UNIQUEMENT en JSON valide avec ce format :\n{\"title\": \"...\", \"analysis\": \"...\", \"plan\": \"...\"}",
             'claude-haiku-4-5-20251001',
@@ -121,7 +121,7 @@ class AutoSuggestCommand extends Command
         return self::SUCCESS;
     }
 
-    private function findSimilarImprovement(string $title, array $existingTitles, AnthropicClient $claude): ?string
+    private function findSimilarImprovement(string $title, array $existingTitles, LLMClient $claude): ?string
     {
         if (empty($existingTitles)) {
             return null;

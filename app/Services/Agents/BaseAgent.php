@@ -4,7 +4,7 @@ namespace App\Services\Agents;
 
 use App\Models\AgentLog;
 use App\Services\AgentContext;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use App\Services\ContextMemory\ContextStore;
 use App\Services\ContextMemoryBridge;
 use App\Services\ConversationMemoryService;
@@ -21,13 +21,13 @@ abstract class BaseAgent implements AgentInterface, ToolProviderInterface
     /** Track if sendText was called during this request (used by async job) */
     public static bool $whatsappSent = false;
 
-    protected AnthropicClient $claude;
+    protected LLMClient $claude;
     protected ConversationMemoryService $memory;
     protected PreferencesManager $preferencesManager;
 
     public function __construct()
     {
-        $this->claude = new AnthropicClient();
+        $this->claude = new LLMClient();
         $this->memory = new ConversationMemoryService();
         $this->preferencesManager = new PreferencesManager();
     }

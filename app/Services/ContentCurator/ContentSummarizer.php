@@ -2,18 +2,18 @@
 
 namespace App\Services\ContentCurator;
 
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use App\Services\ModelResolver;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ContentSummarizer
 {
-    private AnthropicClient $claude;
+    private LLMClient $claude;
 
     public function __construct()
     {
-        $this->claude = new AnthropicClient();
+        $this->claude = new LLMClient();
     }
 
     /**

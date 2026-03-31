@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\SelfImprovement;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -29,7 +29,7 @@ class AnalyzeSelfImprovementJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            $claude = new AnthropicClient();
+            $claude = new LLMClient();
 
             $prompt = "Agent: {$this->routedAgent}\n"
                 . "Message utilisateur: {$this->body}\n"

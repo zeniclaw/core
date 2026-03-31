@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\AppSetting;
 use App\Models\SelfImprovement;
 use App\Models\SubAgent;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -254,7 +254,7 @@ class RunSubAgentJob implements ShouldQueue
             . "- Sois strict: verifie que TOUT ce qui est necessaire est present (routes, controller, vue, model, migration si besoin)\n"
             . "Reponds UNIQUEMENT avec le JSON.";
 
-        $claude = new AnthropicClient();
+        $claude = new LLMClient();
         $response = $claude->chat($verifyPrompt, 'claude-haiku-4-5-20251001');
 
         // Parse response
@@ -1097,7 +1097,7 @@ class RunSubAgentJob implements ShouldQueue
     private function humanizeProgress(string $technicalDesc): string
     {
         try {
-            $claude = new AnthropicClient();
+            $claude = new LLMClient();
             $result = $claude->chat(
                 "Description technique: {$technicalDesc}",
                 'claude-haiku-4-5-20251001',
@@ -1135,7 +1135,7 @@ class RunSubAgentJob implements ShouldQueue
             $filesResult = Process::path($this->workspace)->run('git diff --name-only HEAD~1 HEAD');
             $files = trim($filesResult->output());
 
-            $claude = new AnthropicClient();
+            $claude = new LLMClient();
             $summary = $claude->chat(
                 "Voici le diff d'un commit:\n\nFichiers modifies:\n{$files}\n\nDiff:\n" . substr($diff, 0, 15000),
                 'claude-haiku-4-5-20251001',
@@ -1172,7 +1172,7 @@ class RunSubAgentJob implements ShouldQueue
                 return;
             }
 
-            $claude = new AnthropicClient();
+            $claude = new LLMClient();
             $response = $claude->chat(
                 "Analyse ce diff git pour des problemes de securite:\n\n" . substr($diff, 0, 15000),
                 'claude-haiku-4-5-20251001',

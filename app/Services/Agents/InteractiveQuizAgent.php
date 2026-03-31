@@ -10488,7 +10488,7 @@ class InteractiveQuizAgent extends BaseAgent
 
         while ($retries <= self::LLM_MAX_RETRIES && $llmAnalysis === null) {
             try {
-                $response = app(\App\Services\AnthropicClient::class)->message(
+                $response = app(\App\Services\LLMClient::class)->message(
                     model: $this->resolveModel($context),
                     system: $systemPrompt,
                     messages: [['role' => 'user', 'content' => $userPrompt]],

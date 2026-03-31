@@ -899,7 +899,7 @@ class CustomAgentRunner extends BaseAgent
             if ($reply) return $reply;
         }
 
-        // Fallback: simple chat via AnthropicClient
+        // Fallback: simple chat via LLMClient
         $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Fallback...");
         return $this->claude->chat($userMessage, $model, $systemPrompt, 800) ?: '';
     }

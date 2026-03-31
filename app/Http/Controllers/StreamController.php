@@ -136,7 +136,7 @@ class StreamController extends Controller
      */
     private function streamDirect(AgentContext $context): void
     {
-        $claude = new \App\Services\AnthropicClient();
+        $claude = new \App\Services\LLMClient();
         $model = \App\Services\ModelResolver::balanced();
 
         $systemPrompt = "Tu es ZeniClaw, un assistant IA personnel intelligent et bienveillant. Reponds en francais sauf si l'utilisateur parle une autre langue.";

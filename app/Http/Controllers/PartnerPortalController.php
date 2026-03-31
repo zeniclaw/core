@@ -8,7 +8,7 @@ use App\Models\CustomAgentShare;
 use App\Models\CustomAgentSkill;
 use App\Models\CustomAgentScript;
 use App\Services\AgentContext;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use App\Services\CustomAgentRunner;
 use App\Services\KnowledgeChunker;
 use Illuminate\Http\Request;
@@ -663,7 +663,7 @@ class PartnerPortalController extends Controller
         }
 
         try {
-            $claude = new AnthropicClient();
+            $claude = new LLMClient();
             $prompt = "Tu es un expert en analyse de resultats de scripts. "
                 . "Voici la sortie du script \"{$script->name}\" ({$script->language}):\n\n"
                 . "```\n{$output}\n```\n\n"
@@ -779,7 +779,7 @@ class PartnerPortalController extends Controller
             . "CODE ACTUEL:\n```{$script->language}\n{$script->code}\n```\n\n"
             . "Reponds UNIQUEMENT avec le code modifie, sans explication, sans ```markdown. Juste le code brut.";
 
-        $claude = new \App\Services\AnthropicClient();
+        $claude = new \App\Services\LLMClient();
         $model = \App\Services\ModelResolver::balanced();
         $result = $claude->chat($prompt, $model);
 
@@ -822,7 +822,7 @@ class PartnerPortalController extends Controller
         $messages .= "Utilisateur: {$request->input('message')}";
 
         $model = \App\Services\ModelResolver::fast();
-        $client = new \App\Services\AnthropicClient();
+        $client = new \App\Services\LLMClient();
         $reply = $client->chat($messages, $model, '', 1500);
 
         if (!$reply) {

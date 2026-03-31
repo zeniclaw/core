@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\AgentSession;
 use App\Models\UserAgentAnalytic;
-use App\Services\AnthropicClient;
+use App\Services\LLMClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -26,7 +26,7 @@ class SendProactiveTips extends Command
             ->pluck('phone')
             ->unique();
 
-        $claude = new AnthropicClient();
+        $claude = new LLMClient();
         $sentCount = 0;
 
         foreach ($activeUsers as $phone) {
@@ -55,7 +55,7 @@ class SendProactiveTips extends Command
         return self::SUCCESS;
     }
 
-    private function generatePersonalizedTip(AnthropicClient $claude, string $phone, array $stats): ?string
+    private function generatePersonalizedTip(LLMClient $claude, string $phone, array $stats): ?string
     {
         $usedAgents = array_keys($stats['agents_used']);
         $mostUsed = $stats['most_used'] ?? 'chat';
