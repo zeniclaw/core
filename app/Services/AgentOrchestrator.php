@@ -284,7 +284,9 @@ class AgentOrchestrator
 
             // Override model if the agent has a specific sub-agent model configured
             $configuredModel = $context->agent->getSubAgentModel($routing['agent']);
-            $routingModel = $this->resolveFullModelId($configuredModel) ?? $routing['model'];
+            $routingModel = $this->resolveFullModelId($configuredModel)
+                ?? $this->resolveFullModelId($routing['model'])
+                ?? $routing['model'];
 
             if ($debug) {
                 $confidence = $routing['confidence'] ?? '?';
@@ -975,9 +977,20 @@ class AgentOrchestrator
      */
     private function resolveFullModelId(string $model): ?string
     {
-        // Already a full model ID
-        if (str_contains($model, '-202')) {
+        // Already a full model ID (dated versions or on-prem with colons)
+        if (str_contains($model, '-202') || str_contains($model, ':')) {
             return $model;
+        }
+
+        // Resolve short Claude names (e.g. claude-sonnet-4-6 → claude-sonnet-4-6-20250514)
+        if (str_starts_with($model, 'claude-')) {
+            $resolved = ModelResolver::resolve('balanced'); // try to find it
+            foreach (\App\Services\ModelResolver::CLOUD_MODELS as $id => $label) {
+                if (str_contains($id, $model) || str_contains($model, str_replace(['-20250514', '-20251001', '-20250602'], '', $id))) {
+                    return $id;
+                }
+            }
+            return $model; // return as-is, API might accept it
         }
 
         return match ($model) {
