@@ -164,14 +164,14 @@ class CustomAgentRunner extends BaseAgent
 
         // 5. Check if tools are enabled — use agentic loop or simple chat
         // Small on-prem models can't handle tool_use — fall back to simple chat
+        // Memory/skill tools are always available (learning is core to custom agents)
         $enabledTools = $this->customAgent->enabled_tools ?? [];
-        $hasTools = !empty($enabledTools);
         $canUseTools = in_array($tier, [ModelTier::Medium, ModelTier::Balanced, ModelTier::Powerful]);
 
         // Test chat sessions bypass agentic loop (no tool execution needed)
         $isTestChat = str_starts_with($context->from, 'web-custom-test-');
 
-        if ($hasTools && $canUseTools && !$isTestChat) {
+        if ($canUseTools && !$isTestChat) {
             $result = $this->handleWithTools($context, $systemPrompt, $model, $enabledTools, $ragContext);
             // Fallback to simple chat if agentic loop failed
             if (!$result->reply || str_contains($result->reply, 'trop volumineux') || str_contains($result->reply, "n'ai pas pu")) {
@@ -330,6 +330,11 @@ class CustomAgentRunner extends BaseAgent
                 $names = array_merge($names, self::TOOL_GROUPS[$groupKey]['tools']);
             }
         }
+
+        // Always include memory and skill tools — learning is core to custom agents
+        $alwaysInclude = ['memory_store', 'memory_search', 'teach_skill', 'list_skills', 'forget_skill'];
+        $names = array_merge($names, $alwaysInclude);
+
         return array_unique($names);
     }
 
