@@ -1245,13 +1245,14 @@ class CustomAgentRunner extends BaseAgent
         $parts[] = "ESPACE DE TRAVAIL : {$workspace}\nSi tu dois telecharger, generer ou stocker des fichiers, utilise ce repertoire. Sous-dossiers : docs/, scripts/, downloads/, memory/";
 
         // Inject available credentials (keys only, not values — agent reads them at runtime)
-        $creds = $this->customAgent->credentials()->where('is_active', true)->pluck('description', 'key');
+        $creds = $this->customAgent->credentials()->where('is_active', true)->get();
         if ($creds->isNotEmpty()) {
-            $credList = "CREDENTIALS DISPONIBLES (chiffres, accessibles via getCredential('key')) :\n";
-            foreach ($creds as $key => $desc) {
-                $credList .= "- {$key}" . ($desc ? " : {$desc}" : '') . "\n";
+            $credList = "CREDENTIALS DISPONIBLES :\n";
+            foreach ($creds as $cred) {
+                $value = $cred->decrypted_value;
+                $credList .= "- {$cred->key}" . ($cred->description ? " ({$cred->description})" : '') . " = {$value}\n";
             }
-            $credList .= "Pour utiliser un credential dans un script, appelle \$agent->getCredential('key_name').";
+            $credList .= "Utilise ces valeurs directement dans tes appels API (headers, tokens, etc.).";
             $parts[] = $credList;
         }
 
