@@ -226,7 +226,7 @@ class CustomAgentRunner extends BaseAgent
             $systemPrompt .= "\n\nTu as des CONNAISSANCES provenant de tes documents. Utilise-les en priorite avant de chercher sur le web.";
         }
 
-        $loop = new AgenticLoop(maxIterations: 10, debug: $context->session->debug_mode ?? false);
+        $loop = new AgenticLoop(maxIterations: 15, debug: $context->session->debug_mode ?? false);
 
         // Build multimodal message if media is present
         $userMessage = $context->body ?? '';
