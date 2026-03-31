@@ -722,13 +722,9 @@ class CustomAgentRunner extends BaseAgent
                 $userMsg = $userText;
                 \Illuminate\Support\Facades\Log::info("Skill step: simple chat", ['type' => $stepType, 'step' => $currentStep + 1, 'userMsg_len' => mb_strlen($userMsg), 'sysPrompt_len' => mb_strlen($systemPrompt)]);
                 $this->updateProgress($context, 'skill', $this->currentStepLabel ?? '', "Generation de la reponse...");
-                // Use API directly (more reliable than CLI for simple chat)
-                $reply = $this->claude->chat($userMsg, $model, $systemPrompt);
-                // Fallback to CLI if API fails
-                if (!$reply) {
-                    \Illuminate\Support\Facades\Log::info("Skill step: API failed, trying CLI");
-                    $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
-                }
+                // Use local chatViaCli with --max-turns 1 (no tools) for prompt steps
+                // This avoids the CLI using Bash in loops and hitting max_turns
+                $reply = $this->chatViaCli($userMsg, $systemPrompt, $model);
             }
             \Illuminate\Support\Facades\Log::info("Skill step: reply returned", ['reply_len' => mb_strlen($reply ?? ''), 'preview' => mb_substr($reply ?? '', 0, 100)]);
         }
@@ -1060,14 +1056,20 @@ class CustomAgentRunner extends BaseAgent
         file_put_contents($tmpFile, $systemPrompt);
 
         $cmd = sprintf(
-            'CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 --disallowedTools "Bash,Edit,Write,WebSearch,WebFetch" 2>/dev/null',
+            'sudo CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 --disallowedTools "Bash,Edit,Write,WebSearch,WebFetch" 2>&1',
             escapeshellarg($apiKey),
             escapeshellarg($userMessage),
             escapeshellarg($tmpFile),
             escapeshellarg($slug)
         );
 
-        $output = shell_exec($cmd);
+        try {
+            $result = \Illuminate\Support\Facades\Process::timeout(60)->run($cmd);
+            $output = $result->output();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("chatViaCli exception: " . $e->getMessage());
+            $output = '';
+        }
         @unlink($tmpFile);
 
         \Illuminate\Support\Facades\Log::info("chatViaCli result", [
@@ -1077,12 +1079,7 @@ class CustomAgentRunner extends BaseAgent
 
         if ($output) {
             $data = json_decode($output, true);
-            $result = $data['result'] ?? '';
-            // If error_max_turns but has partial result, use it
-            if (!$result && ($data['subtype'] ?? '') === 'error_max_turns') {
-                \Illuminate\Support\Facades\Log::warning("chatViaCli: max_turns hit, no result");
-            }
-            return $result;
+            return $data['result'] ?? '';
         }
 
         return '';
