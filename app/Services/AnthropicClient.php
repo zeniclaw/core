@@ -635,7 +635,7 @@ class AnthropicClient
         if ($sessionId) {
             // Resume existing session — send new message via --resume
             $cmd = sprintf(
-                'claude --resume %s -p %s --model %s --output-format json --max-turns 12 --allowedTools "Bash,WebSearch,WebFetch" 2>&1',
+                'claude --resume %s -p %s --model %s --output-format json --max-turns 20 --allowedTools "Bash,WebSearch,WebFetch" 2>&1',
                 escapeshellarg($sessionId),
                 escapeshellarg($textMessage), // Only user message, system prompt already in session
                 escapeshellarg($slug)
@@ -645,7 +645,7 @@ class AnthropicClient
             $tools = $imageFile ? 'Bash,Read,WebSearch,WebFetch' : 'Bash,WebSearch,WebFetch';
             $sysPromptArg = $sysPromptFile ? sprintf(' --system-prompt-file %s', escapeshellarg($sysPromptFile)) : '';
             $cmd = sprintf(
-                'claude -p %s%s --model %s --output-format json --max-turns 12 --allowedTools %s 2>&1',
+                'claude -p %s%s --model %s --output-format json --max-turns 20 --allowedTools %s 2>&1',
                 escapeshellarg($fullPrompt),
                 $sysPromptArg,
                 escapeshellarg($slug),
@@ -665,11 +665,16 @@ class AnthropicClient
             $data = json_decode($result->output(), true);
 
             if (!$result->successful()) {
-                // If output has a partial result (e.g. error_max_turns), use it
-                if ($data && !empty($data['result']) && ($data['subtype'] ?? '') === 'error_max_turns') {
-                    Log::info('AnthropicClient::executeClaudeCli max_turns hit, using partial result', [
+                // If output has a result (e.g. error_max_turns), use it even if partial
+                if ($data && ($data['subtype'] ?? '') === 'error_max_turns') {
+                    Log::info('AnthropicClient::executeClaudeCli max_turns hit', [
                         'num_turns' => $data['num_turns'] ?? '?',
+                        'has_result' => !empty($data['result']),
                     ]);
+                    // Use partial result if available, otherwise synthesize a response
+                    if (empty($data['result'])) {
+                        $data['result'] = "L'opération a nécessité trop d'étapes et n'a pas pu être complétée entièrement. Veuillez réessayer ou simplifier la demande.";
+                    }
                     // Fall through to process the result below
                 } else {
                     Log::warning('AnthropicClient::executeClaudeCli failed', [
