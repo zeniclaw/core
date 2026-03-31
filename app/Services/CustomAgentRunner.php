@@ -1056,7 +1056,7 @@ class CustomAgentRunner extends BaseAgent
         file_put_contents($tmpFile, $systemPrompt);
 
         $cmd = sprintf(
-            'sudo CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 --disallowedTools "Bash,Edit,Write,WebSearch,WebFetch" 2>&1',
+            'sudo CLAUDE_CODE_OAUTH_TOKEN=%s HOME=/tmp claude -p %s --system-prompt-file %s --model %s --output-format json --max-turns 1 --allowedTools "" 2>&1',
             escapeshellarg($apiKey),
             escapeshellarg($userMessage),
             escapeshellarg($tmpFile),
