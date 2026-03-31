@@ -614,17 +614,20 @@ class AnthropicClient
             $textMessage = implode("\n", $texts);
         }
 
-        // Build the prompt with system instructions
-        $fullPrompt = $systemPrompt
-            ? "{$systemPrompt}\n\n---\n\nMessage de l'utilisateur:\n{$textMessage}"
-            : $textMessage;
-
-        // If image is present, add file reference to prompt and skip session resume
+        // If image is present, add file reference to prompt
+        $fullPrompt = $textMessage;
         if ($imageFile) {
             $fullPrompt .= "\n\n[Image file: {$imageFile}] — Use the Read tool to view this image file.";
         }
 
         $slug = $this->cliModelSlug($model);
+
+        // Write system prompt to temp file (avoids prompt injection detection by CLI)
+        $sysPromptFile = null;
+        if ($systemPrompt) {
+            $sysPromptFile = tempnam('/tmp', 'zc_sysp_');
+            file_put_contents($sysPromptFile, $systemPrompt);
+        }
 
         // Skip session resume when processing images (fresh context needed)
         $sessionId = $imageFile ? null : $this->getCliSessionId();
@@ -640,9 +643,11 @@ class AnthropicClient
         } else {
             // New session — include Read tool for image analysis
             $tools = $imageFile ? 'Bash,Read,WebSearch,WebFetch' : 'Bash,WebSearch,WebFetch';
+            $sysPromptArg = $sysPromptFile ? sprintf(' --system-prompt-file %s', escapeshellarg($sysPromptFile)) : '';
             $cmd = sprintf(
-                'claude -p %s --model %s --output-format json --max-turns 6 --allowedTools %s 2>/dev/null',
+                'claude -p %s%s --model %s --output-format json --max-turns 6 --allowedTools %s 2>/dev/null',
                 escapeshellarg($fullPrompt),
+                $sysPromptArg,
                 escapeshellarg($slug),
                 escapeshellarg($tools)
             );
@@ -709,9 +714,12 @@ class AnthropicClient
             Log::error('AnthropicClient::executeClaudeCli exception', ['error' => $e->getMessage()]);
             return null;
         } finally {
-            // Clean up temp image file
+            // Clean up temp files
             if ($imageFile && file_exists($imageFile)) {
                 @unlink($imageFile);
+            }
+            if ($sysPromptFile && file_exists($sysPromptFile)) {
+                @unlink($sysPromptFile);
             }
         }
     }
