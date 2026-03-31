@@ -390,6 +390,16 @@ class OllamaController extends Controller
             ['id' => 'mixtral:8x7b', 'name' => 'Mixtral 8x7B (MoE)', 'type' => 'onprem', 'ram_gb' => 32, 'disk_gb' => 26, 'min_cpu' => 8, 'gpu_required' => false, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'expert']],
             ['id' => 'llama3.1:70b', 'name' => 'Llama 3.1 70B (Meta)', 'type' => 'onprem', 'ram_gb' => 48, 'disk_gb' => 40, 'min_cpu' => 8, 'gpu_required' => true, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'top']],
             ['id' => 'qwen2.5:72b', 'name' => 'Qwen 2.5 72B', 'type' => 'onprem', 'ram_gb' => 48, 'disk_gb' => 42, 'min_cpu' => 8, 'gpu_required' => true, 'speed' => 'tres-lent', 'quality' => 5, 'tags' => ['chat', 'top']],
+            // Vision models
+            ['id' => 'llava:7b', 'name' => 'LLaVA 7B', 'type' => 'onprem', 'ram_gb' => 8, 'disk_gb' => 4.7, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 3, 'tags' => ['vision', 'ocr']],
+            ['id' => 'llava:13b', 'name' => 'LLaVA 13B', 'type' => 'onprem', 'ram_gb' => 16, 'disk_gb' => 8, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'lent', 'quality' => 4, 'tags' => ['vision', 'ocr']],
+            ['id' => 'minicpm-v', 'name' => 'MiniCPM-V (OCR)', 'type' => 'onprem', 'ram_gb' => 8, 'disk_gb' => 5.5, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 4, 'tags' => ['vision', 'ocr', 'documents']],
+            ['id' => 'llama3.2-vision:11b', 'name' => 'Llama 3.2 Vision 11B', 'type' => 'onprem', 'ram_gb' => 12, 'disk_gb' => 7.9, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 5, 'tags' => ['vision', 'ocr', 'documents']],
+            // Function calling models
+            ['id' => 'hermes3:8b', 'name' => 'Hermes 3 8B', 'type' => 'onprem', 'ram_gb' => 8, 'disk_gb' => 4.7, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 4, 'tags' => ['function-calling', 'tools']],
+            ['id' => 'mistral-nemo:12b', 'name' => 'Mistral Nemo 12B', 'type' => 'onprem', 'ram_gb' => 12, 'disk_gb' => 7.1, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 4, 'tags' => ['function-calling', 'tools', 'francais']],
+            ['id' => 'command-r:7b', 'name' => 'Command R 7B (Cohere)', 'type' => 'onprem', 'ram_gb' => 8, 'disk_gb' => 4, 'min_cpu' => 4, 'gpu_required' => false, 'speed' => 'modere', 'quality' => 4, 'tags' => ['function-calling', 'rag', 'tools']],
+            ['id' => 'qwen2.5:32b', 'name' => 'Qwen 2.5 32B', 'type' => 'onprem', 'ram_gb' => 24, 'disk_gb' => 19, 'min_cpu' => 8, 'gpu_required' => false, 'speed' => 'lent', 'quality' => 5, 'tags' => ['function-calling', 'tools', 'puissant']],
             // Cloud models (always available)
             ['id' => 'claude-haiku-4-5-20251001', 'name' => 'Claude Haiku 4.5', 'type' => 'cloud', 'provider' => 'Anthropic', 'ram_gb' => 0, 'disk_gb' => 0, 'min_cpu' => 0, 'gpu_required' => false, 'speed' => 'ultra-rapide', 'quality' => 4, 'tags' => ['chat', 'rapide', 'cloud']],
             ['id' => 'claude-sonnet-4-6-20250514', 'name' => 'Claude Sonnet 4.6', 'type' => 'cloud', 'provider' => 'Anthropic', 'ram_gb' => 0, 'disk_gb' => 0, 'min_cpu' => 0, 'gpu_required' => false, 'speed' => 'rapide', 'quality' => 5, 'tags' => ['chat', 'code', 'cloud']],
