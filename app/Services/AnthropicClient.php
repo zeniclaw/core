@@ -334,7 +334,27 @@ class AnthropicClient
             $messages[] = ['role' => 'system', 'content' => $systemPrompt];
         }
 
-        $content = is_array($message) ? json_encode($message) : $message;
+        // Convert multimodal messages (Anthropic format) to OpenAI/Ollama format
+        if (is_array($message)) {
+            $content = [];
+            foreach ($message as $block) {
+                if (($block['type'] ?? '') === 'image' && isset($block['source'])) {
+                    // Anthropic base64 image → OpenAI image_url format
+                    $mediaType = $block['source']['media_type'] ?? 'image/jpeg';
+                    $b64 = $block['source']['data'] ?? '';
+                    $content[] = [
+                        'type' => 'image_url',
+                        'image_url' => ['url' => "data:{$mediaType};base64,{$b64}"],
+                    ];
+                } elseif (($block['type'] ?? '') === 'text') {
+                    $content[] = ['type' => 'text', 'text' => $block['text']];
+                } else {
+                    $content[] = ['type' => 'text', 'text' => json_encode($block)];
+                }
+            }
+        } else {
+            $content = $message;
+        }
         $messages[] = ['role' => 'user', 'content' => $content];
 
         if ($maxTokens <= 0) {
