@@ -380,6 +380,13 @@ class LLMClient
         }
 
         try {
+            $isMultimodal = is_array($content);
+            Log::info('OnPrem chat request', [
+                'model' => $model,
+                'multimodal' => $isMultimodal,
+                'url' => rtrim($baseUrl, '/') . '/v1/chat/completions',
+            ]);
+
             $response = Http::timeout(120)
                 ->withHeaders($headers)
                 ->post(rtrim($baseUrl, '/') . '/v1/chat/completions', $body);
@@ -399,7 +406,7 @@ class LLMClient
                 'error' => $e->getMessage(),
                 'base_url' => $baseUrl,
                 'prompt_chars' => mb_strlen($systemPrompt),
-                'message_chars' => mb_strlen($content),
+                'message_chars' => is_array($content) ? count($content) . ' blocks' : mb_strlen($content),
             ]);
         }
 
