@@ -820,12 +820,14 @@ class CustomAgentRunner extends BaseAgent
             $parts[] = $ragBlock;
         }
 
-        // Credentials (keys + descriptions, not values)
-        $creds = $this->customAgent->credentials()->where('is_active', true)->pluck('description', 'key');
+        // Credentials — inject values directly so the LLM can use them in API calls
+        $creds = $this->customAgent->credentials()->where('is_active', true)->get();
         if ($creds->isNotEmpty()) {
-            $credBlock = "CREDENTIALS DISPONIBLES (utilise getCredential('key') pour lire la valeur):\n";
-            foreach ($creds as $key => $desc) {
-                $credBlock .= "- {$key}" . ($desc ? ": {$desc}" : '') . "\n";
+            $credBlock = "CREDENTIALS DISPONIBLES (utilise ces valeurs directement dans tes appels API):\n";
+            foreach ($creds as $cred) {
+                $credBlock .= "- {$cred->key}";
+                if ($cred->description) $credBlock .= " ({$cred->description})";
+                $credBlock .= ": {$cred->decrypted_value}\n";
             }
             $parts[] = $credBlock;
         }
