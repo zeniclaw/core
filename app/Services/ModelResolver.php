@@ -45,6 +45,14 @@ class ModelResolver
         'llama3.1:8b'               => 'Llama 3.1 8B (Meta)',
         'mistral-small:22b'         => 'Mistral Small 22B (francais+)',
         'mixtral:8x7b'              => 'Mixtral 8x7B (MoE)',
+        'llava:7b'                  => 'LLaVA 7B (vision)',
+        'llava:13b'                 => 'LLaVA 13B (vision+)',
+        'minicpm-v'                 => 'MiniCPM-V (vision, OCR)',
+        'llama3.2-vision:11b'       => 'Llama 3.2 Vision 11B (vision, OCR)',
+        'hermes3:8b'                => 'Hermes 3 8B (function calling)',
+        'mistral-nemo:12b'          => 'Mistral Nemo 12B (function calling)',
+        'command-r:7b'              => 'Command R 7B (function calling, RAG)',
+        'qwen2.5:32b'               => 'Qwen 2.5 32B (function calling, puissant)',
     ];
 
     /** @deprecated Use CLOUD_MODELS + ONPREM_LABELS instead */
