@@ -92,6 +92,12 @@ class CustomAgentRunner extends BaseAgent
             'description' => 'Sauvegarder et rechercher des infos sur l\'utilisateur',
             'tools' => ['memory_store', 'memory_search', 'teach_skill', 'list_skills', 'forget_skill'],
         ],
+        'gitlab' => [
+            'label' => 'GitLab',
+            'icon' => '🦊',
+            'description' => 'Acceder aux projets GitLab (code, branches, MRs, issues, pipelines)',
+            'tools' => ['gitlab_api'],
+        ],
     ];
 
     private const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];

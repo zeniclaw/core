@@ -497,6 +497,31 @@ PROMPT;
                     'required' => ['query'],
                 ],
             ],
+            // ── GitLab API Tool ──────────────────────────────────────
+            [
+                'name' => 'gitlab_api',
+                'description' => 'Appeler l\'API GitLab. Necessite le credential "gitlabtoken" configure sur l\'agent. Utilise pour lister les projets, branches, MRs, pipelines, lire des fichiers, creer des issues, etc.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'action' => [
+                            'type' => 'string',
+                            'enum' => ['list_projects', 'get_project', 'list_branches', 'list_commits', 'list_mrs', 'list_pipelines', 'list_tree', 'read_file', 'list_issues', 'create_issue', 'search_code', 'compare_branches', 'list_environments'],
+                            'description' => 'Action a effectuer',
+                        ],
+                        'project_id' => ['type' => 'string', 'description' => 'ID ou chemin encode du projet (ex: "namespace%2Fproject" ou "12345"). Requis pour toutes les actions sauf list_projects.'],
+                        'search' => ['type' => 'string', 'description' => 'Terme de recherche (pour list_projects ou search_code)'],
+                        'branch' => ['type' => 'string', 'description' => 'Nom de la branche (defaut: main)'],
+                        'path' => ['type' => 'string', 'description' => 'Chemin du fichier (pour read_file ou list_tree)'],
+                        'state' => ['type' => 'string', 'description' => 'Filtre par etat: opened, closed, merged, all (pour MRs et issues)'],
+                        'title' => ['type' => 'string', 'description' => 'Titre (pour create_issue)'],
+                        'description' => ['type' => 'string', 'description' => 'Description (pour create_issue)'],
+                        'from' => ['type' => 'string', 'description' => 'Branche source (pour compare_branches)'],
+                        'to' => ['type' => 'string', 'description' => 'Branche cible (pour compare_branches)'],
+                    ],
+                    'required' => ['action'],
+                ],
+            ],
             // ── Persistent Files (instructions + session memory) ─────
             [
                 'name' => 'update_instructions',

@@ -89,6 +89,7 @@ class AgentTools
                 'teach_skill' => self::executeTeachSkill($input, $context),
                 'list_skills' => self::executeListSkills($context),
                 'forget_skill' => self::executeForgetSkill($input, $context),
+                'gitlab_api' => self::executeGitlabApi($input, $context),
                 default => self::executeFallback($toolName, $input, $context),
             };
         } catch (\Exception $e) {
@@ -335,5 +336,68 @@ class AgentTools
         $deleted = \App\Models\AgentSkill::where('agent_id', $context->agent->id)
             ->where('skill_key', $key)->delete();
         return json_encode(['success' => $deleted > 0, 'message' => $deleted ? "Competence '{$key}' oubliee" : "Competence '{$key}' non trouvee"]);
+    }
+
+    // ── GitLab API Tool ─────────────────────────────────────────
+
+    private static function executeGitlabApi(array $input, AgentContext $context): string
+    {
+        $action = $input['action'] ?? '';
+        if (!$action) return json_encode(['error' => 'Missing action']);
+
+        // Get token from custom agent credentials
+        $ca = self::resolveCustomAgent($context);
+        $token = null;
+        $host = 'gitlab.com';
+
+        if ($ca) {
+            $token = $ca->getCredential('gitlabtoken') ?: $ca->getCredential('gitlab_token');
+            $hostCred = $ca->getCredential('gitlab_host');
+            if ($hostCred) $host = $hostCred;
+        }
+
+        // Fallback to global setting
+        if (!$token) {
+            $token = \App\Models\AppSetting::get('gitlab_access_token');
+        }
+
+        if (!$token) {
+            return json_encode(['error' => 'Aucun token GitLab configure. Ajoutez le credential "gitlabtoken" sur cet agent.']);
+        }
+
+        $gitlab = new GitLabService($host, $token);
+        $projectId = $input['project_id'] ?? '';
+
+        try {
+            $result = match ($action) {
+                'list_projects' => $gitlab->listProjects($input['search'] ?? '', 20),
+                'get_project' => $gitlab->getProject($projectId),
+                'list_branches' => $gitlab->listBranches($projectId),
+                'list_commits' => $gitlab->listCommits($projectId, $input['branch'] ?? 'main', 10),
+                'list_mrs' => $gitlab->listMergeRequests($projectId, $input['state'] ?? 'opened', 10),
+                'list_pipelines' => $gitlab->listPipelines($projectId, 5),
+                'list_tree' => $gitlab->listTree($projectId, $input['path'] ?? '', $input['branch'] ?? 'main'),
+                'read_file' => $gitlab->readFile($projectId, $input['path'] ?? '', $input['branch'] ?? 'main'),
+                'list_issues' => $gitlab->listIssues($projectId, $input['state'] ?? 'opened', 10),
+                'create_issue' => $gitlab->createIssue($projectId, $input['title'] ?? '', $input['description'] ?? ''),
+                'search_code' => $gitlab->searchCode($projectId, $input['search'] ?? ''),
+                'compare_branches' => $gitlab->compareBranches($projectId, $input['from'] ?? 'main', $input['to'] ?? 'develop'),
+                'list_environments' => $gitlab->listEnvironments($projectId),
+                default => ['error' => "Action inconnue: {$action}"],
+            };
+
+            if ($result === null) {
+                return json_encode(['error' => "Appel API GitLab echoue pour action: {$action}. Verifiez le project_id et le token."]);
+            }
+
+            // Truncate large responses
+            $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            if (mb_strlen($json) > 8000) {
+                $json = mb_substr($json, 0, 8000) . "\n... (tronque)";
+            }
+            return $json;
+        } catch (\Throwable $e) {
+            return json_encode(['error' => $e->getMessage()]);
+        }
     }
 }
