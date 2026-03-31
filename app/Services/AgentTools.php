@@ -82,8 +82,14 @@ class AgentTools
                 'store_knowledge' => self::executeStoreKnowledge($input, $context),
                 'recall_knowledge' => self::executeRecallKnowledge($input, $context),
                 'list_knowledge' => self::executeListKnowledge($context),
-                default => (new Agents\BaseAgent())->executeTool($toolName, $input, $context)
-                    ?? json_encode(['error' => "Unknown tool: {$toolName}"]),
+                'update_instructions' => self::executeUpdateInstructions($input, $context),
+                'update_session_memory' => self::executeUpdateSessionMemory($input, $context),
+                'memory_store' => self::executeMemoryStore($input, $context),
+                'memory_search' => self::executeMemorySearch($input, $context),
+                'teach_skill' => self::executeTeachSkill($input, $context),
+                'list_skills' => self::executeListSkills($context),
+                'forget_skill' => self::executeForgetSkill($input, $context),
+                default => json_encode(['error' => "Unknown tool: {$toolName}"]),
             };
         } catch (\Exception $e) {
             Log::error("AgentTools::execute failed", ['tool' => $toolName, 'error' => $e->getMessage()]);
@@ -190,5 +196,120 @@ class AgentTools
         ])->toArray();
 
         return json_encode(['entries' => $list]);
+    }
+
+    // ── Persistent files (instructions + session memory) ─────────
+
+    private static function resolveCustomAgent(AgentContext $context): ?\App\Models\CustomAgent
+    {
+        $activeId = $context->session->active_custom_agent_id ?? null;
+        if ($activeId) {
+            return \App\Models\CustomAgent::find($activeId);
+        }
+        if (str_starts_with($context->from, 'partner-')) {
+            $shareId = (int) substr($context->from, 8);
+            $share = \App\Models\CustomAgentShare::find($shareId);
+            return $share?->customAgent;
+        }
+        return null;
+    }
+
+    private static function executeUpdateInstructions(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        if (!$content) return json_encode(['error' => 'Missing content']);
+
+        $ca = self::resolveCustomAgent($context);
+        if (!$ca) return json_encode(['error' => 'No custom agent context']);
+
+        $path = $ca->workspacePath() . '/instructions.md';
+        file_put_contents($path, $content);
+        return json_encode(['success' => true, 'message' => 'Instructions mises a jour', 'size' => mb_strlen($content)]);
+    }
+
+    private static function executeUpdateSessionMemory(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        if (!$content) return json_encode(['error' => 'Missing content']);
+
+        $ca = self::resolveCustomAgent($context);
+        if (!$ca) return json_encode(['error' => 'No custom agent context']);
+
+        $dir = $ca->workspacePath('memory');
+        $sessionKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $context->from);
+        file_put_contents("{$dir}/{$sessionKey}.md", $content);
+        return json_encode(['success' => true, 'message' => 'Memoire de session mise a jour', 'size' => mb_strlen($content)]);
+    }
+
+    // ── Memory tools (forwarded from BaseAgent) ─────────────────
+
+    private static function executeMemoryStore(array $input, AgentContext $context): string
+    {
+        $content = $input['content'] ?? '';
+        $factType = $input['fact_type'] ?? 'other';
+        $tags = $input['tags'] ?? [];
+        if (!$content) return json_encode(['error' => 'Missing content']);
+
+        $memory = \App\Models\ConversationMemory::create([
+            'user_id' => $context->from,
+            'agent_id' => $context->agent->id,
+            'content' => $content,
+            'fact_type' => $factType,
+            'tags' => $tags,
+            'source' => 'tool',
+        ]);
+        return json_encode(['success' => true, 'id' => $memory->id, 'message' => "Memorise: {$content}"]);
+    }
+
+    private static function executeMemorySearch(array $input, AgentContext $context): string
+    {
+        $query = $input['query'] ?? '';
+        if (!$query) return json_encode(['error' => 'Missing query']);
+
+        $memories = \App\Models\ConversationMemory::forUser($context->from)
+            ->active()->notExpired()->search($query)
+            ->orderByDesc('created_at')->limit(10)->get();
+
+        if ($memories->isEmpty()) {
+            return json_encode(['results' => [], 'message' => "Aucun souvenir pour: {$query}"]);
+        }
+
+        return json_encode(['results' => $memories->map(fn($m) => [
+            'content' => $m->content, 'fact_type' => $m->fact_type, 'tags' => $m->tags,
+        ])->toArray()]);
+    }
+
+    private static function executeTeachSkill(array $input, AgentContext $context): string
+    {
+        $key = $input['skill_key'] ?? '';
+        $title = $input['title'] ?? '';
+        $instructions = $input['instructions'] ?? '';
+        if (!$key || !$title || !$instructions) return json_encode(['error' => 'Missing required fields']);
+
+        \App\Models\AgentSkill::teach(
+            $context->agent->id, 'custom', $key, $title, $instructions,
+            $input['examples'] ?? null, $context->from,
+        );
+        return json_encode(['success' => true, 'message' => "Competence '{$title}' enregistree"]);
+    }
+
+    private static function executeListSkills(AgentContext $context): string
+    {
+        $skills = \App\Models\AgentSkill::allForAgent($context->agent->id);
+        if ($skills->isEmpty()) return json_encode(['skills' => [], 'message' => 'Aucune competence apprise']);
+
+        return json_encode(['skills' => $skills->map(fn($s) => [
+            'key' => $s->skill_key, 'title' => $s->title, 'instructions' => $s->instructions,
+        ])->toArray()]);
+    }
+
+    private static function executeForgetSkill(array $input, AgentContext $context): string
+    {
+        $key = $input['skill_key'] ?? '';
+        if (!$key) return json_encode(['error' => 'Missing skill_key']);
+
+        $deleted = \App\Models\AgentSkill::where('agent_id', $context->agent->id)
+            ->where('skill_key', $key)->delete();
+        return json_encode(['success' => $deleted > 0, 'message' => $deleted ? "Competence '{$key}' oubliee" : "Competence '{$key}' non trouvee"]);
     }
 }
