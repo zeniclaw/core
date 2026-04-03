@@ -148,6 +148,10 @@ class CustomAgentRunner extends BaseAgent
             return $teachResult;
         }
 
+        // 0c. Pre-fetch business data if message matches an API endpoint
+        $bizResult = $this->prefetchBusinessData($context);
+        $businessData = $bizResult['prompt'] ?? null;
+
         // 1. Resolve model — prefer custom agent's explicit model, otherwise use routing/fast default
         $model = $this->customAgent->model !== 'default'
             ? $this->customAgent->model
@@ -166,6 +170,57 @@ class CustomAgentRunner extends BaseAgent
 
         // 4. Build system prompt with injected knowledge (format adapted to tier)
         $systemPrompt = $this->buildSystemPrompt($ragContext, $context, $tier);
+
+        // 4b. If we have pre-fetched business data, format with a dedicated LLM call
+        if ($businessData) {
+            $this->updateProgress($context, 'thinking', 'Mise en forme des donnees...', '');
+
+            // Clear CLI session to force fresh context with our system prompt
+            $rc = new \ReflectionClass($this->claude);
+            $clearMethod = $rc->getMethod('clearCliSessionId');
+            $clearMethod->setAccessible(true);
+            $clearMethod->invoke($this->claude);
+
+            // LLM formatting: data goes in system prompt (written to temp file, no shell arg limit)
+            // User message stays short (passed via -p)
+            $formatSystemPrompt = <<<FMTPROMPT
+{$businessData}
+
+INSTRUCTIONS DE FORMATAGE:
+- Presente les donnees de facon claire et professionnelle
+- Utilise des listes a puces ou un tableau selon ce qui est le plus lisible
+- Formate les montants avec separateur de milliers et symbole monnaie (ex: 21029.80 → 21 029,80 €)
+- Formate les dates en format humain (ex: 2026-03-31T00:00:00 → 31/03/2026)
+- Cache les champs techniques internes (id, tenant_id, journal_id, currency_id, created_at, updated_at, etc.)
+- Mets en avant les champs metier utiles (noms, numeros, montants, statuts, dates cles)
+- N'invente AUCUNE donnee — presente uniquement ce qui est fourni
+- Reponds en francais
+FMTPROMPT;
+
+            $response = $this->claude->chat(
+                "L'utilisateur demande: {$context->body}",
+                $model,
+                $formatSystemPrompt
+            );
+
+            // If LLM fails, format the data directly in PHP
+            if (!$response) {
+                $response = $this->formatBusinessDataFallback($bizResult['raw_data'] ?? [], $bizResult['endpoint_name'] ?? '', $context->body);
+            }
+
+            $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $response);
+            if (!$this->isWebChat($context)) $this->sendText($context->from, $response);
+
+            $this->updateProgress($context, 'idle', '', '');
+
+            return AgentResult::reply($response, [
+                'custom_agent_id' => $this->customAgent->id,
+                'business_query' => true,
+                'model' => $model,
+                'tier' => $tier->value,
+            ]);
+        }
+
         $this->updateProgress($context, 'thinking', 'Generation de la reponse...', "Modele: {$model}");
 
         // 5. Check if tools are enabled — use agentic loop or simple chat
@@ -219,6 +274,13 @@ class CustomAgentRunner extends BaseAgent
         $filteredTools = array_values(array_filter($allTools, function ($tool) use ($allowedToolNames) {
             return in_array($tool['name'] ?? '', $allowedToolNames);
         }));
+
+        // Inject business API endpoints as tools (filtered by relevance)
+        $businessTools = $this->buildBusinessApiTools($context->body ?? '');
+        if (!empty($businessTools)) {
+            $filteredTools = array_merge($filteredTools, $businessTools['definitions']);
+            $systemPrompt .= "\n\n" . $businessTools['prompt'];
+        }
 
         // Always include base tools (memory, skills) if memory group is enabled
         // Add RAG search as a tool
@@ -577,6 +639,369 @@ class CustomAgentRunner extends BaseAgent
      * Check if the user message matches a skill trigger phrase.
      * If matched, execute the routine steps sequentially and return the combined result.
      */
+    /**
+     * Build tool definitions for business API endpoints.
+     * Each endpoint becomes a tool the LLM can call naturally.
+     * Tool execution is strict PHP (no hallucination possible).
+     */
+    /**
+     * Pre-fetch business data if message matches a configured API endpoint.
+     * Uses trigger phrase matching (PHP, no LLM) to detect intent,
+     * then calls the API and returns formatted data for injection into system prompt.
+     */
+    /**
+     * @return array{prompt: string, raw_data: mixed, endpoint_name: string}|array{}
+     */
+    private function prefetchBusinessData(AgentContext $context): array
+    {
+        $body = trim($context->body ?? '');
+        if (mb_strlen($body) < 5) {
+            return [];
+        }
+
+        $service = new BusinessQueryService();
+        $match = $service->tryMatch($this->customAgent, $body);
+
+        if (!$match || !$match['matched']) {
+            return [];
+        }
+
+        $this->log($context, "Business prefetch matched: {$match['endpoint']->name}", [
+            'confidence' => $match['confidence'],
+        ]);
+
+        $this->updateProgress($context, 'thinking', 'Requete API metier...', $match['endpoint']->name);
+
+        $result = $service->execute($match['endpoint'], $match['params'] ?? [], $body);
+        $endpointName = $match['endpoint']->name;
+
+        if (!$result['success']) {
+            return [
+                'prompt' => "DONNEES API METIER (erreur):\nL'endpoint \"{$endpointName}\" a retourne une erreur: " . ($result['error'] ?? 'Erreur inconnue') . "\nSignale cette erreur a l'utilisateur.",
+                'raw_data' => [],
+                'endpoint_name' => $endpointName,
+            ];
+        }
+
+        $data = $result['raw_data'];
+
+        // Slim down records: keep only scalar fields, drop large nested objects
+        if (is_array($data) && isset($data[0]) && is_array($data[0])) {
+            $data = array_slice($data, 0, 20); // max 20 records
+            $data = array_map(function ($record) {
+                if (!is_array($record)) return $record;
+                $slim = [];
+                foreach ($record as $key => $value) {
+                    // Keep scalars and short strings, skip large nested objects/arrays
+                    if (is_scalar($value) || is_null($value)) {
+                        $slim[$key] = $value;
+                    } elseif (is_array($value) && count($value) <= 3) {
+                        $slim[$key] = $value; // keep small arrays (e.g., tags)
+                    }
+                    // Drop: billing_address, shipping_address, dunning_history, etc.
+                }
+                return $slim;
+            }, $data);
+        }
+
+        $dataJson = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        if (mb_strlen($dataJson) > 6000) {
+            $dataJson = mb_substr($dataJson, 0, 6000) . "\n... (donnees tronquees)";
+        }
+
+        $recordCount = is_array($data) && isset($data[0]) ? count($data) : 1;
+
+        $prompt = <<<DATA
+DONNEES API METIER — REPONSE DE L'ENDPOINT "{$endpointName}" ({$recordCount} resultats):
+Les donnees ci-dessous sont REELLES, provenant de l'API de l'utilisateur. Presente-les de facon claire et lisible.
+N'INVENTE RIEN. N'ajoute AUCUNE donnee fictive. Si la liste est vide, dis "Aucun resultat".
+
+{$dataJson}
+DATA;
+
+        return [
+            'prompt' => $prompt,
+            'raw_data' => $data,
+            'endpoint_name' => $endpointName,
+        ];
+    }
+
+    /**
+     * Format business API data as readable text when LLM is unavailable.
+     */
+    private function formatBusinessDataFallback(mixed $data, string $endpointName, string $userMessage): string
+    {
+        if (!is_array($data) || empty($data)) {
+            return "Aucun resultat pour \"{$endpointName}\".";
+        }
+
+        // List of records
+        if (isset($data[0]) && is_array($data[0])) {
+            $count = count($data);
+            $lines = ["📊 **{$endpointName}** — {$count} resultat(s)\n"];
+
+            foreach (array_slice($data, 0, 10) as $i => $record) {
+                $parts = [];
+                foreach ($record as $key => $val) {
+                    if ($this->isFieldHidden($key, $val)) continue;
+                    $parts[] = $this->formatFieldLabel($key) . ': ' . $this->formatFieldValue($key, $val);
+                }
+                $lines[] = ($i + 1) . ". " . implode(' · ', array_slice($parts, 0, 6));
+            }
+
+            if ($count > 10) {
+                $lines[] = "\n_... et " . ($count - 10) . " autres resultats_";
+            }
+
+            return implode("\n", $lines);
+        }
+
+        // Single record
+        $lines = ["📊 **{$endpointName}**\n"];
+        foreach ($data as $key => $val) {
+            if ($this->isFieldHidden($key, $val)) continue;
+            $lines[] = "- **" . $this->formatFieldLabel($key) . "**: " . $this->formatFieldValue($key, $val);
+        }
+        return implode("\n", $lines);
+    }
+
+    /** Auto-detect if a field should be hidden (generic, no hardcoded list). */
+    private function isFieldHidden(string $key, mixed $val): bool
+    {
+        // Non-scalar values (objects, arrays)
+        if (!is_scalar($val) || $val === null || $val === '') return true;
+        // Internal IDs (except the main record id)
+        if ($key !== 'id' && str_ends_with($key, '_id')) return true;
+        // Timestamps (created_at, updated_at, deleted_at, verified_at, etc.)
+        if (preg_match('/^(created|updated|deleted|verified|generated|signed)_at$/', $key)) return true;
+        // File paths
+        if (preg_match('/path$|hash$|signature$/', $key)) return true;
+        // Boolean flags starting with is_ or has_
+        if (preg_match('/^(is|has)_/', $key) && is_bool($val)) return true;
+        // Long base64/hash values
+        if (is_string($val) && mb_strlen($val) > 200) return true;
+
+        return false;
+    }
+
+    private function formatFieldValue(string $key, mixed $val): string
+    {
+        if (!is_scalar($val)) return (string) $val;
+
+        // Money: fields containing total, amount, price, cost, tax, subtotal, balance
+        if (is_numeric($val) && (float) $val != 0 && preg_match('/total|amount|subtotal|tax|price|cost|balance/i', $key)) {
+            return number_format((float) $val, 2, ',', ' ') . ' €';
+        }
+
+        // Dates: ISO format → dd/mm/yyyy
+        if (preg_match('/date|_at$/i', $key) && preg_match('/^\d{4}-\d{2}-\d{2}/', (string) $val)) {
+            try { return \Carbon\Carbon::parse($val)->format('d/m/Y'); } catch (\Throwable) {}
+        }
+
+        // Status keywords → French
+        if ($key === 'status') {
+            $map = ['draft' => 'Brouillon', 'sent' => 'Envoyee', 'paid' => 'Payee',
+                'overdue' => 'En retard', 'cancelled' => 'Annulee', 'pending' => 'En attente',
+                'active' => 'Actif', 'inactive' => 'Inactif', 'completed' => 'Termine',
+                'failed' => 'Echoue', 'processing' => 'En cours'];
+            return $map[(string) $val] ?? (string) $val;
+        }
+
+        return (string) $val;
+    }
+
+    private function formatFieldLabel(string $key): string
+    {
+        // Convert snake_case to readable, with common translations
+        return ucfirst(str_replace('_', ' ', $key));
+    }
+
+    /**
+     * Build tool definitions for business API endpoints.
+     * Pre-filters by relevance to avoid injecting too many tools.
+     */
+    private function buildBusinessApiTools(?string $userMessage = null): array
+    {
+        $allEndpoints = $this->customAgent->endpoints()->where('is_active', true)->get();
+        if ($allEndpoints->isEmpty()) {
+            return [];
+        }
+
+        // Pre-filter: score endpoints by relevance to the user message
+        $endpoints = $this->filterRelevantEndpoints($allEndpoints, $userMessage, 20);
+        if ($endpoints->isEmpty()) {
+            return [];
+        }
+
+        $definitions = [];
+        foreach ($endpoints as $ep) {
+            $toolName = 'biz_' . $ep->id;
+            $params = $ep->parameters ?? [];
+
+            // Build JSON schema properties from declared parameters
+            $properties = [];
+            $required = [];
+            foreach ($params as $p) {
+                $prop = ['type' => match ($p['type'] ?? 'string') {
+                    'int', 'integer' => 'integer',
+                    'float', 'number' => 'number',
+                    'bool', 'boolean' => 'boolean',
+                    default => 'string',
+                }];
+                if (($p['type'] ?? '') === 'enum' && !empty($p['values'])) {
+                    $prop['enum'] = $p['values'];
+                }
+                $prop['description'] = $p['name'];
+                $properties[$p['name']] = $prop;
+                if (!empty($p['required'])) {
+                    $required[] = $p['name'];
+                }
+            }
+
+            $triggers = implode(', ', $ep->trigger_phrases ?? []);
+            $definitions[] = [
+                'name' => $toolName,
+                'description' => "{$ep->name} [{$ep->method}] — {$ep->description}. Phrases: {$triggers}",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => $properties ?: (object) [],
+                    'required' => $required,
+                ],
+            ];
+        }
+
+        // Build system prompt addition — strong instruction to use business tools
+        $epList = collect($definitions)->map(fn($d) => "- {$d['name']}: {$d['description']}")->implode("\n");
+        $prompt = <<<PROMPT
+REGLE PRIORITAIRE — ENDPOINTS API METIER:
+Tu as acces a des outils biz_* qui interrogent les APIs d'entreprise de l'utilisateur.
+
+QUAND l'utilisateur demande des donnees (factures, clients, produits, contacts, commandes, devis, rapports, etc.):
+→ Tu DOIS utiliser le tool biz_* correspondant. NE REPONDS JAMAIS "je n'ai pas acces" pour ce type de demande.
+→ Les donnees retournees sont REELLES. Presente-les telles quelles, N'INVENTE RIEN.
+→ Si un outil echoue (erreur API, 401, etc.), dis "L'API a retourne une erreur: [detail]".
+
+OUTILS DISPONIBLES:
+{$epList}
+PROMPT;
+
+        return [
+            'definitions' => $definitions,
+            'prompt' => $prompt,
+        ];
+    }
+
+    /**
+     * Execute a business API tool call (invoked by the agentic loop).
+     */
+    /**
+     * Pre-filter endpoints by relevance to the user message.
+     * Uses word overlap + synonym matching to keep only the most relevant.
+     */
+    private function filterRelevantEndpoints(\Illuminate\Database\Eloquent\Collection $endpoints, ?string $message, int $limit = 20): \Illuminate\Database\Eloquent\Collection
+    {
+        if (!$message || mb_strlen(trim($message)) < 3) {
+            // No message context — return top endpoints by ID (most common first)
+            return $endpoints->take($limit);
+        }
+
+        $normalized = mb_strtolower(trim($message));
+
+        // Synonym expansion for matching
+        $synonyms = [
+            'facture' => ['invoice', 'invoices', 'factures', 'bill', 'bills'],
+            'client' => ['customer', 'customers', 'clients', 'contact', 'contacts'],
+            'produit' => ['product', 'products', 'produits', 'item', 'items'],
+            'commande' => ['order', 'orders', 'commandes'],
+            'paiement' => ['payment', 'payments', 'paiements'],
+            'devis' => ['quote', 'quotes', 'estimate', 'estimates'],
+            'vente' => ['sale', 'sales', 'ventes', 'invoice', 'invoices'],
+            'achat' => ['purchase', 'purchases', 'achats'],
+            'fournisseur' => ['supplier', 'suppliers', 'vendor', 'vendors', 'fournisseurs'],
+            'categorie' => ['category', 'categories'],
+            'utilisateur' => ['user', 'users', 'utilisateurs'],
+            'rapport' => ['report', 'reports', 'dashboard', 'stats', 'statistics'],
+            'depense' => ['expense', 'expenses', 'depenses'],
+            'compte' => ['account', 'accounts', 'comptes'],
+            'taxe' => ['tax', 'taxes', 'tva', 'vat'],
+        ];
+
+        // Extract message words and expand with synonyms
+        $words = preg_split('/[\s,;.!?\']+/', $normalized, -1, PREG_SPLIT_NO_EMPTY);
+        $expandedWords = $words;
+        foreach ($words as $word) {
+            foreach ($synonyms as $key => $syns) {
+                if ($word === $key || in_array($word, $syns)) {
+                    $expandedWords = array_merge($expandedWords, [$key], $syns);
+                }
+            }
+        }
+        $expandedWords = array_unique($expandedWords);
+
+        // Score each endpoint
+        $scored = $endpoints->map(function ($ep) use ($expandedWords, $normalized) {
+            $score = 0;
+            $searchText = mb_strtolower(
+                $ep->name . ' ' . ($ep->description ?? '') . ' '
+                . implode(' ', $ep->trigger_phrases ?? []) . ' ' . $ep->url
+            );
+
+            foreach ($expandedWords as $word) {
+                if (mb_strlen($word) >= 3 && str_contains($searchText, $word)) {
+                    $score += mb_strlen($word); // Longer matches = higher score
+                }
+            }
+
+            // Boost GET endpoints (most likely for "liste moi...")
+            if ($ep->method === 'GET' && $score > 0) {
+                $score += 3;
+            }
+
+            return ['endpoint' => $ep, 'score' => $score];
+        })
+        ->filter(fn($item) => $item['score'] > 0)
+        ->sortByDesc('score')
+        ->take($limit);
+
+        if ($scored->isEmpty()) {
+            // No relevant match — return a small default set
+            return $endpoints->take(5);
+        }
+
+        return new \Illuminate\Database\Eloquent\Collection(
+            $scored->pluck('endpoint')->values()->all()
+        );
+    }
+
+    public function executeBusinessTool(string $toolName, array $params): string
+    {
+        $endpointId = (int) str_replace('biz_', '', $toolName);
+        $endpoint = $this->customAgent->endpoints()->find($endpointId);
+
+        if (!$endpoint) {
+            return json_encode(['error' => true, 'message' => "Endpoint {$toolName} introuvable."]);
+        }
+
+        $service = new BusinessQueryService();
+        $result = $service->execute($endpoint, $params, '');
+
+        if (!$result['success']) {
+            return json_encode([
+                'error' => true,
+                'message' => $result['error'] ?? 'Erreur API',
+            ]);
+        }
+
+        // Return raw data — let the LLM format it naturally in its response
+        return json_encode([
+            'success' => true,
+            'data' => $result['raw_data'],
+            'endpoint' => $endpoint->name,
+            'records_count' => is_array($result['raw_data']) && isset($result['raw_data'][0])
+                ? count($result['raw_data']) : 1,
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
     private function trySkillTrigger(AgentContext $context): ?AgentResult
     {
         $body = mb_strtolower(trim($context->body ?? ''));

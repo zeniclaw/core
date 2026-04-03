@@ -4,10 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessCustomAgentDocumentJob;
 use App\Models\CustomAgentDocument;
+use App\Models\CustomAgentEndpoint;
 use App\Models\CustomAgentShare;
 use App\Models\CustomAgentSkill;
 use App\Models\CustomAgentScript;
 use App\Services\AgentContext;
+use App\Services\BusinessQueryService;
+use App\Services\SwaggerImportService;
 use App\Services\LLMClient;
 use App\Services\CustomAgentRunner;
 use App\Services\KnowledgeChunker;
@@ -19,7 +22,7 @@ class PartnerPortalController extends Controller
     private function resolveShare(string $token): CustomAgentShare
     {
         $share = CustomAgentShare::where('token', $token)
-            ->with(['customAgent.agent', 'customAgent.documents', 'customAgent.skills', 'customAgent.scripts'])
+            ->with(['customAgent.agent', 'customAgent.documents', 'customAgent.skills', 'customAgent.scripts', 'customAgent.endpoints'])
             ->first();
 
         if (!$share || !$share->isValid()) {
@@ -39,8 +42,9 @@ class PartnerPortalController extends Controller
         $skills = $customAgent->skills()->orderByDesc('created_at')->get();
         $scripts = $customAgent->scripts()->orderByDesc('created_at')->get();
         $credentials = $customAgent->credentials()->orderBy('key')->get();
+        $endpoints = $customAgent->endpoints()->orderByDesc('created_at')->get();
 
-        return view('partner.portal', compact('share', 'customAgent', 'documents', 'skills', 'scripts', 'credentials'));
+        return view('partner.portal', compact('share', 'customAgent', 'documents', 'skills', 'scripts', 'credentials', 'endpoints'));
     }
 
     public function uploadDocument(Request $request, string $token)
@@ -918,6 +922,216 @@ Guide l'utilisateur etape par etape. Sois concis et pratique. Reponds en francai
         $key = $credential->key;
         $credential->delete();
         return back()->with('success', "Credential \"{$key}\" supprime.");
+    }
+
+    // ── Business Endpoints CRUD ─────────────────────────────────
+
+    public function storeEndpoint(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:150',
+            'description' => 'nullable|string|max:500',
+            'method' => 'required|in:GET,POST,PUT,PATCH,DELETE',
+            'url' => 'required|url|max:1000',
+            'auth_type' => 'required|in:bearer,header,query,none',
+            'auth_credential_key' => 'nullable|string|max:150',
+            'trigger_phrases' => 'required|string',
+            'parameters' => 'nullable|string',
+            'response_path' => 'nullable|string|max:300',
+            'headers' => 'nullable|string',
+            'request_body_template' => 'nullable|string',
+        ]);
+
+        $triggers = array_filter(array_map('trim', explode("\n", $validated['trigger_phrases'])));
+        $params = $this->parseJsonField($validated['parameters'] ?? null);
+        $headers = $this->parseJsonField($validated['headers'] ?? null);
+        $bodyTemplate = $this->parseJsonField($validated['request_body_template'] ?? null);
+
+        CustomAgentEndpoint::create([
+            'custom_agent_id' => $share->customAgent->id,
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'method' => $validated['method'],
+            'url' => $validated['url'],
+            'auth_type' => $validated['auth_type'],
+            'auth_credential_key' => $validated['auth_credential_key'] ?? null,
+            'trigger_phrases' => $triggers,
+            'parameters' => $params,
+            'response_path' => $validated['response_path'] ?? null,
+            'headers' => $headers,
+            'request_body_template' => $bodyTemplate,
+            'created_by_share_id' => $share->id,
+        ]);
+
+        return back()->with('success', 'Endpoint API cree !');
+    }
+
+    public function updateEndpoint(Request $request, string $token, CustomAgentEndpoint $endpoint)
+    {
+        $share = $this->resolveShare($token);
+        if ($endpoint->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:150',
+            'description' => 'nullable|string|max:500',
+            'method' => 'required|in:GET,POST,PUT,PATCH,DELETE',
+            'url' => 'required|url|max:1000',
+            'auth_type' => 'required|in:bearer,header,query,none',
+            'auth_credential_key' => 'nullable|string|max:150',
+            'trigger_phrases' => 'required|string',
+            'parameters' => 'nullable|string',
+            'response_path' => 'nullable|string|max:300',
+            'headers' => 'nullable|string',
+            'request_body_template' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
+        ]);
+
+        $triggers = array_filter(array_map('trim', explode("\n", $validated['trigger_phrases'])));
+        $params = $this->parseJsonField($validated['parameters'] ?? null);
+        $headers = $this->parseJsonField($validated['headers'] ?? null);
+        $bodyTemplate = $this->parseJsonField($validated['request_body_template'] ?? null);
+
+        $endpoint->update([
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'method' => $validated['method'],
+            'url' => $validated['url'],
+            'auth_type' => $validated['auth_type'],
+            'auth_credential_key' => $validated['auth_credential_key'] ?? null,
+            'trigger_phrases' => $triggers,
+            'parameters' => $params,
+            'response_path' => $validated['response_path'] ?? null,
+            'headers' => $headers,
+            'request_body_template' => $bodyTemplate,
+            'is_active' => $validated['is_active'] ?? $endpoint->is_active,
+        ]);
+
+        return back()->with('success', 'Endpoint mis a jour.');
+    }
+
+    public function destroyEndpoint(string $token, CustomAgentEndpoint $endpoint)
+    {
+        $share = $this->resolveShare($token);
+        if ($endpoint->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        $endpoint->delete();
+        return back()->with('success', 'Endpoint supprime.');
+    }
+
+    /**
+     * Test an existing saved endpoint with optional params.
+     */
+    public function testEndpoint(Request $request, string $token, CustomAgentEndpoint $endpoint)
+    {
+        $share = $this->resolveShare($token);
+        if ($endpoint->custom_agent_id !== $share->custom_agent_id) abort(403);
+
+        $testParams = json_decode($request->input('test_params', '{}'), true) ?? [];
+
+        $service = new BusinessQueryService();
+        $result = $service->simulate($endpoint, $testParams);
+
+        return response()->json($result);
+    }
+
+    public function destroyAllEndpoints(string $token)
+    {
+        $share = $this->resolveShare($token);
+        $count = $share->customAgent->endpoints()->delete();
+        return back()->with('success', "{$count} endpoint(s) supprime(s).");
+    }
+
+    /**
+     * Simulate an API call for live preview — lets the user test before saving.
+     */
+    public function simulateEndpoint(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+
+        $validated = $request->validate([
+            'method' => 'required|in:GET,POST,PUT,PATCH,DELETE',
+            'url' => 'required|url|max:1000',
+            'auth_type' => 'required|in:bearer,header,query,none',
+            'auth_credential_key' => 'nullable|string|max:150',
+            'response_path' => 'nullable|string|max:300',
+            'headers' => 'nullable|string',
+            'request_body_template' => 'nullable|string',
+            'test_params' => 'nullable|string',
+            'parameters' => 'nullable|string',
+        ]);
+
+        // Build a temporary endpoint for simulation (not saved)
+        $endpoint = new CustomAgentEndpoint([
+            'custom_agent_id' => $share->customAgent->id,
+            'name' => 'simulation',
+            'method' => $validated['method'],
+            'url' => $validated['url'],
+            'auth_type' => $validated['auth_type'],
+            'auth_credential_key' => $validated['auth_credential_key'] ?? null,
+            'response_path' => $validated['response_path'] ?? null,
+            'headers' => $this->parseJsonField($validated['headers'] ?? null),
+            'request_body_template' => $this->parseJsonField($validated['request_body_template'] ?? null),
+            'parameters' => $this->parseJsonField($validated['parameters'] ?? null),
+        ]);
+        $endpoint->setRelation('customAgent', $share->customAgent);
+
+        $testParams = $this->parseJsonField($validated['test_params'] ?? null) ?? [];
+
+        $service = new BusinessQueryService();
+        $result = $service->simulate($endpoint, $testParams);
+
+        return response()->json($result);
+    }
+
+    /**
+     * Analyze a Swagger/OpenAPI spec and return a preview of detected endpoints.
+     */
+    public function analyzeSwagger(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+
+        $validated = $request->validate([
+            'swagger_url' => 'required|string|max:2000',
+        ]);
+
+        $service = new SwaggerImportService();
+        $result = $service->analyze($validated['swagger_url'], $share->customAgent);
+
+        return response()->json($result);
+    }
+
+    /**
+     * Import selected endpoints from a Swagger analysis preview.
+     */
+    public function importSwagger(Request $request, string $token)
+    {
+        $share = $this->resolveShare($token);
+
+        $validated = $request->validate([
+            'endpoints' => 'required|string', // JSON array
+            'auth_credential_key' => 'nullable|string|max:150',
+        ]);
+
+        $endpoints = json_decode($validated['endpoints'], true);
+        if (!is_array($endpoints) || empty($endpoints)) {
+            return back()->with('error', 'Aucun endpoint selectionne.');
+        }
+
+        $service = new SwaggerImportService();
+        $count = $service->import($endpoints, $share->customAgent, $share->id, $validated['auth_credential_key'] ?? null);
+
+        return back()->with('success', "{$count} endpoint(s) importe(s) depuis le Swagger !");
+    }
+
+    private function parseJsonField(?string $value): ?array
+    {
+        if (!$value || trim($value) === '') {
+            return null;
+        }
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : null;
     }
 
     private function processAsync(CustomAgentDocument $document): void

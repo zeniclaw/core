@@ -211,7 +211,9 @@ class AgentTools
                 'list_skills' => self::executeListSkills($context),
                 'forget_skill' => self::executeForgetSkill($input, $context),
                 'gitlab_api' => self::executeGitlabApi($input, $context),
-                default => self::executeFallback($toolName, $input, $context),
+                default => str_starts_with($toolName, 'biz_')
+                    ? self::executeBusinessApiTool($toolName, $input, $context)
+                    : self::executeFallback($toolName, $input, $context),
             };
         } catch (\Exception $e) {
             Log::error("AgentTools::execute failed", ['tool' => $toolName, 'error' => $e->getMessage()]);
@@ -241,6 +243,38 @@ class AgentTools
         }
 
         return json_encode(['error' => "Unknown tool: {$toolName}"]);
+    }
+
+    /**
+     * Execute a business API tool (biz_{endpoint_id}).
+     * Strict pipeline: validate params → HTTP call → return raw data.
+     */
+    private static function executeBusinessApiTool(string $toolName, array $input, AgentContext $context): string
+    {
+        $endpointId = (int) str_replace('biz_', '', $toolName);
+        $endpoint = \App\Models\CustomAgentEndpoint::find($endpointId);
+
+        if (!$endpoint) {
+            return json_encode(['error' => true, 'message' => "Endpoint introuvable."]);
+        }
+
+        $service = new BusinessQueryService();
+        $result = $service->execute($endpoint, $input, '');
+
+        if (!$result['success']) {
+            return json_encode([
+                'error' => true,
+                'message' => $result['error'] ?? 'Erreur API',
+            ]);
+        }
+
+        return json_encode([
+            'success' => true,
+            'data' => $result['raw_data'],
+            'endpoint' => $endpoint->name,
+            'records_count' => is_array($result['raw_data']) && isset($result['raw_data'][0])
+                ? count($result['raw_data']) : 1,
+        ], JSON_UNESCAPED_UNICODE);
     }
 
     // ── Utility executors ───────────────────────────────────────────

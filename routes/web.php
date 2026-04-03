@@ -64,6 +64,14 @@ Route::prefix('partner/{token}')->name('partner.')->middleware('throttle:60,1')-
     Route::post('/scripts/{script}/run-stream', [\App\Http\Controllers\PartnerPortalController::class, 'runScriptStream'])->name('scripts.runStream');
     Route::post('/scripts/{script}/ai-edit', [\App\Http\Controllers\PartnerPortalController::class, 'aiEditScript'])->name('scripts.aiEdit');
     Route::delete('/scripts/{script}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyScript'])->name('scripts.destroy');
+    Route::post('/endpoints', [\App\Http\Controllers\PartnerPortalController::class, 'storeEndpoint'])->name('endpoints.store');
+    Route::put('/endpoints/{endpoint}', [\App\Http\Controllers\PartnerPortalController::class, 'updateEndpoint'])->name('endpoints.update');
+    Route::delete('/endpoints/{endpoint}', [\App\Http\Controllers\PartnerPortalController::class, 'destroyEndpoint'])->name('endpoints.destroy');
+    Route::delete('/endpoints', [\App\Http\Controllers\PartnerPortalController::class, 'destroyAllEndpoints'])->name('endpoints.destroyAll');
+    Route::post('/endpoints/simulate', [\App\Http\Controllers\PartnerPortalController::class, 'simulateEndpoint'])->name('endpoints.simulate');
+    Route::post('/endpoints/{endpoint}/test', [\App\Http\Controllers\PartnerPortalController::class, 'testEndpoint'])->name('endpoints.test');
+    Route::post('/endpoints/swagger-analyze', [\App\Http\Controllers\PartnerPortalController::class, 'analyzeSwagger'])->name('endpoints.swagger.analyze');
+    Route::post('/endpoints/swagger-import', [\App\Http\Controllers\PartnerPortalController::class, 'importSwagger'])->name('endpoints.swagger.import');
 });
 
 // Private agent approval (public, token-secured)

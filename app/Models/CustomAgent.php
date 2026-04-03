@@ -60,6 +60,11 @@ class CustomAgent extends Model
         return $this->hasMany(CustomAgentMemory::class);
     }
 
+    public function endpoints(): HasMany
+    {
+        return $this->hasMany(CustomAgentEndpoint::class);
+    }
+
     /**
      * Get a decrypted credential value by key. Only accessible by the agent itself.
      */
