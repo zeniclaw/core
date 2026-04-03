@@ -1109,45 +1109,50 @@ graph LR
   </div>
 </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script>
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-  themeVariables: {
-    primaryColor: '#1e3a5f',
-    primaryTextColor: '#f1f5f9',
-    primaryBorderColor: '#3b82f6',
-    lineColor: '#475569',
-    secondaryColor: '#1a1035',
-    tertiaryColor: '#0a2e1a',
-    fontFamily: 'Inter, system-ui, sans-serif',
-    fontSize: '13px',
-  },
-  flowchart: { curve: 'basis', padding: 20 },
-});
-// Re-render mermaid when Alpine changes the diagram
 async function renderMermaid() {
   document.querySelectorAll('.mermaid[data-processed]').forEach(el => {
     el.removeAttribute('data-processed');
     el.innerHTML = el.getAttribute('data-original') || el.innerHTML;
   });
-  // Save originals
   document.querySelectorAll('.mermaid:not([data-original])').forEach(el => {
     el.setAttribute('data-original', el.innerHTML);
   });
   await mermaid.run({ querySelector: '.mermaid' });
 }
-// Initial render + re-render on mode change
-document.addEventListener('alpine:initialized', () => {
-  setTimeout(renderMermaid, 100);
-});
-// Watch for x-show changes
-const observer = new MutationObserver(() => setTimeout(renderMermaid, 50));
-document.addEventListener('DOMContentLoaded', () => {
-  const techSection = document.getElementById('technology');
-  if (techSection) observer.observe(techSection, { attributes: true, subtree: true, attributeFilter: ['style'] });
-});
+
+function loadMermaid() {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+  s.onload = function() {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#1e3a5f',
+        primaryTextColor: '#f1f5f9',
+        primaryBorderColor: '#3b82f6',
+        lineColor: '#475569',
+        secondaryColor: '#1a1035',
+        tertiaryColor: '#0a2e1a',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '13px',
+      },
+      flowchart: { curve: 'basis', padding: 20 },
+    });
+    setTimeout(renderMermaid, 100);
+    const observer = new MutationObserver(() => setTimeout(renderMermaid, 50));
+    const techSection = document.getElementById('technology');
+    if (techSection) observer.observe(techSection, { attributes: true, subtree: true, attributeFilter: ['style'] });
+  };
+  document.head.appendChild(s);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadMermaid);
+} else {
+  loadMermaid();
+}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 <script>

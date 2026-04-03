@@ -37,6 +37,12 @@ services:
       - app_storage:/var/www/html/storage
       - ${CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - .:/opt/zeniclaw-repo
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     depends_on:
       db:
         condition: service_healthy

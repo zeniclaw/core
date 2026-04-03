@@ -98,7 +98,7 @@ wait_for_container() {
         health=$($CONTAINER_CMD inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo "none")
         case "$health" in
             healthy) return 0 ;;
-            none)    return 0 ;;  # No healthcheck defined
+            none|"") return 0 ;;  # No healthcheck defined
             *)       sleep 2; elapsed=$((elapsed + 2)) ;;
         esac
     done
