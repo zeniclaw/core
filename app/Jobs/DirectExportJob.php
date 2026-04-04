@@ -22,6 +22,12 @@ class DirectExportJob implements ShouldQueue
 
     public int $timeout = 600; // 10 min — exports can be heavy
     public int $tries = 1;
+    public int $backoff = 0;
+
+    public function retryUntil(): \DateTime
+    {
+        return now()->addMinutes(12);
+    }
 
     public function __construct(
         private int $customAgentId,
