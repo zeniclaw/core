@@ -16,6 +16,9 @@ class LLMClient
     private const CIRCUIT_BREAKER_THRESHOLD = 5; // failures before opening
     private const CIRCUIT_BREAKER_TIMEOUT = 300; // seconds to wait before half-open
 
+    // ── Chat context for CLI tool injection ──────────────────
+    public ?string $currentChatId = null;
+
     // ── Token Usage Tracking ──────────────────────────────────
     private static array $tokenUsage = [];
 
@@ -622,6 +625,27 @@ class LLMClient
             // Inject into both system prompt (new session) and user message (resume)
             $systemPrompt .= $bizInstructions;
             $userMessage .= $bizInstructions;
+        }
+
+        // Inject create_document tool instructions for CLI execution via Bash
+        $hasDocTool = !empty(array_filter($tools, fn($t) => ($t['name'] ?? '') === 'create_document'));
+        if ($hasDocTool) {
+            // Extract chat ID from messages context for WhatsApp delivery
+            $chatIdFlag = '';
+            if (!empty($this->currentChatId) && !str_starts_with($this->currentChatId, 'web-')) {
+                $chatIdFlag = " --chat-id='{$this->currentChatId}'";
+            }
+
+            $docInstructions = "\n\n[OUTIL CREATION DOCUMENT - execute via Bash]\n";
+            $docInstructions .= "Pour creer et envoyer un fichier (Excel, CSV, PDF), utilise:\n";
+            $docInstructions .= "php /var/www/html/artisan doc:create '<JSON>'{$chatIdFlag}\n";
+            $docInstructions .= "Le JSON doit contenir: {\"format\":\"xlsx\",\"title\":\"Titre\",\"headers\":[\"Col1\",\"Col2\"],\"rows\":[[\"val1\",\"val2\"]]}\n";
+            $docInstructions .= "Formats: xlsx, csv, pdf\n";
+            $docInstructions .= "Le fichier sera automatiquement envoye a l'utilisateur sur WhatsApp.\n";
+            $docInstructions .= "IMPORTANT: Collecte d'abord les VRAIES donnees (via biz:call ou web_search) AVANT de creer le document.";
+
+            $systemPrompt .= $docInstructions;
+            $userMessage .= $docInstructions;
         }
 
         $result = $this->executeClaudeCli($userMessage, $model, $systemPrompt);

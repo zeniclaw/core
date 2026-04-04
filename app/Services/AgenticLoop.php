@@ -57,6 +57,9 @@ class AgenticLoop
         for ($iteration = 0; $iteration < $this->maxIterations; $iteration++) {
             $this->compactMessages($messages, $context);
 
+            // Pass chat ID for CLI tool injection (WhatsApp file delivery)
+            $this->claude->currentChatId = $context->from ?? null;
+
             $response = $this->claude->chatWithToolUse($messages, $model, $systemPrompt, $tools);
 
             if (!$response) {
