@@ -262,7 +262,7 @@ do_install() {
     # Step 1: System dependencies
     step "[1/5] System dependencies"
     sudo apt-get update -qq
-    sudo apt-get install -y -qq curl wget pciutils lsb-release 2>/dev/null || true
+    sudo apt-get install -y -qq curl wget pciutils lsb-release zstd 2>/dev/null || true
     ok "System dependencies installed"
 
     # Step 2: GPU detection & driver install
