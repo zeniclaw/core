@@ -754,10 +754,37 @@ DATA;
             if (str_contains($body, $kw)) { $isMultiExport = true; break; }
         }
 
+        // Dispatch as background job — avoids WhatsApp job timeout
+        $isWeb = str_starts_with($context->from, 'web-');
+
+        if (!$isWeb) {
+            \App\Jobs\DirectExportJob::dispatch(
+                $this->customAgent->id,
+                $context->agent->id,
+                $context->from,
+                $context->body ?? '',
+                $format,
+                $isMultiExport,
+            );
+
+            $replyText = $isMultiExport
+                ? "📊 Export multi-onglets en cours de preparation... Le fichier sera envoye dans quelques instants."
+                : "📊 Export en cours de preparation... Le fichier sera envoye dans quelques instants.";
+
+            $this->sendText($context->from, $replyText);
+            $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $replyText);
+
+            return AgentResult::reply($replyText, [
+                'custom_agent_id' => $this->customAgent->id,
+                'direct_export' => true,
+                'async' => true,
+            ]);
+        }
+
+        // Web chat: still synchronous (no timeout issue)
         if ($isMultiExport) {
             return $this->handleMultiSheetExport($context, $body, $format);
         }
-
         return $this->handleSingleSheetExport($context, $bizResult, $body, $format);
     }
 
