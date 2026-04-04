@@ -600,6 +600,30 @@ class LLMClient
 
         if (!$userMessage) return null;
 
+        // Inject biz_* tool instructions for CLI execution via Bash
+        $bizTools = array_filter($tools, fn($t) => str_starts_with($t['name'] ?? '', 'biz_'));
+        if (!empty($bizTools)) {
+            $bizInstructions = "\n\n[OUTILS API METIER - execute via Bash]\n";
+            $bizInstructions .= "Commande: php /var/www/html/artisan biz:call <ENDPOINT_ID> '<JSON_PARAMS>'\n";
+            $bizInstructions .= "Endpoints:\n";
+            foreach ($bizTools as $tool) {
+                $id = str_replace('biz_', '', $tool['name']);
+                $desc = $tool['description'] ?? '';
+                $params = [];
+                foreach (($tool['input_schema']['properties'] ?? []) as $pName => $pDef) {
+                    $params[] = $pName . ' (' . ($pDef['type'] ?? 'string') . ')';
+                }
+                $paramStr = $params ? ' - Params: ' . implode(', ', $params) : '';
+                $bizInstructions .= "- biz:call {$id}: {$desc}{$paramStr}\n";
+            }
+            $bizInstructions .= "Exemple: php /var/www/html/artisan biz:call 264 '{\"entity_id\":1}'\n";
+            $bizInstructions .= "IMPORTANT: Utilise TOUJOURS biz:call pour les donnees metier. N'invente JAMAIS de donnees.";
+
+            // Inject into both system prompt (new session) and user message (resume)
+            $systemPrompt .= $bizInstructions;
+            $userMessage .= $bizInstructions;
+        }
+
         $result = $this->executeClaudeCli($userMessage, $model, $systemPrompt);
 
         if (!$result) return null;
