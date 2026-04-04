@@ -628,8 +628,9 @@ class LLMClient
         }
 
         // Inject create_document tool instructions for CLI execution via Bash
+        // Available when create_document is in tools OR when biz_* tools exist (export business data)
         $hasDocTool = !empty(array_filter($tools, fn($t) => ($t['name'] ?? '') === 'create_document'));
-        if ($hasDocTool) {
+        if ($hasDocTool || !empty($bizTools)) {
             // Extract chat ID from messages context for WhatsApp delivery
             $chatIdFlag = '';
             if (!empty($this->currentChatId) && !str_starts_with($this->currentChatId, 'web-')) {
