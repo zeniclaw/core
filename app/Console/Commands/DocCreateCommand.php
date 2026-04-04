@@ -121,7 +121,7 @@ class DocCreateCommand extends Command
             $data = base64_encode(file_get_contents($filePath));
             $mimetype = mime_content_type($filePath) ?: 'application/octet-stream';
 
-            Http::withHeaders(['Authorization' => 'Bearer zeniclaw-waha-2026'])
+            Http::withHeaders(['X-Api-Key' => 'zeniclaw-waha-2026'])
                 ->timeout(30)
                 ->post('http://waha:3000/api/sendFile', [
                     'chatId' => $chatId,

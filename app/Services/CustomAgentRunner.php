@@ -153,6 +153,12 @@ class CustomAgentRunner extends BaseAgent
         $bizResult = $this->prefetchBusinessData($context);
         $businessData = $bizResult['prompt'] ?? null;
 
+        // 0d. Direct export shortcut: if user asks for file export AND we have business data, skip LLM
+        $exportResult = $this->tryDirectExport($context, $bizResult);
+        if ($exportResult) {
+            return $exportResult;
+        }
+
         // 1. Resolve model — prefer custom agent's explicit model, otherwise use routing/fast default
         $model = $this->customAgent->model !== 'default'
             ? $this->customAgent->model
@@ -709,6 +715,200 @@ DATA;
             'raw_data' => $data,
             'endpoint_name' => $endpointName,
         ];
+    }
+
+    /**
+     * Direct export: detect export requests and generate file without LLM.
+     * Always fetches fresh data from the API (no cache).
+     */
+    private function tryDirectExport(AgentContext $context, array $bizResult): ?AgentResult
+    {
+        $body = mb_strtolower(trim($context->body ?? ''));
+        if (mb_strlen($body) < 5) return null;
+
+
+
+        // Detect export intent
+        $exportKeywords = ['export', 'exporte', 'exporter', 'fichier', 'telecharge', 'télécharge', 'download', 'genere', 'génère'];
+        $formatKeywords = [
+            'xlsx' => ['xls', 'xlsx', 'excel', 'tableur'],
+            'csv' => ['csv'],
+            'pdf' => ['pdf'],
+        ];
+
+        $wantsExport = false;
+        foreach ($exportKeywords as $kw) {
+            if (str_contains($body, $kw)) { $wantsExport = true; break; }
+        }
+        if (!$wantsExport) return null;
+
+        $format = 'xlsx'; // default
+        foreach ($formatKeywords as $fmt => $keywords) {
+            foreach ($keywords as $kw) {
+                if (str_contains($body, $kw)) { $format = $fmt; break 2; }
+            }
+        }
+
+        // We need business data — if prefetch didn't match, try to find a relevant endpoint
+        if (empty($bizResult) || empty($bizResult['raw_data'])) {
+            // Force-fetch: find the best matching endpoint for this export
+            $service = new BusinessQueryService();
+            $match = $service->tryMatch($this->customAgent, $body);
+            if (!$match || !$match['matched']) return null;
+
+            $params = $match['params'] ?? [];
+            $endpointParams = $match['endpoint']->parameters ?? [];
+            if (!empty($endpointParams) && empty($params)) {
+                $smartParams = $this->extractSmartParams($body, $match['endpoint']);
+                if ($smartParams) $params = $smartParams;
+            }
+
+            $result = $service->execute($match['endpoint'], $params, $body);
+            if (!$result['success']) return null;
+
+            $rawData = $result['raw_data'];
+            $endpointName = $match['endpoint']->name;
+        } else {
+            $rawData = $bizResult['raw_data'];
+            $endpointName = $bizResult['endpoint_name'] ?? 'Export';
+        }
+
+        if (!is_array($rawData) || empty($rawData)) return null;
+
+        $this->log($context, "Direct export triggered", ['format' => $format, 'endpoint' => $endpointName, 'records' => count($rawData)]);
+        $this->updateProgress($context, 'thinking', "Generation du fichier {$format}...", $endpointName);
+
+        // Build headers and rows from raw data
+        // Flatten nested objects (e.g., customer.name) and pick useful fields
+        $fieldMap = $this->buildExportFieldMap($rawData);
+        $headers = array_values($fieldMap);
+        $rows = [];
+        foreach ($rawData as $record) {
+            $row = [];
+            foreach (array_keys($fieldMap) as $fieldPath) {
+                $row[] = $this->extractField($record, $fieldPath);
+            }
+            $rows[] = $row;
+        }
+
+        // Generate file via artisan command
+        $slug = preg_replace('/[^a-z0-9]+/', '_', mb_strtolower($endpointName));
+        $timestamp = date('Ymd_His');
+        $title = "{$endpointName} - Export {$timestamp}";
+
+        $spec = json_encode([
+            'format' => $format,
+            'title' => $title,
+            'headers' => $headers,
+            'rows' => $rows,
+        ], JSON_UNESCAPED_UNICODE);
+
+        $chatIdFlag = '';
+        $isWeb = str_starts_with($context->from, 'web-');
+        if (!$isWeb) {
+            $chatIdFlag = ' --chat-id=' . escapeshellarg($context->from);
+        }
+
+        $cmd = 'php /var/www/html/artisan doc:create ' . escapeshellarg($spec) . $chatIdFlag;
+        $process = \Illuminate\Support\Facades\Process::timeout(60)->run($cmd);
+        $output = json_decode($process->output(), true);
+
+        if (!$process->successful() || empty($output['success'])) {
+            $this->log($context, "Direct export failed", ['output' => $process->output()]);
+            return null; // Fall through to normal LLM handling
+        }
+
+        $filename = $output['filename'] ?? 'export.' . $format;
+        $rowCount = $output['rows_count'] ?? count($rows);
+        $colCount = $output['columns_count'] ?? count($headers);
+
+        $replyText = "✅ *{$title}*\n\n";
+        $replyText .= "📊 {$rowCount} lignes, {$colCount} colonnes\n";
+        $replyText .= "📁 Format: {$format}\n";
+        if (!$isWeb) {
+            $replyText .= "\nLe fichier a ete envoye ci-dessus.";
+        }
+
+        if (!$isWeb) {
+            $this->sendText($context->from, $replyText);
+        }
+
+        $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $replyText);
+
+        return AgentResult::reply($replyText, [
+            'custom_agent_id' => $this->customAgent->id,
+            'direct_export' => true,
+            'format' => $format,
+            'filename' => $filename,
+        ]);
+    }
+
+    /**
+     * Build a field map for export dynamically from the actual data.
+     * No hardcoded field names — everything is derived from the API response.
+     */
+    private function buildExportFieldMap(array $data): array
+    {
+        if (empty($data) || !is_array($data[0])) return [];
+
+        $sample = $data[0];
+        $map = [];
+
+        // Skip internal/technical fields (IDs, paths, hashes, signatures, etc.)
+        $skipPatterns = ['_id', '_path', '_hash', 'signed_', 'signature', 'verified_at', 'peppol_', 'cegid_', 'dunning_', 'financing_', 'template_id'];
+
+        foreach ($sample as $key => $value) {
+            // Skip pure ID field
+            if ($key === 'id') continue;
+
+            // Skip fields matching technical patterns
+            $skip = false;
+            foreach ($skipPatterns as $pattern) {
+                if (str_ends_with($key, $pattern) || str_starts_with($key, $pattern)) {
+                    $skip = true;
+                    break;
+                }
+            }
+            if ($skip) continue;
+
+            if (is_scalar($value) || is_null($value)) {
+                // Scalar field — include directly
+                $map[$key] = $this->humanizeFieldName($key);
+            } elseif (is_array($value) && !empty($value) && !isset($value[0])) {
+                // Nested object (associative array) — flatten key scalar children
+                // e.g., customer => {name, email, ...} → customer.name, customer.email
+                foreach ($value as $childKey => $childValue) {
+                    if (is_scalar($childValue) && $childKey !== 'id' && !str_ends_with($childKey, '_id')) {
+                        $map["{$key}.{$childKey}"] = $this->humanizeFieldName($key) . ' - ' . $this->humanizeFieldName($childKey);
+                    }
+                }
+            }
+            // Skip arrays of arrays (line items, history, etc.) — too complex for flat export
+        }
+
+        return $map;
+    }
+
+    private function humanizeFieldName(string $field): string
+    {
+        return ucfirst(str_replace('_', ' ', $field));
+    }
+
+    /**
+     * Extract a field value from a record, supporting dot notation (e.g., customer.name).
+     */
+    private function extractField(array $record, string $path): string
+    {
+        if (str_contains($path, '.')) {
+            [$parent, $child] = explode('.', $path, 2);
+            $value = $record[$parent][$child] ?? '';
+        } else {
+            $value = $record[$path] ?? '';
+        }
+
+        if (is_array($value)) return json_encode($value, JSON_UNESCAPED_UNICODE);
+        if (is_null($value)) return '';
+        return (string) $value;
     }
 
     /**
