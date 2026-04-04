@@ -726,8 +726,6 @@ DATA;
         $body = mb_strtolower(trim($context->body ?? ''));
         if (mb_strlen($body) < 5) return null;
 
-
-
         // Detect export intent
         $exportKeywords = ['export', 'exporte', 'exporter', 'fichier', 'telecharge', 'télécharge', 'download', 'genere', 'génère'];
         $formatKeywords = [
@@ -742,23 +740,40 @@ DATA;
         }
         if (!$wantsExport) return null;
 
-        $format = 'xlsx'; // default
+        $format = 'xlsx';
         foreach ($formatKeywords as $fmt => $keywords) {
             foreach ($keywords as $kw) {
                 if (str_contains($body, $kw)) { $format = $fmt; break 2; }
             }
         }
 
-        // We need business data — if prefetch didn't match, try to find a relevant endpoint
+        // Detect if this is a multi-data / comprehensive export request
+        $multiKeywords = ['complet', 'complete', 'situation', 'bilan', 'synthese', 'synthèse', 'résumé', 'resume', 'tableau de bord', 'dashboard', 'overview', 'plusieurs onglets', 'multi'];
+        $isMultiExport = false;
+        foreach ($multiKeywords as $kw) {
+            if (str_contains($body, $kw)) { $isMultiExport = true; break; }
+        }
+
+        if ($isMultiExport) {
+            return $this->handleMultiSheetExport($context, $body, $format);
+        }
+
+        return $this->handleSingleSheetExport($context, $bizResult, $body, $format);
+    }
+
+    /**
+     * Single-sheet export: fetch one endpoint, generate one sheet.
+     */
+    private function handleSingleSheetExport(AgentContext $context, array $bizResult, string $body, string $format): ?AgentResult
+    {
+        $service = new BusinessQueryService();
+
         if (empty($bizResult) || empty($bizResult['raw_data'])) {
-            // Force-fetch: find the best matching endpoint for this export
-            $service = new BusinessQueryService();
             $match = $service->tryMatch($this->customAgent, $body);
             if (!$match || !$match['matched']) return null;
 
             $params = $match['params'] ?? [];
-            $endpointParams = $match['endpoint']->parameters ?? [];
-            if (!empty($endpointParams) && empty($params)) {
+            if (!empty($match['endpoint']->parameters ?? []) && empty($params)) {
                 $smartParams = $this->extractSmartParams($body, $match['endpoint']);
                 if ($smartParams) $params = $smartParams;
             }
@@ -775,11 +790,122 @@ DATA;
 
         if (!is_array($rawData) || empty($rawData)) return null;
 
-        $this->log($context, "Direct export triggered", ['format' => $format, 'endpoint' => $endpointName, 'records' => count($rawData)]);
+        $this->log($context, "Direct export triggered", ['format' => $format, 'endpoint' => $endpointName]);
         $this->updateProgress($context, 'thinking', "Generation du fichier {$format}...", $endpointName);
 
-        // Build headers and rows from raw data
-        // Flatten nested objects (e.g., customer.name) and pick useful fields
+        $sheets = [$this->buildSheetFromData($endpointName, $rawData)];
+        return $this->generateAndSendExport($context, $endpointName, $sheets, $format);
+    }
+
+    /**
+     * Multi-sheet export: find all relevant GET endpoints, call each, one sheet per dataset.
+     */
+    private function handleMultiSheetExport(AgentContext $context, string $body, string $format): ?AgentResult
+    {
+        $this->log($context, "Multi-sheet export triggered", ['body' => $body, 'format' => $format]);
+        $this->updateProgress($context, 'thinking', 'Collecte des donnees pour export multi-onglets...', '');
+
+        $allEndpoints = $this->customAgent->endpoints()->where('is_active', true)->get();
+        if ($allEndpoints->isEmpty()) return null;
+
+        // Score endpoints by relevance to the user message
+        $service = new BusinessQueryService();
+        $scored = $this->scoreEndpointsForExport($allEndpoints, $body);
+
+        if (empty($scored)) return null;
+
+        $sheets = [];
+        $errors = [];
+
+        foreach ($scored as $ep) {
+            $this->updateProgress($context, 'thinking', "Appel API: {$ep->name}...", '');
+
+            try {
+                // Extract smart params if needed
+                $params = [];
+                if (!empty($ep->parameters)) {
+                    $smartParams = $this->extractSmartParams($body, $ep);
+                    if ($smartParams) $params = $smartParams;
+                }
+
+                $result = $service->execute($ep, $params, $body);
+                if (!$result['success']) {
+                    $errors[] = $ep->name;
+                    continue;
+                }
+
+                $rawData = $result['raw_data'];
+                if (!is_array($rawData) || empty($rawData)) continue;
+
+                // If it's a single object (not a list), wrap it
+                if (!isset($rawData[0])) {
+                    $rawData = [$rawData];
+                }
+
+                $sheets[] = $this->buildSheetFromData($ep->name, $rawData);
+            } catch (\Throwable $e) {
+                $errors[] = $ep->name;
+                $this->log($context, "Multi-export endpoint failed: {$ep->name}", ['error' => $e->getMessage()]);
+            }
+        }
+
+        if (empty($sheets)) return null;
+
+        $title = "Situation comptable - " . date('d/m/Y');
+        return $this->generateAndSendExport($context, $title, $sheets, $format, $errors);
+    }
+
+    /**
+     * Score and filter endpoints relevant for a multi-sheet export.
+     * Only GET endpoints that return list data are useful for exports.
+     */
+    private function scoreEndpointsForExport(\Illuminate\Database\Eloquent\Collection $endpoints, string $body): array
+    {
+        $bodyWords = preg_split('/\s+/', $body);
+
+        $scored = [];
+        foreach ($endpoints as $ep) {
+            // Only GET endpoints make sense for data export
+            if ($ep->method !== 'GET') continue;
+
+            // Skip detail endpoints (with path params like {id})
+            if (preg_match('/\{[^}]+\}/', $ep->url)) continue;
+
+            // Score by trigger phrase overlap with user message
+            $score = 0;
+            $triggers = $ep->trigger_phrases ?? [];
+            $epWords = preg_split('/\s+/', mb_strtolower($ep->name . ' ' . ($ep->description ?? '') . ' ' . implode(' ', $triggers)));
+
+            foreach ($bodyWords as $bw) {
+                if (mb_strlen($bw) < 3) continue;
+                foreach ($epWords as $ew) {
+                    if (str_contains($ew, $bw) || str_contains($bw, $ew)) {
+                        $score++;
+                    }
+                }
+            }
+
+            // Boost "lister" / list endpoints
+            $nameLower = mb_strtolower($ep->name);
+            if (str_contains($nameLower, 'lister') || str_contains($nameLower, 'liste') || str_contains($nameLower, 'statistique') || str_contains($nameLower, 'rapport') || str_contains($nameLower, 'tableau de bord') || str_contains($nameLower, 'dashboard')) {
+                $score += 3;
+            }
+
+            if ($score > 0) {
+                $scored[] = ['ep' => $ep, 'score' => $score];
+            }
+        }
+
+        // Sort by score descending, take top 8 max
+        usort($scored, fn($a, $b) => $b['score'] <=> $a['score']);
+        return array_map(fn($s) => $s['ep'], array_slice($scored, 0, 8));
+    }
+
+    /**
+     * Build a sheet spec (name, headers, rows) from raw API data.
+     */
+    private function buildSheetFromData(string $name, array $rawData): array
+    {
         $fieldMap = $this->buildExportFieldMap($rawData);
         $headers = array_values($fieldMap);
         $rows = [];
@@ -791,40 +917,47 @@ DATA;
             $rows[] = $row;
         }
 
-        // Generate file via artisan command
-        $slug = preg_replace('/[^a-z0-9]+/', '_', mb_strtolower($endpointName));
-        $timestamp = date('Ymd_His');
-        $title = "{$endpointName} - Export {$timestamp}";
+        return ['name' => mb_substr($name, 0, 31), 'headers' => $headers, 'rows' => $rows];
+    }
 
+    /**
+     * Generate the file via doc:create and send via WhatsApp.
+     */
+    private function generateAndSendExport(AgentContext $context, string $title, array $sheets, string $format, array $errors = []): ?AgentResult
+    {
         $spec = json_encode([
             'format' => $format,
             'title' => $title,
-            'headers' => $headers,
-            'rows' => $rows,
+            'sheets' => $sheets,
         ], JSON_UNESCAPED_UNICODE);
 
-        $chatIdFlag = '';
         $isWeb = str_starts_with($context->from, 'web-');
-        if (!$isWeb) {
-            $chatIdFlag = ' --chat-id=' . escapeshellarg($context->from);
-        }
+        $chatIdFlag = $isWeb ? '' : ' --chat-id=' . escapeshellarg($context->from);
 
         $cmd = 'php /var/www/html/artisan doc:create ' . escapeshellarg($spec) . $chatIdFlag;
-        $process = \Illuminate\Support\Facades\Process::timeout(60)->run($cmd);
+        $process = \Illuminate\Support\Facades\Process::timeout(90)->run($cmd);
         $output = json_decode($process->output(), true);
 
         if (!$process->successful() || empty($output['success'])) {
-            $this->log($context, "Direct export failed", ['output' => $process->output()]);
-            return null; // Fall through to normal LLM handling
+            $this->log($context, "Direct export failed", ['output' => mb_substr($process->output(), 0, 500), 'err' => mb_substr($process->errorOutput(), 0, 500)]);
+            return null;
         }
 
         $filename = $output['filename'] ?? 'export.' . $format;
-        $rowCount = $output['rows_count'] ?? count($rows);
-        $colCount = $output['columns_count'] ?? count($headers);
+        $totalRows = $output['total_rows'] ?? 0;
+        $sheetsCount = $output['sheets_count'] ?? count($sheets);
 
+        $sheetNames = array_map(fn($s) => $s['name'], $sheets);
         $replyText = "✅ *{$title}*\n\n";
-        $replyText .= "📊 {$rowCount} lignes, {$colCount} colonnes\n";
-        $replyText .= "📁 Format: {$format}\n";
+        $replyText .= "📊 {$sheetsCount} onglet(s), {$totalRows} lignes au total\n";
+        $replyText .= "📁 Format: {$format}\n\n";
+        $replyText .= "*Onglets :*\n";
+        foreach ($sheets as $s) {
+            $replyText .= "- {$s['name']} (" . count($s['rows']) . " lignes)\n";
+        }
+        if (!empty($errors)) {
+            $replyText .= "\n⚠️ Endpoints en erreur : " . implode(', ', $errors);
+        }
         if (!$isWeb) {
             $replyText .= "\nLe fichier a ete envoye ci-dessus.";
         }
@@ -838,6 +971,7 @@ DATA;
         return AgentResult::reply($replyText, [
             'custom_agent_id' => $this->customAgent->id,
             'direct_export' => true,
+            'multi_sheet' => $sheetsCount > 1,
             'format' => $format,
             'filename' => $filename,
         ]);
