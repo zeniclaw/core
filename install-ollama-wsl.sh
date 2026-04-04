@@ -663,6 +663,230 @@ for m in ms:
     echo ""
 }
 
+# ── Load Model into Memory ─────────────────────────────────────────────────
+
+do_load() {
+    local model="$1"
+
+    if ! _ollama_running; then
+        err "Ollama not running. Run: bash $0 start"
+        return 1
+    fi
+
+    if [ -z "$model" ]; then
+        # Show downloaded models and let user pick
+        echo ""
+        info "Downloaded models:"
+        local models
+        models=$(OLLAMA_HOST="$OLLAMA_HOST" ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ -z "$models" ]; then
+            err "No models downloaded. Run: bash $0 download"
+            return 1
+        fi
+
+        local i=1
+        declare -A model_map
+        while IFS= read -r m; do
+            echo "    ${i}) ${m}"
+            model_map[$i]="$m"
+            i=$((i + 1))
+        done <<< "$models"
+
+        echo ""
+        read -rp "  Load which model? [1-$((i-1))]: " choice
+        model="${model_map[$choice]}"
+        [ -z "$model" ] && { err "Invalid choice"; return 1; }
+    fi
+
+    info "Loading ${model} into memory (keep_alive=-1)..."
+    local start_ts
+    start_ts=$(date +%s%N)
+
+    curl -sf "${OLLAMA_URL}/api/generate" \
+        -d "{\"model\":\"${model}\",\"prompt\":\"\",\"keep_alive\":-1}" >/dev/null 2>&1
+
+    local end_ts
+    end_ts=$(date +%s%N)
+    local dur_ms=$(( (end_ts - start_ts) / 1000000 ))
+
+    sleep 1
+
+    # Show VRAM usage
+    local vram_info
+    vram_info=$(curl -sf "${OLLAMA_URL}/api/ps" 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for m in d.get('models',[]):
+    if '${model}' in m.get('name',''):
+        s=m.get('size',0)/1e9; v=m.get('size_vram',0)/1e9
+        gpu='GPU: {:.1f} GB'.format(v) if v>0 else 'CPU only'
+        print(f'{s:.1f} GB total, {gpu}')
+        break
+" 2>/dev/null || echo "unknown")
+
+    ok "Model ${model} loaded in ${dur_ms}ms — ${vram_info}"
+}
+
+# ── Unload Model from Memory ──────────────────────────────────────────────
+
+do_unload() {
+    local model="$1"
+
+    if ! _ollama_running; then
+        err "Ollama not running"
+        return 1
+    fi
+
+    if [ -z "$model" ]; then
+        # Show loaded models
+        echo ""
+        info "Models in memory:"
+        local models
+        models=$(curl -sf "${OLLAMA_URL}/api/ps" 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for m in d.get('models',[]):
+    print(m.get('name',''))
+" 2>/dev/null)
+
+        if [ -z "$models" ]; then
+            warn "No models loaded in memory"
+            return 0
+        fi
+
+        local i=1
+        declare -A model_map
+        while IFS= read -r m; do
+            [ -z "$m" ] && continue
+            echo "    ${i}) ${m}"
+            model_map[$i]="$m"
+            i=$((i + 1))
+        done <<< "$models"
+
+        echo "    a) Unload ALL"
+        echo ""
+        read -rp "  Unload which? [1-$((i-1)) or a]: " choice
+
+        if [ "$choice" = "a" ]; then
+            for key in "${!model_map[@]}"; do
+                local m="${model_map[$key]}"
+                info "Unloading ${m}..."
+                curl -sf "${OLLAMA_URL}/api/generate" \
+                    -d "{\"model\":\"${m}\",\"keep_alive\":0}" >/dev/null 2>&1
+                ok "Unloaded ${m}"
+            done
+            return 0
+        fi
+
+        model="${model_map[$choice]}"
+        [ -z "$model" ] && { err "Invalid choice"; return 1; }
+    fi
+
+    info "Unloading ${model} from memory..."
+    curl -sf "${OLLAMA_URL}/api/generate" \
+        -d "{\"model\":\"${model}\",\"keep_alive\":0}" >/dev/null 2>&1
+    ok "Model ${model} unloaded"
+}
+
+# ── Test Model with Prompt ─────────────────────────────────────────────────
+
+do_test() {
+    local model="$1"
+    local prompt="$2"
+
+    if ! _ollama_running; then
+        err "Ollama not running. Run: bash $0 start"
+        return 1
+    fi
+
+    if [ -z "$model" ]; then
+        # Pick from loaded or downloaded models
+        local models
+        models=$(OLLAMA_HOST="$OLLAMA_HOST" ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ -z "$models" ]; then
+            err "No models available"
+            return 1
+        fi
+
+        echo ""
+        local i=1
+        declare -A model_map
+        while IFS= read -r m; do
+            echo "    ${i}) ${m}"
+            model_map[$i]="$m"
+            i=$((i + 1))
+        done <<< "$models"
+
+        echo ""
+        read -rp "  Test which model? [1-$((i-1))]: " choice
+        model="${model_map[$choice]}"
+        [ -z "$model" ] && { err "Invalid choice"; return 1; }
+    fi
+
+    if [ -z "$prompt" ]; then
+        echo ""
+        echo "  Test prompts:"
+        echo "    1) Quick: \"Dis bonjour en une phrase\""
+        echo "    2) French: \"Explique la TVA belge en 3 lignes\""
+        echo "    3) Code: \"Ecris une fonction PHP qui calcule la TVA\""
+        echo "    4) Custom prompt"
+        echo ""
+        read -rp "  Choice [1-4]: " pchoice
+        case "$pchoice" in
+            1) prompt="Dis bonjour en une phrase." ;;
+            2) prompt="Explique la TVA belge en 3 lignes maximum." ;;
+            3) prompt="Ecris une fonction PHP qui calcule le montant TTC a partir du HT et du taux de TVA. Code uniquement." ;;
+            4) read -rp "  Prompt: " prompt ;;
+        esac
+    fi
+
+    [ -z "$prompt" ] && { err "No prompt"; return 1; }
+
+    echo ""
+    info "Model: ${model}"
+    info "Prompt: ${prompt}"
+    echo ""
+    echo -e "${BOLD}--- Response ---${NC}"
+
+    local start_ts
+    start_ts=$(date +%s%N)
+
+    # Stream response
+    curl -sf "${OLLAMA_URL}/api/generate" \
+        -d "$(python3 -c "import json; print(json.dumps({'model':'${model}','prompt':'${prompt}','stream':True}))")" \
+        2>/dev/null | while IFS= read -r line; do
+        local token
+        token=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('response',''),end='')" 2>/dev/null)
+        echo -n "$token"
+    done
+
+    local end_ts
+    end_ts=$(date +%s%N)
+    local dur_ms=$(( (end_ts - start_ts) / 1000000 ))
+    local dur_s=$(echo "scale=1; ${dur_ms}/1000" | bc 2>/dev/null || echo "${dur_ms}ms")
+
+    echo ""
+    echo -e "${BOLD}--- End ---${NC}"
+    echo ""
+
+    # Get stats from last response
+    local stats
+    stats=$(curl -sf "${OLLAMA_URL}/api/ps" 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for m in d.get('models',[]):
+    if '${model}' in m.get('name',''):
+        v=m.get('size_vram',0)/1e9
+        s=m.get('size',0)/1e9
+        gpu='GPU {:.1f}GB'.format(v) if v>0 else 'CPU'
+        print(f'{gpu} | Model: {s:.1f}GB')
+        break
+" 2>/dev/null || echo "")
+
+    ok "Time: ${dur_s}s | ${stats}"
+    echo ""
+}
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 _ollama_running() {
@@ -683,21 +907,31 @@ case "$cmd" in
     stop)       do_stop ;;
     status)     do_status ;;
     detectgpu)  detect_gpu ;;
+    load)       do_load "$@" ;;
+    unload)     do_unload "$@" ;;
+    test)       do_test "$@" ;;
     *)
         echo ""
         echo "  ${BOLD}ZeniClaw — Ollama Native WSL2 Manager (GPU-accelerated)${NC}"
         echo ""
         echo "  Usage: bash $0 <command>"
         echo ""
-        echo "  Commands:"
+        echo "  Setup:"
         echo "    install       Full setup: GPU drivers + Ollama + model download"
         echo "    update        Update Ollama to latest version"
+        echo "    detectgpu     Detect and install GPU drivers"
+        echo ""
+        echo "  Models:"
         echo "    list          List available and installed models"
         echo "    download      Download and configure a model"
+        echo "    load          Load a model into GPU/RAM memory"
+        echo "    unload        Unload a model from memory"
+        echo "    test          Test a model with a prompt (streaming)"
+        echo ""
+        echo "  Server:"
         echo "    start         Start Ollama server (port ${OLLAMA_PORT})"
         echo "    stop          Stop Ollama server"
         echo "    status        Show status, models, GPU info"
-        echo "    detectgpu     Detect and install GPU drivers"
         echo ""
         ;;
 esac
