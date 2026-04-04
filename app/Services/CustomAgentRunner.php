@@ -172,8 +172,16 @@ class CustomAgentRunner extends BaseAgent
         // 4. Build system prompt with injected knowledge (format adapted to tier)
         $systemPrompt = $this->buildSystemPrompt($ragContext, $context, $tier);
 
-        // 4b. Store pre-fetched business data for injection into user message later
-        $this->businessDataForInjection = $businessData;
+        // 4b. If business data was fetched, pre-format it in PHP (compact)
+        // and store for injection into the LLM user message
+        if (!empty($bizResult)) {
+            $formatted = $this->formatBusinessDataFallback(
+                $bizResult['raw_data'] ?? [],
+                $bizResult['endpoint_name'] ?? '',
+                $context->body ?? ''
+            );
+            $this->businessDataForInjection = $formatted;
+        }
 
         $this->updateProgress($context, 'thinking', 'Generation de la reponse...', "Modele: {$model}");
 
@@ -247,9 +255,9 @@ class CustomAgentRunner extends BaseAgent
         // Build user message — inject business data if available
         $userMessage = $context->body ?? '';
         if ($this->businessDataForInjection) {
-            $userMessage .= "\n\n" . $this->businessDataForInjection
-                . "\n\nPresente ces donnees clairement. Montants: separateur milliers + €. Dates: format dd/mm/yyyy. Cache les champs techniques (*_id, *_at, *_path). N'invente RIEN.";
-            $this->businessDataForInjection = null; // consumed
+            $userMessage .= "\n\nVoici les DONNEES REELLES de l'API:\n" . $this->businessDataForInjection
+                . "\n\nReponds avec ces donnees. N'invente rien.";
+            $this->businessDataForInjection = null;
         }
         $mediaBlocks = $this->buildMediaBlocks($context);
         if ($mediaBlocks) {
@@ -295,8 +303,8 @@ class CustomAgentRunner extends BaseAgent
 
         // Inject business data into messages if available
         if ($this->businessDataForInjection) {
-            $messages = (is_string($messages) ? $messages : '') . "\n\n" . $this->businessDataForInjection
-                . "\n\nPresente ces donnees clairement. Montants: separateur milliers + €. Dates: format dd/mm/yyyy. Cache les champs techniques (*_id, *_at, *_path). N'invente RIEN.";
+            $messages = (is_string($messages) ? $messages : '') . "\n\nVoici les DONNEES REELLES de l'API:\n"
+                . $this->businessDataForInjection . "\n\nReponds avec ces donnees. N'invente rien.";
             $this->businessDataForInjection = null;
         }
 
@@ -781,30 +789,51 @@ DATA;
             }
         }
 
-        // 3. Enum matching: "payées" → status=paid, "brouillon" → status=draft
-        // Normalize accents for matching
+        // 3. Dynamic enum matching — match message words against declared enum values
+        // No hardcoded translations: uses direct match, substring, and Levenshtein distance
         $msgNorm = $this->stripAccents($msg);
-        $statusMap = [
-            'paye' => 'paid', 'payee' => 'paid', 'payees' => 'paid', 'payes' => 'paid', 'paid' => 'paid',
-            'impaye' => 'overdue', 'impayes' => 'overdue', 'impayees' => 'overdue', 'en retard' => 'overdue', 'overdue' => 'overdue',
-            'brouillon' => 'draft', 'draft' => 'draft',
-            'envoye' => 'sent', 'envoyee' => 'sent', 'envoyees' => 'sent', 'sent' => 'sent',
-            'annule' => 'cancelled', 'annulee' => 'cancelled', 'annulees' => 'cancelled', 'cancelled' => 'cancelled',
-            'en attente' => 'pending', 'pending' => 'pending',
-            'actif' => 'active', 'active' => 'active',
-            'inactif' => 'inactive', 'inactive' => 'inactive',
-            'termine' => 'completed', 'completed' => 'completed',
-        ];
-        $matchedStatuses = [];
+        $msgWords = preg_split('/[\s,;.!?\']+/', $msgNorm, -1, PREG_SPLIT_NO_EMPTY);
+        $matchedEnumWords = [];
         foreach ($params as $p) {
-            if (($p['type'] ?? '') === 'enum' && !empty($p['values'])) {
-                foreach ($statusMap as $fr => $en) {
-                    if (str_contains($msgNorm, $fr) && in_array($en, $p['values'])) {
-                        $extracted[$p['name']] = $en;
-                        $matchedStatuses[] = $fr;
-                        break;
+            if (($p['type'] ?? '') !== 'enum' || empty($p['values'])) continue;
+
+            $bestValue = null;
+            $bestWord = null;
+            $bestScore = PHP_INT_MAX;
+
+            foreach ($msgWords as $word) {
+                if (mb_strlen($word) < 3) continue;
+                foreach ($p['values'] as $enumVal) {
+                    $enumNorm = $this->stripAccents(mb_strtolower($enumVal));
+                    // Exact match
+                    if ($word === $enumNorm) {
+                        $bestValue = $enumVal;
+                        $bestWord = $word;
+                        $bestScore = 0;
+                        break 2;
+                    }
+                    // Substring: word contains enum or enum contains word (e.g. "payee" contains "paid"? no, but "overdue" contains "due")
+                    if (mb_strlen($word) >= 4 && str_contains($word, $enumNorm)) {
+                        $score = mb_strlen($word) - mb_strlen($enumNorm);
+                        if ($score < $bestScore) { $bestValue = $enumVal; $bestWord = $word; $bestScore = $score; }
+                    }
+                    if (mb_strlen($enumNorm) >= 4 && str_contains($enumNorm, $word)) {
+                        $score = mb_strlen($enumNorm) - mb_strlen($word);
+                        if ($score < $bestScore) { $bestValue = $enumVal; $bestWord = $word; $bestScore = $score; }
+                    }
+                    // Levenshtein for close typos only (max distance 1, same length ±1)
+                    if (abs(mb_strlen($word) - mb_strlen($enumNorm)) <= 1) {
+                        $dist = levenshtein($word, $enumNorm);
+                        if ($dist <= 1 && $dist < $bestScore) {
+                            $bestValue = $enumVal; $bestWord = $word; $bestScore = $dist;
+                        }
                     }
                 }
+            }
+
+            if ($bestValue !== null && $bestScore <= 2) {
+                $extracted[$p['name']] = $bestValue;
+                if ($bestWord) $matchedEnumWords[] = $bestWord;
             }
         }
 
@@ -830,17 +859,24 @@ DATA;
 
         // 5. Search term: extract words that aren't fillers or known keywords
         $fillers = ['liste', 'lister', 'moi', 'mes', 'les', 'des', 'du', 'de', 'la', 'le', 'donne',
-            'montre', 'affiche', 'facture', 'factures', 'invoice', 'invoices', 'client', 'clients',
+            'montre', 'affiche', 'bonjour', 'salut', 'stp', 'svp', 'merci', 'pour',
+            'facture', 'factures', 'invoice', 'invoices', 'client', 'clients',
             'produit', 'produits', 'contact', 'contacts', 'commande', 'commandes', 'vente', 'achat',
             'derniers', 'dernieres', 'derniere', 'dernier', 'premiers', 'premier', 'premiere',
-            'toutes', 'tous', 'tout', 'une', 'un', 'que', 'qui', 'quoi'];
-        // Also add status words and matched status terms as fillers
-        $fillers = array_merge($fillers, array_keys($statusMap), $matchedStatuses);
+            'toutes', 'tous', 'tout', 'une', 'un', 'que', 'qui', 'quoi', 'entite', 'entites'];
+        // Also add matched enum words as fillers so they don't end up in search
+        $fillers = array_merge($fillers, $matchedEnumWords);
         // Also add month names
         $fillers = array_merge($fillers, array_keys($months));
 
         $words = preg_split('/[\s,;.!?\']+/', $msg, -1, PREG_SPLIT_NO_EMPTY);
-        $searchTerms = array_filter($words, fn($w) => mb_strlen($w) >= 3 && !in_array($w, $fillers) && !is_numeric($w));
+        // Keep words that are meaningful (not fillers, not already used as per_page number)
+        $usedNumber = $extracted['per_page'] ?? $extracted['limit'] ?? null;
+        $searchTerms = array_filter($words, function ($w) use ($fillers, $usedNumber) {
+            if (mb_strlen($w) < 2 || in_array($w, $fillers)) return false;
+            if (is_numeric($w) && (int) $w === $usedNumber) return false; // skip per_page number
+            return true;
+        });
 
         if (!empty($searchTerms) && $paramsByName->has('search')) {
             $extracted['search'] = implode(' ', $searchTerms);
