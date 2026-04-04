@@ -32,6 +32,7 @@ class CustomAgentRunner extends BaseAgent
     private CustomAgent $customAgent;
     private KnowledgeChunker $chunker;
     private string $currentStepLabel = '';
+    private ?string $businessDataForInjection = null;
 
     /**
      * Available tool groups that can be enabled on custom agents.
@@ -171,55 +172,8 @@ class CustomAgentRunner extends BaseAgent
         // 4. Build system prompt with injected knowledge (format adapted to tier)
         $systemPrompt = $this->buildSystemPrompt($ragContext, $context, $tier);
 
-        // 4b. If we have pre-fetched business data, format with a dedicated LLM call
-        if ($businessData) {
-            $this->updateProgress($context, 'thinking', 'Mise en forme des donnees...', '');
-
-            // Clear CLI session to force fresh context with our system prompt
-            $rc = new \ReflectionClass($this->claude);
-            $clearMethod = $rc->getMethod('clearCliSessionId');
-            $clearMethod->setAccessible(true);
-            $clearMethod->invoke($this->claude);
-
-            // LLM formatting: data goes in system prompt (written to temp file, no shell arg limit)
-            // User message stays short (passed via -p)
-            $formatSystemPrompt = <<<FMTPROMPT
-{$businessData}
-
-INSTRUCTIONS DE FORMATAGE:
-- Presente les donnees de facon claire et professionnelle
-- Utilise des listes a puces ou un tableau selon ce qui est le plus lisible
-- Formate les montants avec separateur de milliers et symbole monnaie (ex: 21029.80 → 21 029,80 €)
-- Formate les dates en format humain (ex: 2026-03-31T00:00:00 → 31/03/2026)
-- Cache les champs techniques internes (id, tenant_id, journal_id, currency_id, created_at, updated_at, etc.)
-- Mets en avant les champs metier utiles (noms, numeros, montants, statuts, dates cles)
-- N'invente AUCUNE donnee — presente uniquement ce qui est fourni
-- Reponds en francais
-FMTPROMPT;
-
-            $response = $this->claude->chat(
-                "L'utilisateur demande: {$context->body}",
-                $model,
-                $formatSystemPrompt
-            );
-
-            // If LLM fails, format the data directly in PHP
-            if (!$response) {
-                $response = $this->formatBusinessDataFallback($bizResult['raw_data'] ?? [], $bizResult['endpoint_name'] ?? '', $context->body);
-            }
-
-            $this->memory->append($context->agent->id, $context->from, $context->senderName, $context->body ?? '', $response);
-            if (!$this->isWebChat($context)) $this->sendText($context->from, $response);
-
-            $this->updateProgress($context, 'idle', '', '');
-
-            return AgentResult::reply($response, [
-                'custom_agent_id' => $this->customAgent->id,
-                'business_query' => true,
-                'model' => $model,
-                'tier' => $tier->value,
-            ]);
-        }
+        // 4b. Store pre-fetched business data for injection into user message later
+        $this->businessDataForInjection = $businessData;
 
         $this->updateProgress($context, 'thinking', 'Generation de la reponse...', "Modele: {$model}");
 
@@ -290,8 +244,13 @@ FMTPROMPT;
 
         $loop = new AgenticLoop(maxIterations: 15, debug: $context->session->debug_mode ?? false);
 
-        // Build multimodal message if media is present
+        // Build user message — inject business data if available
         $userMessage = $context->body ?? '';
+        if ($this->businessDataForInjection) {
+            $userMessage .= "\n\n" . $this->businessDataForInjection
+                . "\n\nPresente ces donnees clairement. Montants: separateur milliers + €. Dates: format dd/mm/yyyy. Cache les champs techniques (*_id, *_at, *_path). N'invente RIEN.";
+            $this->businessDataForInjection = null; // consumed
+        }
         $mediaBlocks = $this->buildMediaBlocks($context);
         if ($mediaBlocks) {
             $contentBlocks = [];
@@ -333,6 +292,13 @@ FMTPROMPT;
     {
         $history = $this->memory->read($context->agent->id, $context->from);
         $messages = $this->buildMessages($history, $context, $tier);
+
+        // Inject business data into messages if available
+        if ($this->businessDataForInjection) {
+            $messages = (is_string($messages) ? $messages : '') . "\n\n" . $this->businessDataForInjection
+                . "\n\nPresente ces donnees clairement. Montants: separateur milliers + €. Dates: format dd/mm/yyyy. Cache les champs techniques (*_id, *_at, *_path). N'invente RIEN.";
+            $this->businessDataForInjection = null;
+        }
 
         // Build multimodal content blocks if media is present
         $mediaBlocks = $this->buildMediaBlocks($context);
@@ -672,7 +638,18 @@ FMTPROMPT;
 
         $this->updateProgress($context, 'thinking', 'Requete API metier...', $match['endpoint']->name);
 
-        $result = $service->execute($match['endpoint'], $match['params'] ?? [], $body);
+        // Extract smart filters from the user message using LLM
+        $params = $match['params'] ?? [];
+        $endpointParams = $match['endpoint']->parameters ?? [];
+        if (!empty($endpointParams) && empty($params)) {
+            $smartParams = $this->extractSmartParams($body, $match['endpoint']);
+            if ($smartParams) {
+                $params = $smartParams;
+                $this->log($context, "Smart params extracted", $smartParams);
+            }
+        }
+
+        $result = $service->execute($match['endpoint'], $params, $body);
         $endpointName = $match['endpoint']->name;
 
         if (!$result['success']) {
@@ -763,6 +740,125 @@ DATA;
             $lines[] = "- **" . $this->formatFieldLabel($key) . "**: " . $this->formatFieldValue($key, $val);
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * Extract API filter parameters from a natural language message using PHP heuristics.
+     * No LLM needed — pattern matching + synonym expansion.
+     *
+     * Examples:
+     * "factures de prounity" → {search: "prounity"}
+     * "factures payées" → {status: "paid"}
+     * "5 dernières factures" → {per_page: 5, sort_order: "desc"}
+     * "factures de mars 2026" → {date_from: "2026-03-01", date_to: "2026-03-31"}
+     */
+    private function extractSmartParams(string $message, \App\Models\CustomAgentEndpoint $endpoint): ?array
+    {
+        $params = $endpoint->parameters ?? [];
+        if (empty($params)) return null;
+
+        $msg = mb_strtolower(trim($message));
+        $extracted = [];
+        $paramsByName = collect($params)->keyBy('name');
+
+        // 1. Numeric extraction: "5 derniers" → per_page=5
+        if (preg_match('/\b(\d{1,3})\s*(derniers?|dernieres?|premiers?|premieres?|top|last|first|recent)/iu', $msg, $m)) {
+            if ($paramsByName->has('per_page')) $extracted['per_page'] = (int) $m[1];
+            if ($paramsByName->has('limit')) $extracted['limit'] = (int) $m[1];
+        }
+
+        // 2. Sort: "derniers/récents" → sort_order=desc
+        if (preg_match('/\b(derniers?|dernieres?|recents?|recentes?|last|recent|newest)/iu', $msg)) {
+            if ($paramsByName->has('sort_order')) $extracted['sort_order'] = 'desc';
+            if ($paramsByName->has('sort_by') && !isset($extracted['sort_by'])) {
+                // Default sort by date if available
+                foreach (['created_at', 'date', 'issue_date', 'updated_at'] as $dateField) {
+                    if ($paramsByName->has($dateField) || str_contains(json_encode($params), $dateField)) {
+                        $extracted['sort_by'] = $dateField;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 3. Enum matching: "payées" → status=paid, "brouillon" → status=draft
+        // Normalize accents for matching
+        $msgNorm = $this->stripAccents($msg);
+        $statusMap = [
+            'paye' => 'paid', 'payee' => 'paid', 'payees' => 'paid', 'payes' => 'paid', 'paid' => 'paid',
+            'impaye' => 'overdue', 'impayes' => 'overdue', 'impayees' => 'overdue', 'en retard' => 'overdue', 'overdue' => 'overdue',
+            'brouillon' => 'draft', 'draft' => 'draft',
+            'envoye' => 'sent', 'envoyee' => 'sent', 'envoyees' => 'sent', 'sent' => 'sent',
+            'annule' => 'cancelled', 'annulee' => 'cancelled', 'annulees' => 'cancelled', 'cancelled' => 'cancelled',
+            'en attente' => 'pending', 'pending' => 'pending',
+            'actif' => 'active', 'active' => 'active',
+            'inactif' => 'inactive', 'inactive' => 'inactive',
+            'termine' => 'completed', 'completed' => 'completed',
+        ];
+        $matchedStatuses = [];
+        foreach ($params as $p) {
+            if (($p['type'] ?? '') === 'enum' && !empty($p['values'])) {
+                foreach ($statusMap as $fr => $en) {
+                    if (str_contains($msgNorm, $fr) && in_array($en, $p['values'])) {
+                        $extracted[$p['name']] = $en;
+                        $matchedStatuses[] = $fr;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 4. Date extraction: "de mars", "mars 2026", "en janvier"
+        $months = ['janvier' => 1, 'fevrier' => 2, 'mars' => 3, 'avril' => 4, 'mai' => 5,
+            'juin' => 6, 'juillet' => 7, 'aout' => 8, 'septembre' => 9, 'octobre' => 10,
+            'novembre' => 11, 'decembre' => 12,
+            'january' => 1, 'february' => 2, 'march' => 3, 'april' => 4, 'may' => 5,
+            'june' => 6, 'july' => 7, 'august' => 8, 'september' => 9, 'october' => 10,
+            'november' => 11, 'december' => 12];
+        foreach ($months as $name => $num) {
+            if (str_contains($msg, $name)) {
+                $year = date('Y');
+                if (preg_match('/\b(20\d{2})\b/', $msg, $ym)) $year = $ym[1];
+                $dateFrom = sprintf('%s-%02d-01', $year, $num);
+                $dateTo = date('Y-m-t', strtotime($dateFrom));
+                if ($paramsByName->has('date_from')) $extracted['date_from'] = $dateFrom;
+                if ($paramsByName->has('date_to')) $extracted['date_to'] = $dateTo;
+                if ($paramsByName->has('month')) $extracted['month'] = $num;
+                break;
+            }
+        }
+
+        // 5. Search term: extract words that aren't fillers or known keywords
+        $fillers = ['liste', 'lister', 'moi', 'mes', 'les', 'des', 'du', 'de', 'la', 'le', 'donne',
+            'montre', 'affiche', 'facture', 'factures', 'invoice', 'invoices', 'client', 'clients',
+            'produit', 'produits', 'contact', 'contacts', 'commande', 'commandes', 'vente', 'achat',
+            'derniers', 'dernieres', 'derniere', 'dernier', 'premiers', 'premier', 'premiere',
+            'toutes', 'tous', 'tout', 'une', 'un', 'que', 'qui', 'quoi'];
+        // Also add status words and matched status terms as fillers
+        $fillers = array_merge($fillers, array_keys($statusMap), $matchedStatuses);
+        // Also add month names
+        $fillers = array_merge($fillers, array_keys($months));
+
+        $words = preg_split('/[\s,;.!?\']+/', $msg, -1, PREG_SPLIT_NO_EMPTY);
+        $searchTerms = array_filter($words, fn($w) => mb_strlen($w) >= 3 && !in_array($w, $fillers) && !is_numeric($w));
+
+        if (!empty($searchTerms) && $paramsByName->has('search')) {
+            $extracted['search'] = implode(' ', $searchTerms);
+        }
+
+        return !empty($extracted) ? $extracted : null;
+    }
+
+    private function stripAccents(string $str): string
+    {
+        return strtr($str, [
+            'à'=>'a','á'=>'a','â'=>'a','ã'=>'a','ä'=>'a','å'=>'a',
+            'è'=>'e','é'=>'e','ê'=>'e','ë'=>'e',
+            'ì'=>'i','í'=>'i','î'=>'i','ï'=>'i',
+            'ò'=>'o','ó'=>'o','ô'=>'o','õ'=>'o','ö'=>'o',
+            'ù'=>'u','ú'=>'u','û'=>'u','ü'=>'u',
+            'ý'=>'y','ÿ'=>'y','ñ'=>'n','ç'=>'c',
+        ]);
     }
 
     /** Auto-detect if a field should be hidden (generic, no hardcoded list). */

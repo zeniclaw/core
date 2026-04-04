@@ -852,14 +852,17 @@ class LLMClient
     /**
      * @param string|array $message Text string or array of content blocks (multimodal)
      */
-    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0): ?string
+    /**
+     * @param bool $forceApi Force direct API call even with OAuth tokens (bypass CLI)
+     */
+    public function chat(string|array $message, string $model = 'claude-haiku-4-5-20251001', string $systemPrompt = '', int $maxTokens = 0, bool $forceApi = false): ?string
     {
         if ($this->isOnPremModel($model)) {
             return $this->chatOnPrem($message, $model, $systemPrompt, $maxTokens);
         }
 
-        // OAuth tokens must route through Claude CLI
-        if ($this->isOAuthToken()) {
+        // OAuth tokens route through Claude CLI (unless forced to API)
+        if ($this->isOAuthToken() && !$forceApi) {
             return $this->chatViaCli($message, $model, $systemPrompt, $maxTokens);
         }
 
