@@ -119,17 +119,28 @@ _check_wsl2_gpu_config() {
     fi
 
     # 4. Check .wslconfig
-    local winuser
-    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
-    local wslconfig="/mnt/c/Users/${winuser}/.wslconfig"
-    local wslconfig_ok=true
+    local winuser wslconfig=""
+    # Find Windows user dir
+    for d in /mnt/c/Users/*/; do
+        local uname
+        uname=$(basename "$d")
+        [[ "$uname" =~ ^(Public|Default|All\ Users|Default\ User)$ ]] && continue
+        if [ -d "${d}AppData" ]; then
+            winuser="$uname"
+            wslconfig="${d}.wslconfig"
+            break
+        fi
+    done
 
-    if [ -n "$winuser" ] && [ -f "$wslconfig" ]; then
+    if [ -n "$wslconfig" ] && [ -f "$wslconfig" ]; then
         ok ".wslconfig found: ${wslconfig}"
         cat "$wslconfig" | sed 's/^/    /'
+        if ! grep -qi "gpuSupport\s*=\s*true" "$wslconfig" 2>/dev/null; then
+            warn ".wslconfig missing gpuSupport=true"
+            issues=$((issues + 1))
+        fi
     elif [ -n "$winuser" ]; then
-        warn ".wslconfig not found at ${wslconfig}"
-        wslconfig_ok=false
+        warn ".wslconfig not found at /mnt/c/Users/${winuser}/.wslconfig"
         issues=$((issues + 1))
     fi
 
@@ -223,9 +234,24 @@ _install_amd_gpu_support() {
 }
 
 _fix_wslconfig() {
-    local winuser
-    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
-    [ -z "$winuser" ] && return
+    # Find Windows user — try multiple methods
+    local winuser wslconfig=""
+    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r\n' | grep -oP '[a-zA-Z0-9._-]+$' || true)
+
+    # Fallback: scan /mnt/c/Users for existing .wslconfig or user dirs
+    if [ -z "$winuser" ] || [ ! -d "/mnt/c/Users/${winuser}" ]; then
+        for d in /mnt/c/Users/*/; do
+            local uname
+            uname=$(basename "$d")
+            [[ "$uname" =~ ^(Public|Default|All\ Users|Default\ User)$ ]] && continue
+            if [ -f "${d}.wslconfig" ] || [ -d "${d}/AppData" ]; then
+                winuser="$uname"
+                break
+            fi
+        done
+    fi
+
+    [ -z "$winuser" ] && { warn "Cannot find Windows user for .wslconfig"; return; }
 
     local wslconfig="/mnt/c/Users/${winuser}/.wslconfig"
     local needs_fix=false
