@@ -217,7 +217,62 @@ _install_amd_gpu_support() {
 
     if [ $issues -gt 0 ]; then
         echo ""
+        _fix_wslconfig
         _show_amd_wsl2_fix_guide
+    fi
+}
+
+_fix_wslconfig() {
+    local winuser
+    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+    [ -z "$winuser" ] && return
+
+    local wslconfig="/mnt/c/Users/${winuser}/.wslconfig"
+    local needs_fix=false
+
+    if [ ! -f "$wslconfig" ]; then
+        needs_fix=true
+    elif ! grep -qi "gpuSupport" "$wslconfig" 2>/dev/null; then
+        needs_fix=true
+    elif grep -qi "gpuSupport\s*=\s*false" "$wslconfig" 2>/dev/null; then
+        needs_fix=true
+    fi
+
+    if $needs_fix; then
+        step "Fixing .wslconfig for GPU support"
+
+        if [ ! -f "$wslconfig" ]; then
+            # Create new .wslconfig
+            printf "[wsl2]\r\ngpuSupport=true\r\n" > "$wslconfig"
+            ok "Created ${wslconfig} with gpuSupport=true"
+        elif ! grep -qi "\[wsl2\]" "$wslconfig" 2>/dev/null; then
+            # Add [wsl2] section
+            printf "\r\n[wsl2]\r\ngpuSupport=true\r\n" >> "$wslconfig"
+            ok "Added [wsl2] gpuSupport=true to ${wslconfig}"
+        elif grep -qi "gpuSupport\s*=\s*false" "$wslconfig" 2>/dev/null; then
+            # Replace false with true
+            sed -i 's/gpuSupport\s*=\s*false/gpuSupport=true/i' "$wslconfig"
+            ok "Changed gpuSupport=false → true in ${wslconfig}"
+        else
+            # [wsl2] exists but no gpuSupport line — add after [wsl2]
+            sed -i '/\[wsl2\]/a gpuSupport=true' "$wslconfig"
+            ok "Added gpuSupport=true under [wsl2] in ${wslconfig}"
+        fi
+
+        echo ""
+        info "Current .wslconfig:"
+        cat "$wslconfig" | sed 's/^/    /'
+        echo ""
+        warn "WSL2 must be restarted for changes to take effect!"
+        echo ""
+        echo -e "  ${BOLD}In Windows PowerShell (as Admin):${NC}"
+        echo "    wsl --shutdown"
+        echo ""
+        echo "  Then relaunch your WSL2 terminal and run:"
+        echo "    bash $0 detectgpu"
+        echo ""
+    else
+        ok ".wslconfig already has gpuSupport=true"
     fi
 }
 
