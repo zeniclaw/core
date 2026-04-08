@@ -38,24 +38,22 @@ step()  { echo -e "\n${BOLD}==> $*${NC}"; }
 
 # Returns gpu type via echo: nvidia, amd, none
 _detect_gpu_type() {
-    # NVIDIA
+    # NVIDIA — CUDA passthrough
     if [ -e /usr/lib/wsl/lib/libcuda.so.1 ] || [ -e /dev/nvidia0 ]; then
         echo "nvidia"
         return
     fi
 
-    # AMD — check multiple signals
+    # AMD — multiple signals
     if [ -e /dev/kfd ]; then
         echo "amd"
         return
     fi
     if [ -d /usr/lib/wsl/lib ] && ls /usr/lib/wsl/lib/libdx*.so* &>/dev/null; then
-        # WSL2 with DirectX — check CPU vendor for AMD
         if grep -qi "AMD" /proc/cpuinfo 2>/dev/null; then
             echo "amd"
             return
         fi
-        # Could be Intel or NVIDIA via DirectX
         if lspci 2>/dev/null | grep -qi "NVIDIA"; then
             echo "nvidia"
             return
@@ -74,17 +72,107 @@ _is_nvidia_ready() {
 }
 
 _is_rocm_ready() {
-    command -v rocminfo &>/dev/null
+    # ROCm is truly ready only if /dev/kfd exists AND rocminfo works
+    [ -e /dev/kfd ] && command -v rocminfo &>/dev/null && rocminfo &>/dev/null 2>&1
 }
+
+_has_vulkan_gpu() {
+    # Check if Vulkan sees a real GPU (not llvmpipe CPU)
+    command -v vulkaninfo &>/dev/null && \
+        vulkaninfo --summary 2>/dev/null | grep -q "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\|PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU"
+}
+
+# ── Check WSL2 GPU Config ────────────────────────────────────────────────
+
+_check_wsl2_gpu_config() {
+    step "WSL2 GPU Configuration Check"
+    local issues=0
+
+    # 1. Check DirectX passthrough
+    if [ -e /dev/dxg ]; then
+        ok "DirectX passthrough: /dev/dxg present"
+    else
+        err "DirectX passthrough: /dev/dxg NOT found"
+        echo "    → GPU is not passed through from Windows to WSL2"
+        issues=$((issues + 1))
+    fi
+
+    # 2. Check WSL GPU libraries
+    if [ -d /usr/lib/wsl/lib ] && ls /usr/lib/wsl/lib/libdx*.so* &>/dev/null; then
+        ok "WSL GPU libraries: present"
+    else
+        err "WSL GPU libraries: missing"
+        issues=$((issues + 1))
+    fi
+
+    # 3. Check Windows GPU driver
+    local win_gpu
+    win_gpu=$(powershell.exe -Command "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name" 2>/dev/null | tr -d '\r' | head -1)
+    local win_driver
+    win_driver=$(powershell.exe -Command "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty DriverVersion" 2>/dev/null | tr -d '\r' | head -1)
+
+    if [ -n "$win_gpu" ]; then
+        ok "Windows GPU: ${win_gpu}"
+        ok "Windows driver: ${win_driver}"
+    else
+        warn "Cannot detect Windows GPU (powershell not accessible)"
+    fi
+
+    # 4. Check .wslconfig
+    local winuser
+    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+    local wslconfig="/mnt/c/Users/${winuser}/.wslconfig"
+    local wslconfig_ok=true
+
+    if [ -n "$winuser" ] && [ -f "$wslconfig" ]; then
+        ok ".wslconfig found: ${wslconfig}"
+        cat "$wslconfig" | sed 's/^/    /'
+    elif [ -n "$winuser" ]; then
+        warn ".wslconfig not found at ${wslconfig}"
+        wslconfig_ok=false
+        issues=$((issues + 1))
+    fi
+
+    # 5. Check /dev/dri (required for native GPU access)
+    if [ -d /dev/dri ] && ls /dev/dri/renderD* &>/dev/null; then
+        ok "GPU render nodes: /dev/dri/renderD* present"
+    else
+        warn "GPU render nodes: /dev/dri/renderD* NOT found"
+        echo "    → This is the main reason Ollama can't use your GPU"
+        issues=$((issues + 1))
+    fi
+
+    # 6. Check /dev/kfd (required for ROCm/HIP)
+    if [ -e /dev/kfd ]; then
+        ok "ROCm device: /dev/kfd present"
+    else
+        warn "ROCm device: /dev/kfd NOT found"
+        echo "    → ROCm/HIP cannot access the GPU without /dev/kfd"
+        issues=$((issues + 1))
+    fi
+
+    # 7. Check Vulkan real GPU
+    if _has_vulkan_gpu; then
+        ok "Vulkan: real GPU detected"
+    else
+        local vk_dev
+        vk_dev=$(vulkaninfo --summary 2>/dev/null | grep "deviceName" | head -1 | sed 's/.*= //' || echo "none")
+        warn "Vulkan: no real GPU (current: ${vk_dev})"
+        issues=$((issues + 1))
+    fi
+
+    echo ""
+    return $issues
+}
+
+# ── NVIDIA Install ──────────────────────────────────────────────────────
 
 _install_nvidia_drivers() {
     step "Installing NVIDIA CUDA toolkit for WSL2..."
 
     sudo apt-get update -qq
     sudo apt-get install -y -qq nvidia-cuda-toolkit 2>/dev/null || {
-        # Fallback: install just nvidia-utils to get nvidia-smi
         warn "Full CUDA toolkit not available, installing minimal drivers..."
-        # Try to find the right nvidia-utils version
         local pkg
         pkg=$(apt-cache search nvidia-utils 2>/dev/null | grep -oP 'nvidia-utils-\d+' | sort -V | tail -1)
         if [ -n "$pkg" ]; then
@@ -92,7 +180,6 @@ _install_nvidia_drivers() {
         fi
     }
 
-    # Ensure WSL CUDA lib is in path
     if [ -d /usr/lib/wsl/lib ] && ! echo "$LD_LIBRARY_PATH" | grep -q "/usr/lib/wsl/lib"; then
         echo 'export LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH' | sudo tee /etc/profile.d/wsl-gpu.sh >/dev/null
         export LD_LIBRARY_PATH=/usr/lib/wsl/lib:${LD_LIBRARY_PATH}
@@ -100,86 +187,112 @@ _install_nvidia_drivers() {
     fi
 }
 
-_install_amd_rocm() {
-    step "Installing AMD ROCm for WSL2..."
+# ── AMD Install & WSL2 Workaround ──────────────────────────────────────
 
-    # Check Ubuntu version
-    local codename
-    codename=$(lsb_release -cs 2>/dev/null || echo "jammy")
-    local version
-    version=$(lsb_release -rs 2>/dev/null || echo "22.04")
+_install_amd_gpu_support() {
+    step "AMD GPU Setup for WSL2"
 
-    info "Detected: Ubuntu ${version} (${codename})"
+    local cpu_name
+    cpu_name=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo 'unknown')
+    info "CPU: ${cpu_name}"
 
-    # Method 1: Try amdgpu-install (official installer)
-    if ! command -v amdgpu-install &>/dev/null; then
-        info "Adding AMD ROCm repository..."
+    # Install Vulkan tools and mesa drivers
+    info "Installing Vulkan & Mesa drivers..."
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq mesa-vulkan-drivers vulkan-tools mesa-utils 2>/dev/null || true
 
-        # Install prerequisites
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq wget gnupg2
-
-        # Add AMD GPG key and repo
-        sudo mkdir -p /etc/apt/keyrings
-        wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | \
-            gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg >/dev/null
-
-        # Add ROCm repo (try latest stable)
-        local rocm_version="6.4"
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${rocm_version} ${codename} main" | \
-            sudo tee /etc/apt/sources.list.d/rocm.list >/dev/null
-
-        # Pin priority
-        echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" | \
-            sudo tee /etc/apt/preferences.d/rocm-pin-600 >/dev/null
-
-        sudo apt-get update -qq
+    # Install ROCm (may work for some dGPU, won't work for iGPU on WSL2 yet)
+    if ! command -v rocminfo &>/dev/null; then
+        info "Installing ROCm tools..."
+        sudo apt-get install -y -qq rocminfo 2>/dev/null || true
     fi
 
-    # Install ROCm libraries (minimal set for Ollama)
-    info "Installing ROCm libraries (this may take a few minutes)..."
-    sudo apt-get install -y -qq rocm-hip-runtime rocm-hip-sdk 2>/dev/null || {
-        warn "Full ROCm SDK not available, trying minimal install..."
-        sudo apt-get install -y -qq rocm-hip-runtime 2>/dev/null || {
-            warn "ROCm hip runtime not available, trying rocminfo only..."
-            sudo apt-get install -y -qq rocminfo 2>/dev/null || true
-        }
-    }
-
-    # Add user to render and video groups
+    # Add user to render/video groups
     sudo usermod -aG render,video "$(whoami)" 2>/dev/null || true
 
-    # Set HSA override for WSL2 (needed for some AMD iGPUs)
-    if ! grep -q "HSA_OVERRIDE_GFX_VERSION" /etc/environment 2>/dev/null; then
-        # Detect gfx version from the GPU
-        local gfx_ver
-        gfx_ver=$(rocminfo 2>/dev/null | grep -oP 'gfx\d+' | head -1 || true)
-        if [ -n "$gfx_ver" ]; then
-            info "Detected GPU arch: ${gfx_ver}"
-        else
-            # For Ryzen AI PRO (RDNA 3.5 / Phoenix/Hawk Point), use gfx1103
-            gfx_ver="gfx1103"
-            info "Assuming GPU arch: ${gfx_ver} (Ryzen AI PRO / RDNA 3.5)"
-        fi
+    # Now check the real situation
+    echo ""
+    _check_wsl2_gpu_config
+    local issues=$?
 
-        # Convert gfx1103 → 11.0.3
-        local major minor patch
-        major=$(echo "$gfx_ver" | grep -oP '\d' | head -1)
-        minor=$(echo "$gfx_ver" | grep -oP '\d' | sed -n '2p')
-        patch=$(echo "$gfx_ver" | grep -oP '\d' | sed -n '3p')
-        if [ -n "$major" ] && [ -n "$minor" ]; then
-            local hsa_ver="${major}${minor}.0.${patch:-0}"
-            echo "HSA_OVERRIDE_GFX_VERSION=${hsa_ver}" | sudo tee -a /etc/environment >/dev/null
-            export HSA_OVERRIDE_GFX_VERSION="${hsa_ver}"
-            ok "Set HSA_OVERRIDE_GFX_VERSION=${hsa_ver}"
-        fi
-    fi
-
-    # Ensure /dev/kfd is accessible
-    if [ -e /dev/kfd ]; then
-        sudo chmod 666 /dev/kfd 2>/dev/null || true
+    if [ $issues -gt 0 ]; then
+        echo ""
+        _show_amd_wsl2_fix_guide
     fi
 }
+
+_show_amd_wsl2_fix_guide() {
+    echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  AMD GPU on WSL2 — Configuration Required                   ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Current situation:${NC}"
+    echo "  Your AMD GPU is detected by Windows but not accessible inside WSL2."
+    echo "  Ollama runs on CPU only until the GPU is properly exposed."
+    echo ""
+    echo -e "${BOLD}What's needed:${NC} /dev/dri/renderD128 and/or /dev/kfd inside WSL2."
+    echo ""
+    echo -e "${CYAN}═══ STEP 1: Windows AMD Driver ═══${NC}"
+    echo ""
+    echo "  Ensure you have the latest AMD Adrenalin driver installed on Windows."
+    echo "  Download: https://www.amd.com/en/support"
+    echo "  → Choose: Processors with Graphics → AMD Ryzen AI PRO"
+    echo ""
+    echo -e "${CYAN}═══ STEP 2: .wslconfig ═══${NC}"
+    echo ""
+
+    local winuser
+    winuser=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+    local wslconfig_path="C:\\Users\\${winuser}\\.wslconfig"
+
+    echo "  Edit (or create): ${wslconfig_path}"
+    echo ""
+    echo "  Content should include:"
+    echo -e "  ${GREEN}[wsl2]${NC}"
+    echo -e "  ${GREEN}networkingMode=mirrored${NC}"
+    echo -e "  ${GREEN}gpuSupport=true${NC}"
+    echo ""
+    echo "  To edit from here:"
+    echo "    notepad.exe '$(echo "$wslconfig_path" | sed 's/\\/\\\\/g')'"
+    echo ""
+    echo -e "${CYAN}═══ STEP 3: Restart WSL2 ═══${NC}"
+    echo ""
+    echo "  In Windows PowerShell (as Admin):"
+    echo "    wsl --shutdown"
+    echo "  Then relaunch your WSL2 terminal."
+    echo ""
+    echo -e "${CYAN}═══ STEP 4: Verify ═══${NC}"
+    echo ""
+    echo "  After restart, run:"
+    echo "    bash $0 detectgpu"
+    echo ""
+    echo "  You should see:"
+    echo "    [OK] GPU render nodes: /dev/dri/renderD* present"
+    echo ""
+    echo -e "${CYAN}═══ ALTERNATIVE: Use Ollama on Windows ═══${NC}"
+    echo ""
+    echo "  If WSL2 GPU passthrough doesn't work, you can run Ollama on Windows:"
+    echo "  1. Download Ollama for Windows: https://ollama.com/download/windows"
+    echo "  2. Install and start it (default port 11434)"
+    echo "  3. Configure ZeniClaw to use: http://host.containers.internal:11434"
+    echo "     Or find your Windows IP and use: http://<WINDOWS_IP>:11434"
+    echo ""
+    echo -e "${CYAN}═══ ALTERNATIVE: CPU Optimization ═══${NC}"
+    echo ""
+
+    local cores
+    cores=$(nproc 2>/dev/null || echo "?")
+    echo "  Your CPU has ${cores} cores — Ollama CPU mode is usable."
+    echo "  For best CPU performance:"
+    echo "    - Use smaller models: qwen2.5:7b instead of mistral-nemo:12b"
+    echo "    - Set OLLAMA_NUM_PARALLEL=1 (already default)"
+    echo "    - Close heavy Windows apps to free RAM"
+    echo ""
+    echo -e "${BOLD}After making changes, run: bash $0 detectgpu${NC}"
+    echo ""
+}
+
+# ── Main detect_gpu ────────────────────────────────────────────────────
 
 detect_gpu() {
     step "GPU Detection & Setup"
@@ -191,10 +304,10 @@ detect_gpu() {
         nvidia)
             ok "NVIDIA GPU detected"
             if _is_nvidia_ready; then
-                ok "NVIDIA drivers ready"
+                ok "NVIDIA drivers: ready"
                 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true
             else
-                warn "NVIDIA drivers not fully configured"
+                warn "NVIDIA drivers not fully configured — installing..."
                 _install_nvidia_drivers
                 if _is_nvidia_ready; then
                     ok "NVIDIA drivers installed and working"
@@ -207,44 +320,24 @@ detect_gpu() {
             ;;
         amd)
             ok "AMD GPU detected ($(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo 'unknown'))"
+
+            # Check if GPU is actually usable (not just detected via CPU vendor)
             if _is_rocm_ready; then
-                ok "AMD ROCm ready"
-                rocminfo 2>/dev/null | grep -E "Marketing Name" | head -3 || true
+                ok "AMD ROCm: fully working"
+                rocminfo 2>/dev/null | grep -E "Marketing Name" | head -3 | sed 's/^/  /'
+            elif _has_vulkan_gpu; then
+                ok "AMD Vulkan: GPU accessible"
             else
-                warn "AMD ROCm not installed — installing now..."
-                _install_amd_rocm
-                if _is_rocm_ready; then
-                    ok "AMD ROCm installed and working"
-                    rocminfo 2>/dev/null | grep -E "Marketing Name" | head -3 || true
-                else
-                    warn "ROCm installed but rocminfo not working"
-                    info "Ollama may still detect the GPU at startup"
-                    info "Try: sudo reboot (WSL2) then retry"
-                fi
+                warn "AMD GPU detected but NOT accessible inside WSL2"
+                _install_amd_gpu_support
             fi
             ;;
         none)
             warn "No GPU detected"
-            info "Ollama will run on CPU (slower)"
-            info "For WSL2, ensure GPU passthrough is enabled:"
-            echo "  1. Windows: GPU driver installed (NVIDIA/AMD)"
-            echo "  2. .wslconfig: [wsl2] gpuSupport=true"
-            echo "  3. Restart WSL: wsl --shutdown"
+            echo ""
+            _check_wsl2_gpu_config
             ;;
     esac
-
-    # Vulkan check (bonus)
-    if ! command -v vulkaninfo &>/dev/null; then
-        info "Installing Vulkan tools..."
-        sudo apt-get install -y -qq mesa-vulkan-drivers vulkan-tools 2>/dev/null || true
-    fi
-    if command -v vulkaninfo &>/dev/null; then
-        local vk_gpu
-        vk_gpu=$(vulkaninfo --summary 2>/dev/null | grep "deviceName" | head -1 | sed 's/.*= //' || true)
-        if [ -n "$vk_gpu" ]; then
-            ok "Vulkan GPU: ${vk_gpu}"
-        fi
-    fi
 
     echo ""
     return 0
